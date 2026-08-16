@@ -1,8 +1,10 @@
 package com.shaw485.smartegg;
 
 import android.app.Activity;
+import android.os.Build;
 import android.os.Bundle;
 import android.view.View;
+import android.view.WindowManager;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -14,6 +16,12 @@ public final class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            WindowManager.LayoutParams params = getWindow().getAttributes();
+            params.layoutInDisplayCutoutMode =
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            getWindow().setAttributes(params);
+        }
         enterImmersiveMode();
 
         gameView = new WebView(this);
@@ -33,7 +41,7 @@ public final class MainActivity extends Activity {
         settings.setLoadWithOverviewMode(true);
 
         setContentView(gameView);
-        gameView.loadUrl("file:///android_asset/web_preview/index.html");
+        gameView.loadUrl("file:///android_asset/web_preview/index.html?android=1");
     }
 
     private void enterImmersiveMode() {

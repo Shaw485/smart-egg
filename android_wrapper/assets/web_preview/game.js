@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 134;   // 跟 index.html 的 ?v=134 保持一致
+    const GAME_CODE_VERSION = 135;   // 跟 index.html 的 ?v=135 保持一致
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
         const last = parseInt(localStorage.getItem(LAST_KNOWN_KEY) || '0', 10);
@@ -321,7 +321,16 @@
 
     function resize() {
         const ww = window.innerWidth;
-        const wh = window.innerHeight - 48;
+        const isAndroidApp = document.body.classList.contains('android-app');
+        const wh = window.innerHeight - (isAndroidApp ? 0 : 48);
+        if (isAndroidApp) {
+            canvas.style.width = ww + 'px';
+            canvas.style.height = wh + 'px';
+            canvas.width = Math.round(W * dpr);
+            canvas.height = Math.round(H * dpr);
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            return;
+        }
         const baseR = W / H;
         const winR = ww / wh;
         let cw, ch;
@@ -2342,6 +2351,13 @@
         const probeStart = performance.now();
         logStep('level-load', 'probe-start', { total: TOTAL_LEVELS, url_prefix: '../godot_project/levels/level_' });
         for (let i = 0; i < TOTAL_LEVELS; i++) {
+            // Android WebView 的 file:// 页面可能禁止 fetch 本地 JSON；优先使用脚本内置关卡。
+            if (window.__SMART_EGG_LEVELS__ && window.__SMART_EGG_LEVELS__[i]) {
+                _cachedLevels[i] = window.__SMART_EGG_LEVELS__[i];
+                _availableLevels.push(i);
+                logStep('level-load', 'probe-inline-level', { idx: i, source: 'levels_bundle.js' });
+                continue;
+            }
             try {
                 const url = '../godot_project/levels/level_' + i + '.json?v=' + GAME_CODE_VERSION;
                 const t0 = performance.now();
@@ -2493,6 +2509,10 @@
     }
 
     async function _fetchLevelIntoCache(idx) {
+        if (window.__SMART_EGG_LEVELS__ && window.__SMART_EGG_LEVELS__[idx]) {
+            _cachedLevels[idx] = window.__SMART_EGG_LEVELS__[idx];
+            return;
+        }
         try {
             const url = '../godot_project/levels/level_' + idx + '.json?v=' + GAME_CODE_VERSION;
             const t0 = performance.now();
