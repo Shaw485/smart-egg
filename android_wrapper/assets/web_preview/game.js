@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 132;   // 跟 index.html 的 ?v=132 保持一致
+    const GAME_CODE_VERSION = 133;   // 跟 index.html 的 ?v=133 保持一致
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
         const last = parseInt(localStorage.getItem(LAST_KNOWN_KEY) || '0', 10);
@@ -1971,7 +1971,7 @@
         ctx.strokeStyle = '#000'; ctx.lineWidth = 5;
         _wonkyRectPath(bx, by, bw, bh, 52, 55555, 2.5); ctx.stroke();
         ctx.restore();
-        sketchBold('选择关卡', bx + bw / 2, by + bh / 2 + 10, 56);
+        sketchBold('开始游戏', bx + bw / 2, by + bh / 2 + 10, 56);
         sketchText('© 2024 MVP Demo', W / 2, H - 52, 24, 'center', false, 'rgba(0,0,0,0.4)');
         uiBTN.start = { x: bx, y: by, w: bw, h: bh };
     }
