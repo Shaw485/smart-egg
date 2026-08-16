@@ -17,9 +17,11 @@ mkdir -p "$BUILD_DIR/classes" "$BUILD_DIR/dex"
   -d "$BUILD_DIR/classes" "$SCRIPT_DIR/src/com/shaw485/smartegg/MainActivity.java"
 "$TOOLS_DIR/d8" --lib "$ANDROID_JAR" --min-api 23 \
   --output "$BUILD_DIR/dex" "$BUILD_DIR/classes/com/shaw485/smartegg/MainActivity.class"
+"$TOOLS_DIR/aapt2" compile --dir "$SCRIPT_DIR/res" -o "$BUILD_DIR/compiled-res.zip"
 "$TOOLS_DIR/aapt2" link -o "$BUILD_DIR/unsigned.apk" -I "$ANDROID_JAR" \
   --manifest "$SCRIPT_DIR/AndroidManifest.xml" -A "$SCRIPT_DIR/assets" \
-  --min-sdk-version 23 --target-sdk-version 35 --version-code 133 --version-name 43.0
+  --min-sdk-version 23 --target-sdk-version 35 --version-code 134 --version-name 44.0 \
+  "$BUILD_DIR/compiled-res.zip"
 (cd "$BUILD_DIR/dex" && zip -q -j "$BUILD_DIR/unsigned.apk" classes.dex)
 "$TOOLS_DIR/zipalign" -f 4 "$BUILD_DIR/unsigned.apk" "$BUILD_DIR/aligned.apk"
 
@@ -31,5 +33,5 @@ fi
 
 "$TOOLS_DIR/apksigner" sign --ks "$BUILD_DIR/smart-egg.keystore" \
   --ks-pass pass:android --key-pass pass:android \
-  --out "$BUILD_DIR/Smart-Egg-v133.apk" "$BUILD_DIR/aligned.apk"
-"$TOOLS_DIR/apksigner" verify --verbose "$BUILD_DIR/Smart-Egg-v133.apk"
+  --out "$BUILD_DIR/Smart-Egg-v134.apk" "$BUILD_DIR/aligned.apk"
+"$TOOLS_DIR/apksigner" verify --verbose "$BUILD_DIR/Smart-Egg-v134.apk"
