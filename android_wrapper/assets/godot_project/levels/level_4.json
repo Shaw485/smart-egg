@@ -1,0 +1,24 @@
+{
+  "$schema": "Part7_level_json_schema_v1",
+  "id": 4,
+  "name": "要有礼貌哦～",
+  "type": "knock_twice",
+  "description": {
+    "定位": "观察与交互关。人物需要走到右门前再敲门。",
+    "表面目标": "从左侧入口到达右侧出口",
+    "正解": "人物站在右门前，连续点击右门两次",
+    "hint_l1": "门好像在等你做点什么……"
+  },
+  "world_size": { "w": 1920, "h": 1080 },
+  "spawn": { "x": 420, "y": 810 },
+  "platforms": [
+    { "x": 960, "y": 1090, "w": 1920, "h": 440, "kind": "ground", "comment": "连续地面，顶边 y=870" }
+  ],
+  "doors": [
+    { "id": "entry_door_4", "x": 300, "y": 765, "w": 150, "h": 210, "is_goal": false, "comment": "左侧出生门" },
+    { "id": "goal_door_4", "x": 1450, "y": 765, "w": 150, "h": 210, "is_goal": true, "comment": "需要在门前有效敲两次的右门" }
+  ],
+  "crates": [],
+  "keys": [],
+  "decor": []
+}

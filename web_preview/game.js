@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 131;   // 跟 index.html 的 ?v=131 保持一致
+    const GAME_CODE_VERSION = 132;   // 跟 index.html 的 ?v=132 保持一致
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
         const last = parseInt(localStorage.getItem(LAST_KNOWN_KEY) || '0', 10);
@@ -56,6 +56,9 @@
     let _animTargetDoor = null;
     // v4.9.6c 坏关卡健康保护：进入 playing 后 0.5秒内还在往下掉超过1100 → 平台没接住 = 坏关，立刻跳选关页，避免等死亡循环
     let _healthGuardFrames = 0;
+    // 第五关敲门状态：只有人物站在目标门前的敲门才累计，所有敲门都会显示“咚”。
+    let _validKnockCount = 0;
+    let _knockEffects = [];
 
     // 暴露调试接口到 window
     window.__debug = {
@@ -183,6 +186,9 @@
         } else if (name === 'unlock') {
             _tone(440, 0.12, 'square', 0.035, 0.00, 660);
             _tone(880, 0.24, 'triangle', 0.055, 0.10, 1175);
+        } else if (name === 'knock') {
+            _tone(145, 0.11, 'sine', 0.10, 0.00, 82);
+            _tone(105, 0.16, 'triangle', 0.065, 0.045, 62);
         }
     }
     let _bgmTimer = 0;
@@ -697,6 +703,27 @@
         }
     }
 
+    function drawKnockEffects() {
+        const now = performance.now();
+        _knockEffects = _knockEffects.filter(effect => now - effect.startedAt < 620);
+        for (const effect of _knockEffects) {
+            const t = Math.min(1, (now - effect.startedAt) / 620);
+            const eased = 1 - Math.pow(1 - t, 3);
+            ctx.save();
+            ctx.globalAlpha = 1 - t;
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 7 - t * 3;
+            ctx.beginPath();
+            ctx.arc(effect.x, effect.y, 25 + eased * 58, -0.85, 0.85);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(effect.x, effect.y, 40 + eased * 75, -0.7, 0.7);
+            ctx.stroke();
+            sketchBold('咚', effect.x - 74 - eased * 12, effect.y - 12 - eased * 28, 46);
+            ctx.restore();
+        }
+    }
+
     // ===== v4.9.6 选关 + 通关存档 =====
     const TOTAL_LEVELS = 10;
     const LS_KEY = 'big_clever_save_v1';
@@ -943,7 +970,8 @@
                 player.x - HALF_W, player.y - HALF_H, HALF_W * 2, HALF_H * 2,
                 dx, dy, d.w, d.h);
             const doorLocked = !!d.locked && !unlockedDoors.has(d.id);
-            if (d.is_goal && !doorLocked && overlap >= PLAYER_HALF_AREA) {
+            const knockGateOpen = levelData.type !== 'knock_twice' || _validKnockCount >= 2;
+            if (d.is_goal && !doorLocked && knockGateOpen && overlap >= PLAYER_HALF_AREA) {
                 // v19.0 简化阻断：只阻断「倒计时进行中（_goalHitStartMs>0）」的重复触发
                 //   v18 阻断了 _goalHitJumped=true（上一次已经跳完的标志）→ 但跳完后下一关进入前，loadLevelAndStart 会清零这个标志
                 //   双重保险：这里只看「现在是否在倒计时中」→ 更安全（即便 loadLevel 清零遗漏也不会卡 goal-hit）
@@ -2263,6 +2291,36 @@
             return;
         }
         if (gameState === 'playing') {
+            if (levelData && levelData.type === 'knock_twice') {
+                const goalDoor = (levelData.doors || []).find(d => d.is_goal);
+                if (goalDoor) {
+                    const doorRect = {
+                        x: goalDoor.x - goalDoor.w / 2 - 18,
+                        y: goalDoor.y - goalDoor.h / 2 - 30,
+                        w: goalDoor.w + 36,
+                        h: goalDoor.h + 48
+                    };
+                    if (inRect(p, doorRect)) {
+                        const playerAtDoor = Math.abs(player.x - goalDoor.x) <= 75
+                            && Math.abs(player.y - goalDoor.y) <= 170;
+                        playSfx('knock');
+                        _knockEffects.push({
+                            x: goalDoor.x - goalDoor.w * 0.36,
+                            y: goalDoor.y - goalDoor.h * 0.12,
+                            startedAt: performance.now(),
+                            valid: playerAtDoor
+                        });
+                        if (playerAtDoor) _validKnockCount = Math.min(2, _validKnockCount + 1);
+                        logStep('input', 'door-knock', {
+                            valid: playerAtDoor,
+                            validKnocks: _validKnockCount,
+                            playerX: Math.round(player.x),
+                            doorX: goalDoor.x
+                        });
+                        return;
+                    }
+                }
+            }
             if (inRect(p, uiBTN.left)) pressInput('left', true);
             else if (inRect(p, uiBTN.right)) pressInput('right', true);
             else if (inRect(p, uiBTN.jump)) pressInput('jump', true);
@@ -2384,6 +2442,8 @@
     }
     function loadLevelAndStart() {
         showSuccess = false; successTimer = SUCCESS_TOTAL; doorOpenT = 0; showDead = false;
+        _validKnockCount = 0;
+        _knockEffects = [];
         _completeTimer = 0;
         // v19.0 关键：每次进入新关卡，goal-hit状态机必须全部清零！（否则「_goalHitJumped=true」会遗留到下一关，physicsStep阻断命中导致goal-hit不触发！）
         _goalHitStartMs = 0;
@@ -2701,6 +2761,7 @@
                 drawCrates();
                 drawKeys();
                 drawDoors();
+                drawKnockEffects();
                 drawPlayer();
                 drawLevelTopBar();
                 drawBottomControls();
