@@ -1,0 +1,28 @@
+{
+  "$schema": "Part7_level_json_schema_v1",
+  "id": 2,
+  "name": "门被锁住了!",
+  "type": "key_lock",
+  "no_fall": true,
+  "description": {
+    "定位": "钥匙教学关。人物从左上入口门旁出生，地面中央有钥匙，右侧出口被锁住。",
+    "表面目标": "打开右侧锁门",
+    "正解": "跳到地面碰到钥匙，钥匙自动飞向锁门并将其打开",
+    "hint_l1": "门被锁住了。去碰一下地面中央的钥匙吧！"
+  },
+  "world_size": { "w": 1920, "h": 1080 },
+  "spawn": { "x": 430, "y": 370 },
+  "platforms": [
+    { "x": 960, "y": 1090, "w": 1920, "h": 440, "kind": "ground", "comment": "地面顶边 y=870" },
+    { "x": 330, "y": 456, "w": 380, "h": 52, "kind": "step_entry", "comment": "左上出生平台，顶边 y=430" }
+  ],
+  "keys": [
+    { "id": "gold_key", "x": 860, "y": 805, "target_door": "goal_door_2", "comment": "碰到后飞向锁门" }
+  ],
+  "doors": [
+    { "id": "entry_door_2", "x": 300, "y": 325, "w": 150, "h": 210, "is_goal": false, "comment": "左上入口门" },
+    { "id": "goal_door_2", "x": 1510, "y": 765, "w": 150, "h": 210, "is_goal": true, "locked": true, "comment": "右侧锁门，底边落在地面顶边" }
+  ],
+  "crates": [],
+  "decor": []
+}

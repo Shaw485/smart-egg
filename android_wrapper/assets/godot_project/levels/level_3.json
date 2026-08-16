@@ -1,0 +1,26 @@
+{
+  "$schema": "Part7_level_json_schema_v1",
+  "id": 3,
+  "name": "一次不够，再来一次!",
+  "type": "double_jump_gap",
+  "double_jump": true,
+  "description": {
+    "定位": "二段跳教学关。左右平台之间隔着深坑，普通单次跳跃无法跨越。",
+    "表面目标": "从左侧入口跳到右侧出口",
+    "正解": "起跳后在空中再次按跳跃，使用仅本关生效的二段跳跨过深坑",
+    "hint_l1": "这一关可以连续跳两次！"
+  },
+  "world_size": { "w": 1920, "h": 1080 },
+  "spawn": { "x": 430, "y": 810 },
+  "platforms": [
+    { "x": 300, "y": 1090, "w": 600, "h": 440, "kind": "ground", "comment": "左侧出生地面，顶边 y=870" },
+    { "x": 1500, "y": 1090, "w": 840, "h": 440, "kind": "ground", "comment": "右侧出口地面，顶边 y=870" }
+  ],
+  "doors": [
+    { "id": "entry_door_3", "x": 300, "y": 765, "w": 150, "h": 210, "is_goal": false, "comment": "左侧入口门" },
+    { "id": "goal_door_3", "x": 1450, "y": 765, "w": 150, "h": 210, "is_goal": true, "comment": "右侧通关门" }
+  ],
+  "crates": [],
+  "keys": [],
+  "decor": []
+}
