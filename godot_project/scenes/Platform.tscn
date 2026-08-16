@@ -1,0 +1,14 @@
+[gd_scene load_steps=4 format=3 uid="uid://c1platform0000002"]
+
+[ext_resource type="Script" path="res://scripts/Platform.gd" id="1_plat"]
+
+[sub_resource type="RectangleShape2D" id="RectShape_1"]
+size = Vector2(200, 40)
+
+[node name="Platform" type="StaticBody2D"]
+collision_layer = 2
+collision_mask = 0
+script = ExtResource("1_plat")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("RectShape_1")

@@ -1,0 +1,14 @@
+[gd_scene load_steps=4 format=3 uid="uid://c1doorexit0000003"]
+
+[ext_resource type="Script" path="res://scripts/Door.gd" id="1_door"]
+
+[sub_resource type="RectangleShape2D" id="DoorRectShape"]
+size = Vector2(90, 150)
+
+[node name="Door" type="Area2D"]
+collision_layer = 0
+collision_mask = 1
+script = ExtResource("1_door")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("DoorRectShape")
