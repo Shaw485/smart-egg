@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 141;   // 跟 index.html 的 ?v=141 保持一致
+    const GAME_CODE_VERSION = 142;   // 跟 index.html 的 ?v=142 保持一致
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
         const last = parseInt(localStorage.getItem(LAST_KNOWN_KEY) || '0', 10);
@@ -73,6 +73,7 @@
     let _creatorDraft = null;
     let _creatorTool = 'platform';
     let _creatorMechanic = 'normal';
+    let _creatorHistory = [];
 
     // 暴露调试接口到 window
     window.__debug = {
@@ -856,6 +857,10 @@
         const labels=['1','2','3','4','5','6','7','8','9','0','←','清'];
         for(let i=0;i<labels.length;i++){const col=i%3,row=Math.floor(i/3),bw=135,bh=105,bx=px+75+col*170,by=py+235+row*135;ctx.save();ctx.fillStyle='#fff';_wonkyRectPath(bx,by,bw,bh,22,85200+i,2);ctx.fill();ctx.strokeStyle='#000';ctx.lineWidth=5;_wonkyRectPath(bx,by,bw,bh,22,85200+i,2);ctx.stroke();ctx.restore();sketchBold(labels[i],bx+bw/2,by+bh/2+5,45);uiBTN.passwordKeys.push({x:bx,y:by,w:bw,h:bh,key:labels[i]});}
         if(performance.now()<_passwordErrorUntil) sketchBold('密码不对，再数数花朵',W/2,py+800,28,'center','#d33');
+    }
+    function _expectedFlowerPassword() {
+        const blocks=(levelData&&levelData.question_blocks)||[];
+        return blocks.length ? blocks.map(b=>Math.max(0,Math.min(9,Number(b.count)||0))).join('') : String((levelData&&levelData.password)||'');
     }
 
     // ===== v4.9.6 选关 + 通关存档 =====
@@ -2146,7 +2151,19 @@
         return { id:'custom-'+Date.now(), name:'我的脑洞关卡', type:'custom', mechanic:'normal', no_fall:true, description:{hint_l1:'找到办法进入终点门。'}, world_size:{w:1920,h:1080}, spawn:{x:300,y:810}, platforms:[{x:960,y:1090,w:1920,h:440,kind:'ground'}], doors:[{id:'custom_entry',x:300,y:765,w:150,h:210,is_goal:false},{id:'custom_goal',x:1540,y:765,w:150,h:210,is_goal:true}], crates:[], keys:[], question_blocks:[], decor:[] };
     }
     function _saveCreatorLevels() { localStorage.setItem(CREATOR_LS_KEY,JSON.stringify(_creatorLevels)); }
+    function _pushCreatorHistory() {
+        if(!_creatorDraft)return;
+        _creatorHistory.push(JSON.stringify(_creatorDraft));
+        if(_creatorHistory.length>30)_creatorHistory.shift();
+    }
+    function _undoCreatorStep() {
+        if(!_creatorHistory.length){logStep('creator','undo-empty',{});return;}
+        _creatorDraft=JSON.parse(_creatorHistory.pop());
+        _creatorMechanic=_creatorDraft.mechanic||'normal';
+        logStep('creator','undo',{remaining_steps:_creatorHistory.length});
+    }
     function _applyCreatorMechanic(kind) {
+        _pushCreatorHistory();
         _creatorMechanic=kind; _creatorDraft.mechanic=kind; _creatorDraft.type='custom'; _creatorDraft.double_jump=false;
         if(kind!=='flower_password')_creatorDraft.question_blocks=[];
         if(kind!=='key')_creatorDraft.keys=[];
@@ -2177,7 +2194,7 @@
         sketchBold('关卡编辑器',W/2,48,44); sketchText(_creatorDraft.name,W/2,92,23);
         const tools=[['platform','平台'],['spawn','出生门'],['goal','终点门'],['crate','木箱'],['key','钥匙']];uiBTN.editorTools=[];
         tools.forEach((it,i)=>{const r=_button(45+i*190,120,170,68,it[1],86200+i,23);r.action='tool';r.tool=it[0];if(_creatorTool===it[0]){ctx.strokeStyle='#000';ctx.lineWidth=7;ctx.strokeRect(r.x+5,r.y+5,r.w-10,r.h-10);}uiBTN.editorTools.push(r);});
-        [['save','保存'],['play','试玩'],['export','导出'],['back','返回']].forEach((it,i)=>{const r=_button(W-610+i*145,120,130,68,it[1],86300+i,22);r.action=it[0];uiBTN.editorTools.push(r);});
+        [['save','保存'],['play','试玩'],['undo','撤销'],['export','导出'],['back','返回']].forEach((it,i)=>{const r=_button(W-730+i*135,120,122,68,it[1],86300+i,21);r.action=it[0];uiBTN.editorTools.push(r);});
         sketchText('特殊玩法：',55,230,24,'left');
         const mechanics=[['normal','普通'],['double_jump','多跳'],['knock_twice','敲门'],['flower_password','顶花'],['key','钥匙']];
         mechanics.forEach((it,i)=>{const r=_button(210+i*210,198,185,65,it[1],86400+i,23);r.action='mechanic';r.mechanic=it[0];if(_creatorMechanic===it[0]){ctx.strokeStyle='#000';ctx.lineWidth=7;ctx.strokeRect(r.x+5,r.y+5,r.w-10,r.h-10);}uiBTN.editorTools.push(r);});
@@ -2406,10 +2423,11 @@
                 playSfx('knock');
                 logStep('puzzle','password-key',{key:b.key,input:_passwordInput});
                 if (_passwordInput.length === 4) {
-                    if (_passwordInput === String(levelData.password || '')) {
+                    const expectedPassword=_expectedFlowerPassword();
+                    if (_passwordInput === expectedPassword) {
                         _passwordSolved=true; _passwordVisible=false; playSfx('unlock');
-                        logStep('puzzle','password-correct',{input:_passwordInput});
-                    } else { _passwordErrorUntil=performance.now()+1300; logStep('puzzle','password-wrong',{input:_passwordInput}); _passwordInput=''; }
+                        logStep('puzzle','password-correct',{input:_passwordInput,expected:expectedPassword});
+                    } else { _passwordErrorUntil=performance.now()+1300; logStep('puzzle','password-wrong',{input:_passwordInput,expected:expectedPassword}); _passwordInput=''; }
                 }
                 return;
             }
@@ -2431,8 +2449,8 @@
         if (gameState === 'creatorList') {
             for(const b of uiBTN.creatorBtns||[]) if(inRect(p,b)){
                 if(b.action==='back') gameState='menu';
-                else if(b.action==='new'){_creatorDraft=_newCreatorDraft();_creatorTool='platform';_creatorMechanic='normal';gameState='creatorEdit';}
-                else if(b.action==='open'){_creatorDraft=JSON.parse(JSON.stringify(_creatorLevels[b.index]));_creatorMechanic=_creatorDraft.mechanic||'normal';gameState='creatorEdit';}
+                else if(b.action==='new'){_creatorDraft=_newCreatorDraft();_creatorTool='platform';_creatorMechanic='normal';_creatorHistory=[];gameState='creatorEdit';}
+                else if(b.action==='open'){_creatorDraft=JSON.parse(JSON.stringify(_creatorLevels[b.index]));_creatorMechanic=_creatorDraft.mechanic||'normal';_creatorHistory=[];gameState='creatorEdit';}
                 else if(b.action==='play'){_creatorDraft=JSON.parse(JSON.stringify(_creatorLevels[b.index]));_creatorMechanic=_creatorDraft.mechanic||'normal';_playCreatorDraft();}
                 else if(b.action==='import') { try { const raw=prompt('粘贴关卡 JSON'); if(raw){const lv=JSON.parse(raw);_creatorLevels.push(lv);_saveCreatorLevels();logStep('creator','level-import',{id:lv.id});} } catch(e){alert('关卡格式不正确：'+e.message);} }
                 return;
@@ -2445,11 +2463,13 @@
                 else if(b.action==='mechanic') _applyCreatorMechanic(b.mechanic);
                 else if(b.action==='back') gameState='creatorList';
                 else if(b.action==='play') _playCreatorDraft();
+                else if(b.action==='undo') _undoCreatorStep();
                 else if(b.action==='export') _exportCreatorLevel(_creatorDraft);
                 else if(b.action==='save'){const name=prompt('给关卡起个名字',_creatorDraft.name)||_creatorDraft.name;_creatorDraft.name=name;const idx=_creatorLevels.findIndex(x=>x.id===_creatorDraft.id);if(idx>=0)_creatorLevels[idx]=JSON.parse(JSON.stringify(_creatorDraft));else _creatorLevels.push(JSON.parse(JSON.stringify(_creatorDraft)));_saveCreatorLevels();logStep('creator','level-save',{id:_creatorDraft.id,name,mechanic:_creatorDraft.mechanic});gameState='creatorList';}
                 return;
             }
             if(p.x>45&&p.x<W-45&&p.y>290&&p.y<880){
+                _pushCreatorHistory();
                 if(_creatorTool==='platform') _creatorDraft.platforms.push({x:Math.round(p.x),y:Math.round(p.y),w:260,h:52,kind:'step_custom'});
                 else if(_creatorTool==='spawn') {_creatorDraft.spawn={x:Math.round(p.x),y:Math.round(p.y)};_creatorDraft.doors=_creatorDraft.doors.filter(d=>d.is_goal);_creatorDraft.doors.unshift({id:'custom_entry',x:Math.round(p.x),y:Math.round(p.y)-45,w:150,h:210,is_goal:false});}
                 else if(_creatorTool==='goal'){_creatorDraft.doors=_creatorDraft.doors.filter(d=>!d.is_goal);_creatorDraft.doors.push({id:'custom_goal',x:Math.round(p.x),y:Math.round(p.y),w:150,h:210,is_goal:true});}
