@@ -1,14 +1,24 @@
 package com.shaw485.smartegg;
 
 import android.app.Activity;
+import android.content.ContentValues;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
+import android.provider.MediaStore;
 import android.view.View;
 import android.view.WindowManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.Toast;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 
 public final class MainActivity extends Activity {
     private WebView gameView;
@@ -39,6 +49,48 @@ public final class MainActivity extends Activity {
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setUseWideViewPort(true);
         settings.setLoadWithOverviewMode(true);
+
+        gameView.addJavascriptInterface(new Object() {
+            @JavascriptInterface
+            public void exportLog(String filename, String content) {
+                try {
+                    OutputStream stream;
+                    String savedLocation;
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        ContentValues values = new ContentValues();
+                        values.put(MediaStore.Downloads.DISPLAY_NAME, filename);
+                        values.put(MediaStore.Downloads.MIME_TYPE, "application/json");
+                        values.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/Smart Egg");
+                        android.net.Uri uri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+                        if (uri == null) throw new IllegalStateException("无法创建下载文件");
+                        stream = getContentResolver().openOutputStream(uri);
+                        savedLocation = "下载/Smart Egg/" + filename;
+                    } else {
+                        File dir = getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS);
+                        if (dir == null) throw new IllegalStateException("外部存储不可用");
+                        File file = new File(dir, filename);
+                        stream = new FileOutputStream(file);
+                        savedLocation = file.getAbsolutePath();
+                    }
+                    if (stream == null) throw new IllegalStateException("无法打开日志文件");
+                    stream.write(content.getBytes(StandardCharsets.UTF_8));
+                    stream.close();
+                    final String message = "日志已导出：" + savedLocation;
+                    runOnUiThread(new Runnable() {
+                        @Override public void run() {
+                            Toast.makeText(MainActivity.this, message, Toast.LENGTH_LONG).show();
+                        }
+                    });
+                } catch (Exception error) {
+                    final String message = "日志导出失败：" + error.getMessage();
+                    runOnUiThread(new Runnable() {
+                        @Override public void run() {
+                            Toast.makeText(MainActivity.this, message, Toast.LENGTH_LONG).show();
+                        }
+                    });
+                }
+            }
+        }, "AndroidLogExporter");
 
         setContentView(gameView);
         gameView.loadUrl("file:///android_asset/web_preview/index.html?android=1");

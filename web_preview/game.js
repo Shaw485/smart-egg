@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 137;   // 跟 index.html 的 ?v=137 保持一致
+    const GAME_CODE_VERSION = 139;   // 跟 index.html 的 ?v=139 保持一致
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
         const last = parseInt(localStorage.getItem(LAST_KNOWN_KEY) || '0', 10);
@@ -90,7 +90,10 @@
     // ====== 日志系统（logStep：带帧号+时间戳+K/V详情，按category分组）======
     // 用法：logStep('physics', 'gate1-pass', {x:player.x, y:player.y, vx:player.vx, vy:player.vy})
     // 所有日志走 window.__gameLogs 数组，可在浏览器DevTools里查看或通过 _dumpLogs() 导出
-    const LOG_MAX = 3000;  // v4.9.7a 从500扩到3000，能容纳完整 3 关+所有链路，不占内存（每条~200B→600KB）
+    const LOG_MAX = 10000;
+    const LOG_SESSION_ID = 'se-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+    let _logSequence = 0;
+    const _logStartedAt = new Date().toISOString();
     window.__gameLogs = window.__gameLogs || [];
     // v4.9.7a 死亡/坏关卡前 10 帧 player 快照（环形buffer），排查"为什么掉下去/为什么没碰门"直接回溯状态
     const PLAYER_RING_SIZE = 10;
@@ -107,8 +110,11 @@
     }
     function logStep(cat, tag, kv) {
         const entry = {
+            seq: ++_logSequence,
             f: frameCount,
             t: (performance.now() / 1000).toFixed(3),
+            at: new Date().toISOString(),
+            session: LOG_SESSION_ID,
             cat, tag,
             kv: kv || {}
         };
@@ -145,6 +151,68 @@
     // 暴露 ring buffer 到 debug
     window.__debug.getLastPlayerSnaps = window._deadSnaps;
 
+    function _runtimeSnapshot() {
+        return {
+            codeVersion: GAME_CODE_VERSION,
+            sessionId: LOG_SESSION_ID,
+            sessionStartedAt: _logStartedAt,
+            exportedAt: new Date().toISOString(),
+            page: { href: location.href, protocol: location.protocol, online: navigator.onLine, visibility: document.visibilityState },
+            device: { userAgent: navigator.userAgent, platform: navigator.platform, language: navigator.language, dpr: window.devicePixelRatio, viewport: { width: innerWidth, height: innerHeight } },
+            backend: {
+                mode: location.protocol === 'file:' ? 'android-local-offline' : 'static-web-preview',
+                apiEndpoint: null,
+                note: '当前游戏无业务后端；关卡来自内置 levels_bundle.js 或本地 JSON。所有资源读取结果记录在 level-load/network 分类。'
+            },
+            game: {
+                state: gameState, levelIndex: currentLevelIndex,
+                levelName: levelData && levelData.name,
+                showSuccess, showDead, paused: gameState === 'paused',
+                player: { x: player.x, y: player.y, vx: player.vx, vy: player.vy, onGround: player.onGround, alive: player.alive, jumpsLeft: player.jumpsLeft },
+                input: { ...input }, validKnockCount: _validKnockCount,
+                availableLevels: _availableLevels.slice(),
+                progress: { unlocked: _progress.unlocked, completed: (_progress.completed || []).slice() }
+            },
+            audio: { supported: !!(window.AudioContext || window.webkitAudioContext), state: _audioCtx ? _audioCtx.state : 'not-created' }
+        };
+    }
+    function exportDiagnosticLog() {
+        logStep('export', 'export-request', { state: gameState, levelIndex: currentLevelIndex, logCountBeforeExport: window.__gameLogs.length });
+        const report = {
+            format: 'smart-egg-diagnostic-log', schemaVersion: 1,
+            runtime: _runtimeSnapshot(),
+            recentPlayerFrames: _playerRing.slice(),
+            logs: window.__gameLogs.slice()
+        };
+        const text = JSON.stringify(report, null, 2);
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const filename = `smart-egg-log-v${GAME_CODE_VERSION}-${stamp}.json`;
+        try {
+            if (window.AndroidLogExporter && typeof window.AndroidLogExporter.exportLog === 'function') {
+                window.AndroidLogExporter.exportLog(filename, text);
+                logStep('export', 'android-export-dispatched', { filename, bytes: text.length });
+                return;
+            }
+            const blob = new Blob([text], { type: 'application/json;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = filename; a.style.display = 'none';
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+            logStep('export', 'browser-download-triggered', { filename, bytes: text.length });
+        } catch (err) {
+            logStep('fatal', 'log-export-failed', { message: err.message, stack: String(err.stack || '') });
+            alert('日志导出失败：' + err.message);
+        }
+    }
+    window.__debug.exportLog = exportDiagnosticLog;
+    window.addEventListener('error', e => logStep('fatal', 'window-error', { message: e.message, file: e.filename, line: e.lineno, column: e.colno, stack: e.error && e.error.stack }));
+    window.addEventListener('unhandledrejection', e => logStep('fatal', 'unhandled-rejection', { reason: String(e.reason), stack: e.reason && e.reason.stack }));
+    window.addEventListener('online', () => logStep('network', 'browser-online', { online: true }));
+    window.addEventListener('offline', () => logStep('network', 'browser-offline', { online: false }));
+    document.addEventListener('visibilitychange', () => logStep('lifecycle', 'visibility-change', { visibility: document.visibilityState }));
+    window.addEventListener('pagehide', e => logStep('lifecycle', 'page-hide', { persisted: e.persisted }));
+
     const input = { left: false, right: false, jumpPressed: false, jumpHeld: false };
     let helpVisible = false;
     const keys = { ArrowLeft:'left', KeyA:'left', ArrowRight:'right', KeyD:'right',
@@ -175,6 +243,7 @@
         osc.start(t); osc.stop(t + duration + 0.02);
     }
     function playSfx(name) {
+        logStep('audio', 'sfx-request', { name, audioState: _audioCtx ? _audioCtx.state : 'not-created', gameState, levelIndex: currentLevelIndex });
         if (name === 'jump') {
             _tone(260, 0.16, 'sine', 0.07, 0, 520);
         } else if (name === 'land') {
@@ -672,7 +741,7 @@
         uiBTN.right  = { x: x2, y: by, w: sz, h: sz };
         uiBTN.jump   = { x: x3, y: by, w: sz, h: sz };
     }
-    const uiBTN = { left: null, right: null, jump: null, help: null, restart: null, pause: null, pauseLevelSelect: null, pauseResume: null, start: null, levelSelect_btns: [] };
+    const uiBTN = { left: null, right: null, jump: null, help: null, restart: null, pause: null, pauseLevelSelect: null, pauseResume: null, start: null, exportLog: null, levelSelect_btns: [] };
 
     function drawGameplayMessage() {
         if (!helpVisible && gameState !== 'paused') return;
@@ -1969,6 +2038,13 @@
 
     function drawMenu() {
         drawGrid();
+        const logW = 250, logH = 76, logX = W - logW - 46, logY = 38;
+        ctx.save(); ctx.fillStyle = '#fff';
+        _wonkyRectPath(logX, logY, logW, logH, 20, 55139, 2); ctx.fill();
+        ctx.strokeStyle = '#000'; ctx.lineWidth = 4;
+        _wonkyRectPath(logX, logY, logW, logH, 20, 55139, 2); ctx.stroke(); ctx.restore();
+        sketchBold('导出日志', logX + logW / 2, logY + logH / 2 + 5, 30);
+        uiBTN.exportLog = { x: logX, y: logY, w: logW, h: logH };
         // 主菜单保持简单风格
         sketchBold('大聪明', W / 2, H * 0.24, 100);
         sketchBold('脑洞蛋', W / 2, H * 0.40, 120);
@@ -2184,6 +2260,11 @@
     }
     function handleDown(p) {
         if (gameState === 'menu') {
+            if (inRect(p, uiBTN.exportLog)) {
+                logStep('input', 'menu-export-log-click', { x: Math.round(p.x), y: Math.round(p.y) });
+                exportDiagnosticLog();
+                return;
+            }
             if (inRect(p, uiBTN.start)) {
                 gameState = 'levelSelect';
                 logStep('state', 'menu→levelSelect', {});
@@ -2341,9 +2422,46 @@
     canvas.addEventListener('mousedown', e => handleDown(getMousePos(e)));
     canvas.addEventListener('mouseup',   () => handleUp());
     canvas.addEventListener('mouseleave',() => handleUp());
-    canvas.addEventListener('touchstart',e => { e.preventDefault(); handleDown(getMousePos(e)); }, { passive: false });
-    canvas.addEventListener('touchend', e => { e.preventDefault(); handleUp(); }, { passive: false });
-    canvas.addEventListener('touchcancel',e => handleUp());
+    const _activeTouchControls = new Map();
+    function _touchPos(touch) {
+        const rect = canvas.getBoundingClientRect();
+        return { x: (touch.clientX - rect.left) * (W / rect.width), y: (touch.clientY - rect.top) * (H / rect.height) };
+    }
+    function _controlAt(p) {
+        if (inRect(p, uiBTN.left)) return 'left';
+        if (inRect(p, uiBTN.right)) return 'right';
+        if (inRect(p, uiBTN.jump)) return 'jump';
+        return null;
+    }
+    canvas.addEventListener('touchstart', e => {
+        e.preventDefault();
+        _ensureAudio(); _startBgm();
+        for (const touch of Array.from(e.changedTouches)) {
+            const p = _touchPos(touch);
+            const control = gameState === 'playing' ? _controlAt(p) : null;
+            if (control) {
+                _activeTouchControls.set(touch.identifier, control);
+                pressInput(control, true);
+                logStep('input', 'touch-control-down', { id: touch.identifier, control, x: Math.round(p.x), y: Math.round(p.y), active: Array.from(_activeTouchControls.values()), input: { ...input } });
+            } else {
+                logStep('input', 'touch-action-down', { id: touch.identifier, x: Math.round(p.x), y: Math.round(p.y), state: gameState, touchCount: e.touches.length });
+                handleDown(p);
+            }
+        }
+    }, { passive: false });
+    function _releaseChangedTouches(e, reason) {
+        e.preventDefault();
+        for (const touch of Array.from(e.changedTouches)) {
+            const control = _activeTouchControls.get(touch.identifier);
+            if (!control) continue;
+            _activeTouchControls.delete(touch.identifier);
+            const stillHeld = Array.from(_activeTouchControls.values()).includes(control);
+            if (!stillHeld) pressInput(control, false);
+            logStep('input', 'touch-control-up', { id: touch.identifier, control, reason, stillHeld, active: Array.from(_activeTouchControls.values()), input: { ...input } });
+        }
+    }
+    canvas.addEventListener('touchend', e => _releaseChangedTouches(e, 'end'), { passive: false });
+    canvas.addEventListener('touchcancel', e => _releaseChangedTouches(e, 'cancel'), { passive: false });
 
     // ===== 启动 =====
     async function probeAvailableLevels() {
@@ -2580,6 +2698,14 @@
         if (dt > 0.05) dt = 0.05;
         last = now;
         frameCount++;
+        if (frameCount % 60 === 0) {
+            logStep('snapshot', 'one-second-state', {
+                gameState, levelIndex: currentLevelIndex, showSuccess, showDead,
+                player: { x: Math.round(player.x), y: Math.round(player.y), vx: Math.round(player.vx), vy: Math.round(player.vy), onGround: player.onGround, jumpsLeft: player.jumpsLeft },
+                input: { ...input }, validKnockCount: _validKnockCount,
+                audioState: _audioCtx ? _audioCtx.state : 'not-created'
+            });
+        }
 
         // ===== v17.0 实时 FPS 平滑计算（debug 面板显示 & dumpLatencyReport 证据）=====
         if (now && _fpsLastFrameMs > 0) {
@@ -2979,6 +3105,7 @@
 
     (async function main() {
         resize();
+        logStep('lifecycle', 'session-start', _runtimeSnapshot());
         // v4.9.6 启动时探测所有可用关卡
         await probeAvailableLevels();
         // 预加载第 0 关数据（菜单页背景用不到，只是启动热身）
