@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 139;   // 跟 index.html 的 ?v=139 保持一致
+    const GAME_CODE_VERSION = 140;   // 跟 index.html 的 ?v=140 保持一致
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
         const last = parseInt(localStorage.getItem(LAST_KNOWN_KEY) || '0', 10);
@@ -59,6 +59,18 @@
     // 第五关敲门状态：只有人物站在目标门前的敲门才累计，所有敲门都会显示“咚”。
     let _validKnockCount = 0;
     let _knockEffects = [];
+    let _questionBlocks = [];
+    let _flowerBursts = [];
+    let _passwordVisible = false;
+    let _passwordInput = '';
+    let _passwordSolved = false;
+    let _passwordErrorUntil = 0;
+    let _playingCustom = false;
+    const CREATOR_LS_KEY = 'smart_egg_creator_levels_v1';
+    let _creatorLevels = [];
+    try { _creatorLevels = JSON.parse(localStorage.getItem(CREATOR_LS_KEY) || '[]'); } catch (_) { _creatorLevels = []; }
+    let _creatorDraft = null;
+    let _creatorTool = 'platform';
 
     // 暴露调试接口到 window
     window.__debug = {
@@ -553,7 +565,7 @@
         ctx.lineJoin = 'round'; ctx.lineCap = 'round';
         _wonkyRectPath(bx, by, bw, bh, br, 5000, 2.0); ctx.stroke();
         ctx.restore();
-        sketchBold('第 ' + (currentLevelIndex + 1) + ' 关', bx + bw / 2, by + bh / 2 + 8, 34);
+        sketchBold(_playingCustom ? '自定义关卡' : ('第 ' + (currentLevelIndex + 1) + ' 关'), bx + bw / 2, by + bh / 2 + 8, _playingCustom ? 29 : 34);
 
         // === 2. ? ↻ ⏸ 三个手绘不规则方按钮（盒子不变，用Canvas线条/形状自画3个图标→绝对居中+放大）===
         const bs = 96, bgap = 34;
@@ -741,7 +753,7 @@
         uiBTN.right  = { x: x2, y: by, w: sz, h: sz };
         uiBTN.jump   = { x: x3, y: by, w: sz, h: sz };
     }
-    const uiBTN = { left: null, right: null, jump: null, help: null, restart: null, pause: null, pauseLevelSelect: null, pauseResume: null, start: null, exportLog: null, levelSelect_btns: [] };
+    const uiBTN = { left: null, right: null, jump: null, help: null, restart: null, pause: null, pauseLevelSelect: null, pauseResume: null, start: null, creator: null, exportLog: null, levelSelect_btns: [], creatorBtns: [], editorTools: [], passwordKeys: [] };
 
     function drawGameplayMessage() {
         if (!helpVisible && gameState !== 'paused') return;
@@ -800,6 +812,49 @@
             sketchBold('咚', effect.x - 74 - eased * 12, effect.y - 12 - eased * 28, 46);
             ctx.restore();
         }
+    }
+
+    function _drawFlower(cx, cy, scale = 1, alpha = 1) {
+        ctx.save(); ctx.translate(cx, cy); ctx.scale(scale, scale); ctx.globalAlpha = alpha;
+        ctx.fillStyle = '#fff'; ctx.strokeStyle = '#000'; ctx.lineWidth = 4; ctx.lineJoin = 'round';
+        for (let i = 0; i < 5; i++) {
+            const a = -Math.PI / 2 + i * Math.PI * 2 / 5;
+            ctx.beginPath(); ctx.arc(Math.cos(a) * 13, Math.sin(a) * 13, 10, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        }
+        ctx.beginPath(); ctx.arc(0, 0, 7, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.restore();
+    }
+    function drawQuestionBlocks() {
+        const now = performance.now();
+        for (let i = 0; i < _questionBlocks.length; i++) {
+            const b = _questionBlocks[i], x = b.x - b.w / 2, y = b.y - b.h / 2;
+            ctx.save(); ctx.fillStyle = b.remaining > 0 ? '#fff' : '#ddd';
+            _wonkyRectPath(x, y, b.w, b.h, 14, 84000 + i * 91, 2); ctx.fill();
+            ctx.strokeStyle = '#000'; ctx.lineWidth = 6;
+            _wonkyRectPath(x, y, b.w, b.h, 14, 84000 + i * 91, 2); ctx.stroke(); ctx.restore();
+            sketchBold(b.remaining > 0 ? '?' : '×', b.x, b.y + 6, 58);
+            for (let f = 0; f < b.revealed; f++) {
+                const row = Math.floor(f / 3), col = f % 3;
+                _drawFlower(b.x + (col - 1) * 34, y - 28 - row * 42, 0.72, 1);
+            }
+        }
+        _flowerBursts = _flowerBursts.filter(f => now - f.at < 650);
+        for (const f of _flowerBursts) {
+            const t = (now - f.at) / 650;
+            _drawFlower(f.x, f.y - t * 90, 0.8 + t * 0.35, 1 - t);
+        }
+    }
+    function drawPasswordPanel() {
+        if (!_passwordVisible) return;
+        ctx.save(); ctx.fillStyle = 'rgba(0,0,0,.28)'; ctx.fillRect(0,0,W,H); ctx.restore();
+        const pw = 620, ph = 850, px = (W-pw)/2, py = 105;
+        ctx.save(); ctx.fillStyle = '#fff'; _wonkyRectPath(px,py,pw,ph,34,85001,3); ctx.fill(); ctx.strokeStyle='#000';ctx.lineWidth=7;_wonkyRectPath(px,py,pw,ph,34,85001,3);ctx.stroke();ctx.restore();
+        sketchBold('密码是？', W/2, py+65, 48);
+        uiBTN.passwordKeys = [];
+        const slotW=105,gap=22,start=W/2-(slotW*4+gap*3)/2;
+        for(let i=0;i<4;i++){const sx=start+i*(slotW+gap);ctx.save();ctx.fillStyle='#111';_wonkyRectPath(sx,py+105,slotW,90,15,85100+i,1.5);ctx.fill();ctx.restore();sketchBold(_passwordInput[i]||'',sx+slotW/2,py+152,50,'center','#fff');}
+        const labels=['1','2','3','4','5','6','7','8','9','0','←','×'];
+        for(let i=0;i<labels.length;i++){const col=i%3,row=Math.floor(i/3),bw=135,bh=105,bx=px+75+col*170,by=py+235+row*135;ctx.save();ctx.fillStyle='#fff';_wonkyRectPath(bx,by,bw,bh,22,85200+i,2);ctx.fill();ctx.strokeStyle='#000';ctx.lineWidth=5;_wonkyRectPath(bx,by,bw,bh,22,85200+i,2);ctx.stroke();ctx.restore();sketchBold(labels[i],bx+bw/2,by+bh/2+5,45);uiBTN.passwordKeys.push({x:bx,y:by,w:bw,h:bh,key:labels[i]});}
+        if(performance.now()<_passwordErrorUntil) sketchBold('密码不对，再数数花朵',W/2,py+800,28,'center','#d33');
     }
 
     // ===== v4.9.6 选关 + 通关存档 =====
@@ -982,6 +1037,7 @@
             });
             return;
         }
+        if (_passwordVisible) { player.vx = 0; player.vy = 0; return; }
 
         // ① 最高优先级：只有 gameState==='playing' 才运行物理！其他状态一律冻结。
         if (gameState !== 'playing') {
@@ -1049,7 +1105,13 @@
                 dx, dy, d.w, d.h);
             const doorLocked = !!d.locked && !unlockedDoors.has(d.id);
             const knockGateOpen = levelData.type !== 'knock_twice' || _validKnockCount >= 2;
-            if (d.is_goal && !doorLocked && knockGateOpen && overlap >= PLAYER_HALF_AREA) {
+            const passwordGateOpen = levelData.type !== 'flower_password' || _passwordSolved;
+            if (d.is_goal && levelData.type === 'flower_password' && !_passwordSolved && overlap >= PLAYER_HALF_AREA) {
+                _passwordVisible = true; player.vx = 0; input.left = false; input.right = false;
+                logStep('puzzle','password-panel-open',{input:_passwordInput, revealed:_questionBlocks.map(b=>b.revealed)});
+                return;
+            }
+            if (d.is_goal && !doorLocked && knockGateOpen && passwordGateOpen && overlap >= PLAYER_HALF_AREA) {
                 // v19.0 简化阻断：只阻断「倒计时进行中（_goalHitStartMs>0）」的重复触发
                 //   v18 阻断了 _goalHitJumped=true（上一次已经跳完的标志）→ 但跳完后下一关进入前，loadLevelAndStart 会清零这个标志
                 //   双重保险：这里只看「现在是否在倒计时中」→ 更安全（即便 loadLevel 清零遗漏也不会卡 goal-hit）
@@ -1228,6 +1290,20 @@
         // Y 方向
         player.y += player.vy * dt;
         const landingSpeed = player.vy;
+        if (player.vy < 0 && _questionBlocks.length) {
+            for (const b of _questionBlocks) {
+                const bx=b.x-b.w/2, by=b.y-b.h/2;
+                if (!rectVsRect(player.x-HALF_W,player.y-HALF_H,HALF_W*2,HALF_H*2,bx,by,b.w,b.h)) continue;
+                player.y = by + b.h + HALF_H; player.vy = 0;
+                if (b.remaining > 0) {
+                    b.remaining--; b.revealed++;
+                    _flowerBursts.push({x:b.x,y:by,at:performance.now()});
+                    playSfx('unlock');
+                    logStep('puzzle','flower-block-hit',{id:b.id,remaining:b.remaining,revealed:b.revealed,total:b.count});
+                } else logStep('puzzle','empty-block-hit',{id:b.id});
+                break;
+            }
+        }
         for (const p of plats) {
             const px = p.x - p.w / 2, py = p.y - p.h / 2;
             if (rectVsRect(player.x - HALF_W, player.y - HALF_H, HALF_W * 2, HALF_H * 2,
@@ -2048,7 +2124,7 @@
         // 主菜单保持简单风格
         sketchBold('大聪明', W / 2, H * 0.24, 100);
         sketchBold('脑洞蛋', W / 2, H * 0.40, 120);
-        const bw = W * 0.34, bh = 150, bx = (W - bw) / 2, by = H * 0.58;
+        const bw = W * 0.28, bh = 135, gap=70, bx = W/2-bw-gap/2, by = H * 0.58;
         // 开始按钮（不规则圆角方形白底黑描边）
         ctx.save();
         ctx.fillStyle = '#fff';
@@ -2056,9 +2132,50 @@
         ctx.strokeStyle = '#000'; ctx.lineWidth = 5;
         _wonkyRectPath(bx, by, bw, bh, 52, 55555, 2.5); ctx.stroke();
         ctx.restore();
-        sketchBold('开始游戏', bx + bw / 2, by + bh / 2 + 10, 56);
+        sketchBold('主线关卡', bx + bw / 2, by + bh / 2 + 10, 50);
+        const cbx=W/2+gap/2;
+        ctx.save();ctx.fillStyle='#fff';_wonkyRectPath(cbx,by,bw,bh,52,55595,2.5);ctx.fill();ctx.strokeStyle='#000';ctx.lineWidth=5;_wonkyRectPath(cbx,by,bw,bh,52,55595,2.5);ctx.stroke();ctx.restore();
+        sketchBold('创造模式',cbx+bw/2,by+bh/2+10,50);
         sketchText('© 2024 MVP Demo', W / 2, H - 52, 24, 'center', false, 'rgba(0,0,0,0.4)');
         uiBTN.start = { x: bx, y: by, w: bw, h: bh };
+        uiBTN.creator = { x: cbx, y: by, w: bw, h: bh };
+    }
+
+    function _newCreatorDraft() {
+        return { id:'custom-'+Date.now(), name:'我的脑洞关卡', type:'custom', no_fall:true, description:{hint_l1:'找到办法进入终点门。'}, world_size:{w:1920,h:1080}, spawn:{x:300,y:810}, platforms:[{x:960,y:1090,w:1920,h:440,kind:'ground'}], doors:[{id:'custom_entry',x:300,y:765,w:150,h:210,is_goal:false},{id:'custom_goal',x:1540,y:765,w:150,h:210,is_goal:true}], crates:[], keys:[], decor:[] };
+    }
+    function _saveCreatorLevels() { localStorage.setItem(CREATOR_LS_KEY,JSON.stringify(_creatorLevels)); }
+    function _button(x,y,w,h,label,seed,size=30){ctx.save();ctx.fillStyle='#fff';_wonkyRectPath(x,y,w,h,22,seed,2);ctx.fill();ctx.strokeStyle='#000';ctx.lineWidth=4;_wonkyRectPath(x,y,w,h,22,seed,2);ctx.stroke();ctx.restore();sketchBold(label,x+w/2,y+h/2+5,size);return{x,y,w,h};}
+    function drawCreatorList() {
+        sketchBold('创造模式',W/2,100,66); sketchText('把脑洞做成可以分享的关卡',W/2,165,28);
+        uiBTN.creatorBtns=[];
+        const cols=3,cw=480,ch=180,gap=45,startX=(W-(cols*cw+(cols-1)*gap))/2;
+        _creatorLevels.forEach((lv,i)=>{const x=startX+(i%cols)*(cw+gap),y=235+Math.floor(i/cols)*(ch+35);const r=_button(x,y,cw,ch,lv.name||('自定义关卡 '+(i+1)),86000+i,34);r.action='open';r.index=i;uiBTN.creatorBtns.push(r);sketchText('点击继续编辑',x+cw/2,y+125,22);});
+        const by=H-170,bw=420,bh=100;
+        let r=_button(W/2-bw-25,by,bw,bh,'＋ 生成自定义关卡',86100,30);r.action='new';uiBTN.creatorBtns.push(r);
+        r=_button(W/2+25,by,260,bh,'导入关卡',86101,28);r.action='import';uiBTN.creatorBtns.push(r);
+        r=_button(55,45,220,80,'返回首页',86102,27);r.action='back';uiBTN.creatorBtns.push(r);
+    }
+    function drawCreatorEditor() {
+        sketchBold('关卡编辑器',W/2,55,48); sketchText(_creatorDraft.name,W/2,105,25);
+        const tools=[['platform','平台'],['spawn','出生门'],['goal','终点门'],['crate','木箱'],['key','钥匙']];uiBTN.editorTools=[];
+        tools.forEach((it,i)=>{const r=_button(45+i*210,135,185,78,it[1],86200+i,25);r.action='tool';r.tool=it[0];if(_creatorTool===it[0]){ctx.strokeStyle='#000';ctx.lineWidth=8;ctx.strokeRect(r.x+5,r.y+5,r.w-10,r.h-10);}uiBTN.editorTools.push(r);});
+        [['save','保存'],['play','试玩'],['export','导出'],['back','返回']].forEach((it,i)=>{const r=_button(W-650+i*155,135,140,78,it[1],86300+i,24);r.action=it[0];uiBTN.editorTools.push(r);});
+        ctx.save();ctx.strokeStyle='rgba(0,0,0,.35)';ctx.setLineDash([12,10]);ctx.strokeRect(45,245,W-90,635);ctx.restore();
+        for(const p of _creatorDraft.platforms){const x=p.x-p.w/2,y=p.y-p.h/2;ctx.fillStyle='#fff';ctx.fillRect(x,y,p.w,p.h);ctx.strokeStyle='#000';ctx.lineWidth=5;ctx.strokeRect(x,y,p.w,p.h);}
+        for(const d of _creatorDraft.doors){ctx.strokeStyle='#000';ctx.lineWidth=6;ctx.strokeRect(d.x-d.w/2,d.y-d.h/2,d.w,d.h);sketchText(d.is_goal?'终':'生',d.x,d.y,28);}
+        for(const c of _creatorDraft.crates||[]){ctx.strokeStyle='#000';ctx.lineWidth=5;ctx.strokeRect(c.x-c.w/2,c.y-c.h/2,c.w,c.h);sketchText('箱',c.x,c.y,24);}
+        for(const k of _creatorDraft.keys||[]){sketchBold('🔑',k.x,k.y,35);}
+        sketchText('选择上方组件，再点击虚线区域放置；平台会自动生成合适尺寸。',W/2,925,25);
+    }
+    function _playCreatorDraft() {
+        _playingCustom=true; levelData=JSON.parse(JSON.stringify(_creatorDraft)); currentLevelIndex=-1;
+        _cachedLevels[-1]=levelData; if(!_availableLevels.includes(-1))_availableLevels.push(-1); loadLevelAndStart();
+        logStep('creator','custom-play',{id:levelData.id,name:levelData.name});
+    }
+    function _exportCreatorLevel(lv) {
+        const text=JSON.stringify(lv,null,2),filename=(lv.name||'smart-egg-level')+'.json';
+        if(window.AndroidLogExporter&&window.AndroidLogExporter.exportLog){window.AndroidLogExporter.exportLog(filename,text);}else{const blob=new Blob([text],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}logStep('creator','level-export',{id:lv.id,bytes:text.length});
     }
 
     function drawComplete() {
@@ -2259,6 +2376,23 @@
         } else input[name] = isDown;
     }
     function handleDown(p) {
+        if (_passwordVisible) {
+            for (const b of uiBTN.passwordKeys || []) if (inRect(p,b)) {
+                if (b.key === '×') { _passwordVisible=false; _passwordInput=''; }
+                else if (b.key === '←') _passwordInput=_passwordInput.slice(0,-1);
+                else if (_passwordInput.length < 4) _passwordInput += b.key;
+                playSfx('knock');
+                logStep('puzzle','password-key',{key:b.key,input:_passwordInput});
+                if (_passwordInput.length === 4) {
+                    if (_passwordInput === String(levelData.password || '')) {
+                        _passwordSolved=true; _passwordVisible=false; playSfx('unlock');
+                        logStep('puzzle','password-correct',{input:_passwordInput});
+                    } else { _passwordErrorUntil=performance.now()+1300; logStep('puzzle','password-wrong',{input:_passwordInput}); _passwordInput=''; }
+                }
+                return;
+            }
+            return;
+        }
         if (gameState === 'menu') {
             if (inRect(p, uiBTN.exportLog)) {
                 logStep('input', 'menu-export-log-click', { x: Math.round(p.x), y: Math.round(p.y) });
@@ -2268,6 +2402,36 @@
             if (inRect(p, uiBTN.start)) {
                 gameState = 'levelSelect';
                 logStep('state', 'menu→levelSelect', {});
+            }
+            if (inRect(p, uiBTN.creator)) { gameState='creatorList'; logStep('state','menu→creatorList',{}); }
+            return;
+        }
+        if (gameState === 'creatorList') {
+            for(const b of uiBTN.creatorBtns||[]) if(inRect(p,b)){
+                if(b.action==='back') gameState='menu';
+                else if(b.action==='new'){_creatorDraft=_newCreatorDraft();_creatorTool='platform';gameState='creatorEdit';}
+                else if(b.action==='open'){_creatorDraft=JSON.parse(JSON.stringify(_creatorLevels[b.index]));gameState='creatorEdit';}
+                else if(b.action==='import') { try { const raw=prompt('粘贴关卡 JSON'); if(raw){const lv=JSON.parse(raw);_creatorLevels.push(lv);_saveCreatorLevels();logStep('creator','level-import',{id:lv.id});} } catch(e){alert('关卡格式不正确：'+e.message);} }
+                return;
+            }
+            return;
+        }
+        if (gameState === 'creatorEdit') {
+            for(const b of uiBTN.editorTools||[]) if(inRect(p,b)){
+                if(b.action==='tool') _creatorTool=b.tool;
+                else if(b.action==='back') gameState='creatorList';
+                else if(b.action==='play') _playCreatorDraft();
+                else if(b.action==='export') _exportCreatorLevel(_creatorDraft);
+                else if(b.action==='save'){const name=prompt('给关卡起个名字',_creatorDraft.name)||_creatorDraft.name;_creatorDraft.name=name;const idx=_creatorLevels.findIndex(x=>x.id===_creatorDraft.id);if(idx>=0)_creatorLevels[idx]=JSON.parse(JSON.stringify(_creatorDraft));else _creatorLevels.push(JSON.parse(JSON.stringify(_creatorDraft)));_saveCreatorLevels();logStep('creator','level-save',{id:_creatorDraft.id,name});}
+                return;
+            }
+            if(p.x>45&&p.x<W-45&&p.y>245&&p.y<880){
+                if(_creatorTool==='platform') _creatorDraft.platforms.push({x:Math.round(p.x),y:Math.round(p.y),w:260,h:52,kind:'step_custom'});
+                else if(_creatorTool==='spawn') {_creatorDraft.spawn={x:Math.round(p.x),y:Math.round(p.y)};_creatorDraft.doors=_creatorDraft.doors.filter(d=>d.is_goal);_creatorDraft.doors.unshift({id:'custom_entry',x:Math.round(p.x),y:Math.round(p.y)-45,w:150,h:210,is_goal:false});}
+                else if(_creatorTool==='goal'){_creatorDraft.doors=_creatorDraft.doors.filter(d=>!d.is_goal);_creatorDraft.doors.push({id:'custom_goal',x:Math.round(p.x),y:Math.round(p.y),w:150,h:210,is_goal:true});}
+                else if(_creatorTool==='crate') (_creatorDraft.crates||(_creatorDraft.crates=[])).push({id:'box_'+Date.now(),x:Math.round(p.x),y:Math.round(p.y),w:130,h:140});
+                else if(_creatorTool==='key'){(_creatorDraft.keys||(_creatorDraft.keys=[])).push({id:'key_'+Date.now(),x:Math.round(p.x),y:Math.round(p.y),target_door:'custom_goal'});const gd=_creatorDraft.doors.find(d=>d.is_goal);if(gd)gd.locked=true;}
+                logStep('creator','element-place',{tool:_creatorTool,x:Math.round(p.x),y:Math.round(p.y)});
             }
             return;
         }
@@ -2332,8 +2496,9 @@
             if (gameState === 'paused' && inRect(p, uiBTN.pauseLevelSelect)) {
                 helpVisible = false;
                 handleUp();
-                gameState = 'levelSelect';
-                logStep('state', 'paused→levelSelect', { source: 'pause-menu' });
+                gameState = _playingCustom ? 'creatorEdit' : 'levelSelect';
+                if (_playingCustom) _playingCustom=false;
+                logStep('state', 'paused→list', { source: 'pause-menu', to:gameState });
                 return;
             }
             if (gameState === 'paused' && inRect(p, uiBTN.pauseResume)) {
@@ -2578,6 +2743,7 @@
         showSuccess = false; successTimer = SUCCESS_TOTAL; doorOpenT = 0; showDead = false;
         _validKnockCount = 0;
         _knockEffects = [];
+        _passwordVisible = false; _passwordInput = ''; _passwordSolved = false;
         _completeTimer = 0;
         // v19.0 关键：每次进入新关卡，goal-hit状态机必须全部清零！（否则「_goalHitJumped=true」会遗留到下一关，physicsStep阻断命中导致goal-hit不触发！）
         _goalHitStartMs = 0;
@@ -2613,6 +2779,8 @@
         player.jumpsLeft = levelData.double_jump ? 2 : 1;
         resetCratesFromLevel();
         resetKeysFromLevel();
+        _questionBlocks = (levelData.question_blocks || []).map(b => ({ ...b, remaining: b.count, revealed: 0 }));
+        _flowerBursts = [];
         // v4.9.6c 坏关卡保护：启动健康计数器（进入 playing 后 30 帧检查）
         _healthGuardFrames = 30;
         gameState = 'playing';
@@ -2755,6 +2923,12 @@
                     hist.fps = _fpsSmoothed;
                 }
                 const idx = _goalHitLevelIndex;
+                if (_playingCustom) {
+                    logStep('creator','custom-complete',{id:levelData&&levelData.id,elapsed_ms:Math.round(elapsed)});
+                    showSuccess=false;showDead=false;gameState='creatorList';_playingCustom=false;
+                    _goalHitJumped=true;_goalHitStartMs=0;_goalHitLevelIndex=-1;
+                    requestAnimationFrame(loop); return;
+                }
                 const nxt = idx + 1;
                 const overflow  = nxt >= TOTAL_LEVELS;
                 const nAvail    = _availableLevels.includes(nxt);
@@ -2900,6 +3074,8 @@
             drawGrid();
             if (gameState === 'menu') drawMenu();
             else if (gameState === 'levelSelect') drawLevelSelect();
+            else if (gameState === 'creatorList') drawCreatorList();
+            else if (gameState === 'creatorEdit') drawCreatorEditor();
             else if (gameState === 'complete' || gameState === 'completeIntro') drawComplete();
             else {
                 drawPlatforms();
@@ -2907,6 +3083,7 @@
                 drawCrates();
                 drawKeys();
                 drawDoors();
+                drawQuestionBlocks();
                 drawKnockEffects();
                 drawPlayer();
                 drawLevelTopBar();
@@ -2914,6 +3091,7 @@
                 drawGameplayMessage();
                 drawSuccessOverlay();
                 drawDeadOverlay();
+                drawPasswordPanel();
             }
             // ✅ 屏幕内 Debug Overlay（左上角，便于一眼看出是否卡在哪一步）
             // 调试开关：URL加 ?debug=1 可见

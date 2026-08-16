@@ -1,0 +1,28 @@
+{
+  "$schema": "Part7_level_json_schema_v1",
+  "id": 5,
+  "name": "密码是？",
+  "type": "flower_password",
+  "password": "3125",
+  "no_fall": true,
+  "description": {
+    "定位": "观察计数关。顶四个问号方块，数清每个方块掉出的花朵数量，再到右门输入四位密码。",
+    "表面目标": "打开右侧密码门",
+    "正解": "四个方块从左到右分别有3、1、2、5朵花，密码为3125",
+    "hint_l1": "顶顶看，花朵会告诉你密码。"
+  },
+  "world_size": { "w": 1920, "h": 1080 },
+  "spawn": { "x": 620, "y": 810 },
+  "platforms": [{ "x": 960, "y": 1090, "w": 1920, "h": 440, "kind": "ground" }],
+  "question_blocks": [
+    { "id": "flower_1", "x": 690, "y": 430, "w": 105, "h": 105, "count": 3 },
+    { "id": "flower_2", "x": 870, "y": 430, "w": 105, "h": 105, "count": 1 },
+    { "id": "flower_3", "x": 1050, "y": 430, "w": 105, "h": 105, "count": 2 },
+    { "id": "flower_4", "x": 1230, "y": 430, "w": 105, "h": 105, "count": 5 }
+  ],
+  "doors": [
+    { "id": "entry_door_5", "x": 300, "y": 765, "w": 150, "h": 210, "is_goal": false },
+    { "id": "goal_door_5", "x": 1540, "y": 765, "w": 150, "h": 210, "is_goal": true }
+  ],
+  "crates": [], "keys": [], "decor": []
+}
