@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 145;   // 跟 index.html 的 ?v=145 保持一致
+    const GAME_CODE_VERSION = 146;   // 跟 index.html 的 ?v=146 保持一致
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
         const last = parseInt(localStorage.getItem(LAST_KNOWN_KEY) || '0', 10);
@@ -48,6 +48,18 @@
     let showDead = false;
     const DEAD_BTN = { btx: 0, bty: 0, btw: 360, bth: 110 };
     let gameState = 'menu';
+    const PAGE_NAMES = Object.freeze({
+        menu:'首页', levelSelect:'主线选关页', creatorList:'创造模式关卡列表页',
+        creatorEdit:'关卡编辑器页', playing:'主线关卡页', paused:'暂停页',
+        complete:'通关页', completeIntro:'通关过渡页'
+    });
+    function currentPageName() {
+        if(_creatorDeleteConfirmIndex>=0)return '删除确认弹窗';
+        if(_passwordVisible)return '密码输入弹窗';
+        if(gameState==='playing'&&_playingCustom)return '自定义关卡试玩页';
+        if(gameState==='paused'&&_playingCustom)return '自定义关卡暂停页';
+        return PAGE_NAMES[gameState]||gameState;
+    }
     let levelData = null;
     let _successStuckCounter = 0;  // 兜底保险：showSuccess 持续超过120帧就强制切complete
     // v4.9.5 进门动画：蛋吸入参数
@@ -90,6 +102,8 @@
     // 暴露调试接口到 window
     window.__debug = {
       getState: () => gameState,
+      getPageName: () => currentPageName(),
+      PAGE_NAMES,
       setState: (v) => { gameState = v; },
       getShowSuccess: () => showSuccess,
       getShowDead: () => showDead,
@@ -192,6 +206,7 @@
                 note: '当前游戏无业务后端；关卡来自内置 levels_bundle.js 或本地 JSON。所有资源读取结果记录在 level-load/network 分类。'
             },
             game: {
+                pageName: currentPageName(),
                 state: gameState, levelIndex: currentLevelIndex,
                 levelName: levelData && levelData.name,
                 showSuccess, showDead, paused: gameState === 'paused',
@@ -794,7 +809,7 @@
             _wonkyRectPath(leftX, btnY, btnW, btnH, 22, 73101, 2.3); ctx.fill(); ctx.stroke();
             _wonkyRectPath(rightX, btnY, btnW, btnH, 22, 73201, 2.3); ctx.fill(); ctx.stroke();
             ctx.restore();
-            sketchBold('回到选关', leftX + btnW / 2, btnY + btnH / 2 + 7, 27);
+            sketchBold(_playingCustom ? '回到创造模式' : '回到选关', leftX + btnW / 2, btnY + btnH / 2 + 7, _playingCustom ? 23 : 27);
             sketchBold('返回游戏', rightX + btnW / 2, btnY + btnH / 2 + 7, 27);
             uiBTN.pauseLevelSelect = { x: leftX, y: btnY, w: btnW, h: btnH };
             uiBTN.pauseResume = { x: rightX, y: btnY, w: btnW, h: btnH };
@@ -2597,7 +2612,7 @@
             if (gameState === 'paused' && inRect(p, uiBTN.pauseLevelSelect)) {
                 helpVisible = false;
                 handleUp();
-                gameState = _playingCustom ? 'creatorEdit' : 'levelSelect';
+                gameState = _playingCustom ? 'creatorList' : 'levelSelect';
                 if (_playingCustom) _playingCustom=false;
                 logStep('state', 'paused→list', { source: 'pause-menu', to:gameState });
                 return;

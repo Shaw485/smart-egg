@@ -10,4 +10,4 @@ SMART_EGG_JAVA_HOME=/path/to/jdk \
 ./build-apk.sh
 ```
 
-产物位于 `build/Smart-Egg-v145.apk`。构建目录和签名文件不提交到仓库。
+产物位于 `build/Smart-Egg-v146.apk`。构建目录和签名文件不提交到仓库。
