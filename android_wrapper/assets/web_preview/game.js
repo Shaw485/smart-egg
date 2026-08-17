@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 143;   // 跟 index.html 的 ?v=143 保持一致
+    const GAME_CODE_VERSION = 144;   // 跟 index.html 的 ?v=144 保持一致
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
         const last = parseInt(localStorage.getItem(LAST_KNOWN_KEY) || '0', 10);
@@ -74,6 +74,7 @@
     let _creatorTool = 'platform';
     let _creatorMechanics = [];
     let _creatorHistory = [];
+    let _creatorSavedUntil = 0;
     function _mechanicsOf(lv) {
         if(!lv)return [];
         if(Array.isArray(lv.mechanics))return lv.mechanics.filter(x=>x&&x!=='normal');
@@ -2158,9 +2159,17 @@
     }
 
     function _newCreatorDraft() {
-        return { id:'custom-'+Date.now(), name:'我的脑洞关卡', type:'custom', mechanics:[], no_fall:true, description:{hint_l1:'找到办法进入终点门。'}, world_size:{w:1920,h:1080}, spawn:{x:300,y:810}, platforms:[{x:960,y:1090,w:1920,h:440,kind:'ground'}], doors:[{id:'custom_entry',x:300,y:765,w:150,h:210,is_goal:false},{id:'custom_goal',x:1540,y:765,w:150,h:210,is_goal:true}], crates:[], keys:[], question_blocks:[], decor:[] };
+        return { id:'custom-'+Date.now(), name:'我的脑洞关卡 '+(_creatorLevels.length+1), type:'custom', mechanics:[], no_fall:true, description:{hint_l1:'找到办法进入终点门。'}, world_size:{w:1920,h:1080}, spawn:{x:300,y:810}, platforms:[{x:960,y:1090,w:1920,h:440,kind:'ground'}], doors:[{id:'custom_entry',x:300,y:765,w:150,h:210,is_goal:false},{id:'custom_goal',x:1540,y:765,w:150,h:210,is_goal:true}], crates:[], keys:[], question_blocks:[], decor:[] };
     }
     function _saveCreatorLevels() { localStorage.setItem(CREATOR_LS_KEY,JSON.stringify(_creatorLevels)); }
+    function _saveCreatorDraftToList() {
+        if(!_creatorDraft)return;
+        const idx=_creatorLevels.findIndex(x=>x.id===_creatorDraft.id);
+        const saved=JSON.parse(JSON.stringify(_creatorDraft));
+        if(idx>=0)_creatorLevels[idx]=saved;else _creatorLevels.push(saved);
+        _saveCreatorLevels();_creatorSavedUntil=performance.now()+1800;gameState='creatorList';
+        logStep('creator','level-save',{id:saved.id,name:saved.name,mechanics:saved.mechanics,list_index:idx>=0?idx:_creatorLevels.length-1});
+    }
     function _pushCreatorHistory() {
         if(!_creatorDraft)return;
         _creatorHistory.push(JSON.stringify(_creatorDraft));
@@ -2196,6 +2205,7 @@
     function _button(x,y,w,h,label,seed,size=30){ctx.save();ctx.fillStyle='#fff';_wonkyRectPath(x,y,w,h,22,seed,2);ctx.fill();ctx.strokeStyle='#000';ctx.lineWidth=4;_wonkyRectPath(x,y,w,h,22,seed,2);ctx.stroke();ctx.restore();sketchBold(label,x+w/2,y+h/2+5,size);return{x,y,w,h};}
     function drawCreatorList() {
         sketchBold('创造模式',W/2,100,66); sketchText('把脑洞做成可以分享的关卡',W/2,165,28);
+        if(performance.now()<_creatorSavedUntil)sketchBold('已保存，点击“玩”开始体验',W/2,205,26,'center','#111');
         uiBTN.creatorBtns=[];
         const cols=3,cw=480,ch=180,gap=45,startX=(W-(cols*cw+(cols-1)*gap))/2;
         _creatorLevels.forEach((lv,i)=>{const x=startX+(i%cols)*(cw+gap),y=235+Math.floor(i/cols)*(ch+35);ctx.save();ctx.fillStyle='#fff';_wonkyRectPath(x,y,cw,ch,22,86000+i,2);ctx.fill();ctx.strokeStyle='#000';ctx.lineWidth=4;_wonkyRectPath(x,y,cw,ch,22,86000+i,2);ctx.stroke();ctx.restore();sketchBold(lv.name||('自定义关卡 '+(i+1)),x+cw/2,y+48,32);const ms=_mechanicsOf(lv),names={double_jump:'多跳',knock_twice:'敲门',flower_password:'顶花密码',key:'钥匙'};sketchText(ms.length?ms.map(x=>names[x]).join('＋'):'普通玩法',x+cw/2,y+88,20);let r=_button(x+55,y+112,165,52,'玩',86050+i,23);r.action='play';r.index=i;uiBTN.creatorBtns.push(r);r=_button(x+260,y+112,165,52,'编辑',86070+i,23);r.action='open';r.index=i;uiBTN.creatorBtns.push(r);});
@@ -2476,7 +2486,7 @@
                 else if(b.action==='back') gameState='creatorList';
                 else if(b.action==='play') _playCreatorDraft();
                 else if(b.action==='undo') _undoCreatorStep();
-                else if(b.action==='save'){const name=prompt('给关卡起个名字',_creatorDraft.name)||_creatorDraft.name;_creatorDraft.name=name;const idx=_creatorLevels.findIndex(x=>x.id===_creatorDraft.id);if(idx>=0)_creatorLevels[idx]=JSON.parse(JSON.stringify(_creatorDraft));else _creatorLevels.push(JSON.parse(JSON.stringify(_creatorDraft)));_saveCreatorLevels();logStep('creator','level-save',{id:_creatorDraft.id,name,mechanics:_creatorDraft.mechanics});gameState='creatorList';}
+                else if(b.action==='save')_saveCreatorDraftToList();
                 return;
             }
             if(p.x>45&&p.x<W-45&&p.y>290&&p.y<880){
