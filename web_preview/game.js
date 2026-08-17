@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 144;   // 跟 index.html 的 ?v=144 保持一致
+    const GAME_CODE_VERSION = 145;   // 跟 index.html 的 ?v=145 保持一致
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
         const last = parseInt(localStorage.getItem(LAST_KNOWN_KEY) || '0', 10);
@@ -75,6 +75,7 @@
     let _creatorMechanics = [];
     let _creatorHistory = [];
     let _creatorSavedUntil = 0;
+    let _creatorDeleteConfirmIndex = -1;
     function _mechanicsOf(lv) {
         if(!lv)return [];
         if(Array.isArray(lv.mechanics))return lv.mechanics.filter(x=>x&&x!=='normal');
@@ -767,7 +768,7 @@
         uiBTN.right  = { x: x2, y: by, w: sz, h: sz };
         uiBTN.jump   = { x: x3, y: by, w: sz, h: sz };
     }
-    const uiBTN = { left: null, right: null, jump: null, help: null, restart: null, pause: null, pauseLevelSelect: null, pauseResume: null, start: null, creator: null, exportLog: null, levelSelect_btns: [], creatorBtns: [], editorTools: [], passwordKeys: [] };
+    const uiBTN = { left: null, right: null, jump: null, help: null, restart: null, pause: null, pauseLevelSelect: null, pauseResume: null, start: null, creator: null, exportLog: null, levelSelect_btns: [], creatorBtns: [], creatorConfirmBtns: [], editorTools: [], passwordKeys: [] };
 
     function drawGameplayMessage() {
         if (!helpVisible && gameState !== 'paused') return;
@@ -2206,12 +2207,31 @@
     function drawCreatorList() {
         sketchBold('创造模式',W/2,100,66); sketchText('把脑洞做成可以分享的关卡',W/2,165,28);
         if(performance.now()<_creatorSavedUntil)sketchBold('已保存，点击“玩”开始体验',W/2,205,26,'center','#111');
-        uiBTN.creatorBtns=[];
+        uiBTN.creatorBtns=[];uiBTN.creatorConfirmBtns=[];
         const cols=3,cw=480,ch=180,gap=45,startX=(W-(cols*cw+(cols-1)*gap))/2;
-        _creatorLevels.forEach((lv,i)=>{const x=startX+(i%cols)*(cw+gap),y=235+Math.floor(i/cols)*(ch+35);ctx.save();ctx.fillStyle='#fff';_wonkyRectPath(x,y,cw,ch,22,86000+i,2);ctx.fill();ctx.strokeStyle='#000';ctx.lineWidth=4;_wonkyRectPath(x,y,cw,ch,22,86000+i,2);ctx.stroke();ctx.restore();sketchBold(lv.name||('自定义关卡 '+(i+1)),x+cw/2,y+48,32);const ms=_mechanicsOf(lv),names={double_jump:'多跳',knock_twice:'敲门',flower_password:'顶花密码',key:'钥匙'};sketchText(ms.length?ms.map(x=>names[x]).join('＋'):'普通玩法',x+cw/2,y+88,20);let r=_button(x+55,y+112,165,52,'玩',86050+i,23);r.action='play';r.index=i;uiBTN.creatorBtns.push(r);r=_button(x+260,y+112,165,52,'编辑',86070+i,23);r.action='open';r.index=i;uiBTN.creatorBtns.push(r);});
+        _creatorLevels.forEach((lv,i)=>{
+            const x=startX+(i%cols)*(cw+gap),y=235+Math.floor(i/cols)*(ch+35);
+            ctx.save();ctx.fillStyle='#fff';_wonkyRectPath(x,y,cw,ch,22,86000+i,2);ctx.fill();ctx.strokeStyle='#000';ctx.lineWidth=4;_wonkyRectPath(x,y,cw,ch,22,86000+i,2);ctx.stroke();ctx.restore();
+            sketchBold(lv.name||('自定义关卡 '+(i+1)),x+cw/2,y+48,32);
+            const ms=_mechanicsOf(lv),names={double_jump:'多跳',knock_twice:'敲门',flower_password:'顶花密码',key:'钥匙'};
+            sketchText(ms.length?ms.map(x=>names[x]).join('＋'):'普通玩法',x+cw/2,y+88,20);
+            let r=_button(x+55,y+112,165,52,'玩',86050+i,23);r.action='play';r.index=i;uiBTN.creatorBtns.push(r);
+            r=_button(x+260,y+112,165,52,'编辑',86070+i,23);r.action='open';r.index=i;uiBTN.creatorBtns.push(r);
+            r=_button(x+cw-62,y+12,46,46,'×',86090+i,25);r.action='delete';r.index=i;uiBTN.creatorBtns.push(r);
+        });
         const by=H-170,bw=420,bh=100;
         let r=_button(W/2-bw/2,by,bw,bh,'＋ 生成自定义关卡',86100,30);r.action='new';uiBTN.creatorBtns.push(r);
         r=_button(55,45,220,80,'返回首页',86102,27);r.action='back';uiBTN.creatorBtns.push(r);
+        if(_creatorDeleteConfirmIndex>=0&&_creatorLevels[_creatorDeleteConfirmIndex]){
+            const lv=_creatorLevels[_creatorDeleteConfirmIndex];
+            ctx.save();ctx.fillStyle='rgba(0,0,0,.36)';ctx.fillRect(0,0,W,H);ctx.restore();
+            const mw=720,mh=330,mx=(W-mw)/2,my=(H-mh)/2;
+            ctx.save();ctx.fillStyle='#fff';_wonkyRectPath(mx,my,mw,mh,30,86500,3);ctx.fill();ctx.strokeStyle='#000';ctx.lineWidth=7;_wonkyRectPath(mx,my,mw,mh,30,86500,3);ctx.stroke();ctx.restore();
+            sketchBold('确认删除这个关卡吗？',W/2,my+82,38);
+            sketchText(lv.name||'未命名关卡',W/2,my+138,26);
+            r=_button(mx+85,my+205,230,78,'取消',86501,28);r.action='cancel';uiBTN.creatorConfirmBtns.push(r);
+            r=_button(mx+405,my+205,230,78,'确认删除',86502,27);r.action='confirm';uiBTN.creatorConfirmBtns.push(r);
+        }
     }
     function drawCreatorEditor() {
         sketchBold('关卡编辑器',W/2,48,44); sketchText(_creatorDraft.name,W/2,92,23);
@@ -2470,11 +2490,27 @@
             return;
         }
         if (gameState === 'creatorList') {
+            if(_creatorDeleteConfirmIndex>=0){
+                for(const b of uiBTN.creatorConfirmBtns||[])if(inRect(p,b)){
+                    if(b.action==='cancel'){
+                        logStep('creator','level-delete-cancel',{index:_creatorDeleteConfirmIndex});
+                        _creatorDeleteConfirmIndex=-1;
+                    } else if(b.action==='confirm'){
+                        const removed=_creatorLevels.splice(_creatorDeleteConfirmIndex,1)[0];
+                        _saveCreatorLevels();
+                        logStep('creator','level-delete-confirm',{id:removed&&removed.id,name:removed&&removed.name,remaining:_creatorLevels.length});
+                        _creatorDeleteConfirmIndex=-1;
+                    }
+                    return;
+                }
+                return;
+            }
             for(const b of uiBTN.creatorBtns||[]) if(inRect(p,b)){
                 if(b.action==='back') gameState='menu';
                 else if(b.action==='new'){_creatorDraft=_newCreatorDraft();_creatorTool='platform';_creatorMechanics=[];_creatorHistory=[];gameState='creatorEdit';}
                 else if(b.action==='open'){_creatorDraft=JSON.parse(JSON.stringify(_creatorLevels[b.index]));_creatorMechanics=_mechanicsOf(_creatorDraft);_creatorHistory=[];gameState='creatorEdit';}
                 else if(b.action==='play'){_creatorDraft=JSON.parse(JSON.stringify(_creatorLevels[b.index]));_creatorMechanics=_mechanicsOf(_creatorDraft);_playCreatorDraft();}
+                else if(b.action==='delete'){_creatorDeleteConfirmIndex=b.index;logStep('creator','level-delete-request',{id:_creatorLevels[b.index]&&_creatorLevels[b.index].id,index:b.index});}
                 return;
             }
             return;
