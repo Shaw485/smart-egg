@@ -1,12 +1,12 @@
 (() => {
     const canvas = document.getElementById('game-canvas');
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { alpha: false });
 
     // ===== v15.0 永久防缓存：代码版本号 + localStorage 自动校验 + 右上角可视化显示 =====
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 146;   // 跟 index.html 的 ?v=146 保持一致
+    const GAME_CODE_VERSION = 147;   // 跟 index.html 的 ?v=147 保持一致
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
         const last = parseInt(localStorage.getItem(LAST_KNOWN_KEY) || '0', 10);
@@ -41,6 +41,7 @@
     const COMPLETE_INTRO_TOTAL = 90;
 
     let dpr = window.devicePixelRatio || 1;
+    let renderScale = dpr;
     let frameCount = 0;
     let showSuccess = false;
     let successTimer = 0;
@@ -435,11 +436,14 @@
         const isAndroidApp = document.body.classList.contains('android-app');
         const wh = window.innerHeight - (isAndroidApp ? 0 : 48);
         if (isAndroidApp) {
+            // 1920×1080 的手绘 Canvas 在模拟器 WebView 中按设备 DPR 全量绘制非常昂贵。
+            // 0.70 倍内部缓冲仍保持相同逻辑坐标和全屏比例，但像素填充量下降约 51%。
+            renderScale = 0.70;
             canvas.style.width = ww + 'px';
             canvas.style.height = wh + 'px';
-            canvas.width = Math.round(W * dpr);
-            canvas.height = Math.round(H * dpr);
-            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            canvas.width = Math.round(W * renderScale);
+            canvas.height = Math.round(H * renderScale);
+            ctx.setTransform(renderScale, 0, 0, renderScale, 0, 0);
             return;
         }
         const baseR = W / H;
@@ -449,9 +453,10 @@
         else { cw = ww; ch = cw / baseR; }
         canvas.style.width = cw + 'px';
         canvas.style.height = ch + 'px';
-        canvas.width = Math.round(W * dpr);
-        canvas.height = Math.round(H * dpr);
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        renderScale = Math.min(dpr, 1.25);
+        canvas.width = Math.round(W * renderScale);
+        canvas.height = Math.round(H * renderScale);
+        ctx.setTransform(renderScale, 0, 0, renderScale, 0, 0);
     }
     window.addEventListener('resize', resize);
 
@@ -545,7 +550,7 @@
     }
 
     function drawGrid() {
-        // 参考截图：约 48px 的浅灰方格，每四格加一条略明显的主网格。
+        // 直接绘制比离屏 Canvas 拷贝更兼容安卓模拟器的 Skia OpenGL 管线。
         ctx.fillStyle = '#F7F7F7';
         ctx.fillRect(0, 0, W, H);
         const step = 48;

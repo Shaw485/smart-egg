@@ -10,4 +10,4 @@ if "$SMART_EGG_SDK/platform-tools/adb" devices | grep -q '^emulator-'; then
 fi
 
 "$SMART_EGG_SDK/emulator/emulator" "@$SMART_EGG_AVD" -gpu host >/tmp/smart-egg-emulator.log 2>&1 &
-echo "已启动 $SMART_EGG_AVD；首次进入请点击系统全屏说明中的 Got it。"
+echo "已启动 ${SMART_EGG_AVD}；首次进入请点击系统全屏说明中的 Got it。"
