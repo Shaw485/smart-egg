@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 147;   // 跟 index.html 的 ?v=147 保持一致
+    const GAME_CODE_VERSION = 148;   // 跟 index.html 的 ?v=148 保持一致
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
         const last = parseInt(localStorage.getItem(LAST_KNOWN_KEY) || '0', 10);
@@ -89,6 +89,9 @@
     let _creatorHistory = [];
     let _creatorSavedUntil = 0;
     let _creatorDeleteConfirmIndex = -1;
+    let _creatorBindingMode = false;
+    const _heldMovingTargets = new Map();
+    let _mouseMovingTarget = null;
     function _mechanicsOf(lv) {
         if(!lv)return [];
         if(Array.isArray(lv.mechanics))return lv.mechanics.filter(x=>x&&x!=='normal');
@@ -99,6 +102,35 @@
         return result;
     }
     function _hasMechanic(name) { return _mechanicsOf(levelData).includes(name); }
+    function _isMovingHeld(obj) { return Array.from(_heldMovingTargets.values()).includes(obj) || _mouseMovingTarget === obj; }
+    function _movingTargets() {
+        if (!levelData) return [];
+        const out=[];
+        for(const d of levelData.doors||[])if(d.hold_to_stop)out.push({kind:'door',obj:d,w:d.w||150,h:d.h||210});
+        for(const p of levelData.platforms||[])if(p.hold_to_stop)out.push({kind:'platform',obj:p,w:p.w||260,h:p.h||52});
+        for(const c of crates)if(c.hold_to_stop)out.push({kind:'crate',obj:c,w:c.w||130,h:c.h||140});
+        for(const k of keyItems)if(k.hold_to_stop&&k.state!=='collected')out.push({kind:'key',obj:k,w:90,h:90});
+        for(const q of _questionBlocks)if(q.hold_to_stop)out.push({kind:'question',obj:q,w:q.w||105,h:q.h||105});
+        return out;
+    }
+    function _movingTargetAt(p) {
+        for(const t of _movingTargets().reverse())if(inRect(p,{x:t.obj.x-t.w/2-18,y:t.obj.y-t.h/2-18,w:t.w+36,h:t.h+36}))return t;
+        return null;
+    }
+    function _updateMovingTargets(dt) {
+        if(!_hasMechanic('hold_to_stop'))return;
+        for(const t of _movingTargets()){
+            const o=t.obj;
+            if(o._moveBaseY==null)o._moveBaseY=o.y;
+            if(_isMovingHeld(o))continue;
+            if(Math.abs(player.x-o.x)<540){
+                const dir=o.x>=player.x?1:-1;
+                o.x+=dir*MOVE_SPEED*dt;
+                o.x=Math.max(t.w/2+16,Math.min(W-t.w/2-16,o.x));
+                o.y=o._moveBaseY+Math.max(-190,Math.min(80,player.y-levelData.spawn.y));
+            } else if(Math.abs(o.y-o._moveBaseY)>1) o.y+=(o._moveBaseY-o.y)*Math.min(1,dt*9);
+        }
+    }
 
     // 暴露调试接口到 window
     window.__debug = {
@@ -393,7 +425,7 @@
             id: c.id || ('crate_' + i),
             x: c.x, y: c.y, w: c.w || 130, h: c.h || 140,
             spawnX: c.x, spawnY: c.y,
-            vy: 0, onGround: false
+            vy: 0, onGround: false, hold_to_stop: !!c.hold_to_stop
         }));
     }
 
@@ -402,12 +434,13 @@
         keyItems = (levelData && levelData.keys || []).map((k, i) => ({
             id: k.id || ('key_' + i), x: k.x, y: k.y,
             startX: k.x, startY: k.y, targetDoor: k.target_door,
-            state: 'idle', flyT: 0
+            state: 'idle', flyT: 0, hold_to_stop: !!k.hold_to_stop
         }));
     }
 
     function updateKeys(dt) {
         for (const k of keyItems) {
+            if (k.hold_to_stop && _isMovingHeld(k)) continue;
             if (k.state === 'idle') {
                 const hit = rectVsRect(player.x - HALF_W, player.y - HALF_H, HALF_W * 2, HALF_H * 2,
                                        k.x - 42, k.y - 42, 84, 84);
@@ -1105,6 +1138,7 @@
             doors_count: levelData ? (levelData.doors||[]).length : 0
         });
 
+        _updateMovingTargets(dt);
         // ② 进门判定（playing状态下才检查，命中后立刻冻结+return）
         const PLAYER_HALF_AREA = HALF_W * 2 * HALF_H * 2 * 0.5;
         // v4.9.7a E类：门碰撞日志（每个门每帧 overlap 详情，排查"蛋在门口没触发过关"最关键）
@@ -1144,12 +1178,13 @@
             const doorLocked = !!d.locked && !unlockedDoors.has(d.id);
             const knockGateOpen = !_hasMechanic('knock_twice') || _validKnockCount >= 2;
             const passwordGateOpen = !_hasMechanic('flower_password') || _passwordSolved;
+            const movingGateOpen = !_hasMechanic('hold_to_stop') || !d.hold_to_stop || _isMovingHeld(d);
             if (d.is_goal && _hasMechanic('flower_password') && !_passwordSolved && performance.now() >= _passwordDismissUntil && overlap >= PLAYER_HALF_AREA) {
                 _passwordVisible = true; player.vx = 0; input.left = false; input.right = false;
                 logStep('puzzle','password-panel-open',{input:_passwordInput, revealed:_questionBlocks.map(b=>b.revealed)});
                 return;
             }
-            if (d.is_goal && !doorLocked && knockGateOpen && passwordGateOpen && overlap >= PLAYER_HALF_AREA) {
+            if (d.is_goal && !doorLocked && knockGateOpen && passwordGateOpen && movingGateOpen && overlap >= PLAYER_HALF_AREA) {
                 // v19.0 简化阻断：只阻断「倒计时进行中（_goalHitStartMs>0）」的重复触发
                 //   v18 阻断了 _goalHitJumped=true（上一次已经跳完的标志）→ 但跳完后下一关进入前，loadLevelAndStart 会清零这个标志
                 //   双重保险：这里只看「现在是否在倒计时中」→ 更安全（即便 loadLevel 清零遗漏也不会卡 goal-hit）
@@ -1258,6 +1293,7 @@
         const plats = levelData.platforms || [];
         // 木箱重力与平台碰撞。木箱可坠落，重开关卡时由 JSON 初始位置恢复。
         for (const c of crates) {
+            if(c.hold_to_stop&&_isMovingHeld(c)){c.vy=0;continue;}
             if (levelData.no_fall) c.x = Math.max(c.w / 2, Math.min(W - c.w / 2, c.x));
             c.vy = Math.min(MAX_FALL, c.vy + GRAVITY * dt);
             c.y += c.vy * dt;
@@ -2203,8 +2239,16 @@
         logStep('creator','undo',{remaining_steps:_creatorHistory.length});
     }
     function _toggleCreatorMechanic(kind) {
+        if(kind==='hold_to_stop'){
+            if(!_creatorMechanics.includes(kind))_creatorMechanics.push(kind);
+            _creatorDraft.mechanics=[..._creatorMechanics];_creatorBindingMode=true;
+            logStep('creator','moving-binding-mode-open',{});return;
+        }
         _pushCreatorHistory();
-        if(kind==='normal')_creatorMechanics=[];
+        if(kind==='normal'){
+            _creatorMechanics=[];_creatorBindingMode=false;
+            for(const o of [...(_creatorDraft.platforms||[]),...(_creatorDraft.doors||[]),...(_creatorDraft.crates||[]),...(_creatorDraft.keys||[]),...(_creatorDraft.question_blocks||[])])delete o.hold_to_stop;
+        }
         else if(_creatorMechanics.includes(kind))_creatorMechanics=_creatorMechanics.filter(x=>x!==kind);
         else _creatorMechanics.push(kind);
         _creatorDraft.mechanics=[..._creatorMechanics];_creatorDraft.mechanic=undefined;_creatorDraft.type='custom';
@@ -2218,7 +2262,7 @@
         if(_creatorMechanics.includes('key')){
             if(!(_creatorDraft.keys||[]).length)_creatorDraft.keys=[{id:'custom_key',x:960,y:790,target_door:'custom_goal'}];
         }
-        const labels={double_jump:'连续跳两次',knock_twice:'走到门前敲门两次',flower_password:'顶出花朵并记住密码',key:'找到钥匙'};
+        const labels={double_jump:'连续跳两次',knock_twice:'走到门前敲门两次',flower_password:'顶出花朵并记住密码',key:'找到钥匙',hold_to_stop:'按住会动的元素'};
         _creatorDraft.description.hint_l1=_creatorMechanics.length?_creatorMechanics.map(x=>labels[x]).join('，')+'。':'找到办法进入终点门。';
         const gd=_creatorDraft.doors.find(d=>d.is_goal); if(gd)gd.locked=_creatorMechanics.includes('key');
         logStep('creator','mechanic-toggle',{changed:kind,mechanics:_creatorMechanics});
@@ -2233,7 +2277,7 @@
             const x=startX+(i%cols)*(cw+gap),y=235+Math.floor(i/cols)*(ch+35);
             ctx.save();ctx.fillStyle='#fff';_wonkyRectPath(x,y,cw,ch,22,86000+i,2);ctx.fill();ctx.strokeStyle='#000';ctx.lineWidth=4;_wonkyRectPath(x,y,cw,ch,22,86000+i,2);ctx.stroke();ctx.restore();
             sketchBold(lv.name||('自定义关卡 '+(i+1)),x+cw/2,y+48,32);
-            const ms=_mechanicsOf(lv),names={double_jump:'多跳',knock_twice:'敲门',flower_password:'顶花密码',key:'钥匙'};
+            const ms=_mechanicsOf(lv),names={double_jump:'多跳',knock_twice:'敲门',flower_password:'顶花密码',key:'钥匙',hold_to_stop:'会动'};
             sketchText(ms.length?ms.map(x=>names[x]).join('＋'):'普通玩法',x+cw/2,y+88,20);
             let r=_button(x+55,y+112,165,52,'玩',86050+i,23);r.action='play';r.index=i;uiBTN.creatorBtns.push(r);
             r=_button(x+260,y+112,165,52,'编辑',86070+i,23);r.action='open';r.index=i;uiBTN.creatorBtns.push(r);
@@ -2259,14 +2303,17 @@
         tools.forEach((it,i)=>{const r=_button(45+i*190,120,170,68,it[1],86200+i,23);r.action='tool';r.tool=it[0];if(_creatorTool===it[0]){ctx.strokeStyle='#000';ctx.lineWidth=7;ctx.strokeRect(r.x+5,r.y+5,r.w-10,r.h-10);}uiBTN.editorTools.push(r);});
         [['save','保存'],['play','试玩'],['undo','撤销'],['back','返回']].forEach((it,i)=>{const r=_button(W-585+i*145,120,132,68,it[1],86300+i,21);r.action=it[0];uiBTN.editorTools.push(r);});
         sketchText('特殊玩法：',55,230,24,'left');
-        const mechanics=[['normal','普通'],['double_jump','多跳'],['knock_twice','敲门'],['flower_password','顶花'],['key','钥匙']];
-        mechanics.forEach((it,i)=>{const r=_button(210+i*210,198,185,65,it[1],86400+i,23);r.action='mechanic';r.mechanic=it[0];const selected=it[0]==='normal'?!_creatorMechanics.length:_creatorMechanics.includes(it[0]);if(selected){ctx.strokeStyle='#000';ctx.lineWidth=7;ctx.strokeRect(r.x+5,r.y+5,r.w-10,r.h-10);}uiBTN.editorTools.push(r);});
+        const mechanics=[['normal','普通'],['double_jump','多跳'],['knock_twice','敲门'],['flower_password','顶花'],['key','钥匙'],['hold_to_stop','会动']];
+        mechanics.forEach((it,i)=>{const r=_button(180+i*190,198,165,65,it[1],86400+i,22);r.action='mechanic';r.mechanic=it[0];const selected=it[0]==='normal'?!_creatorMechanics.length:_creatorMechanics.includes(it[0]);if(selected){ctx.strokeStyle='#000';ctx.lineWidth=7;ctx.strokeRect(r.x+5,r.y+5,r.w-10,r.h-10);}uiBTN.editorTools.push(r);});
         ctx.save();ctx.strokeStyle='rgba(0,0,0,.35)';ctx.setLineDash([12,10]);ctx.strokeRect(45,290,W-90,590);ctx.restore();
         for(const p of _creatorDraft.platforms){const x=p.x-p.w/2,y=p.y-p.h/2;ctx.fillStyle='#fff';ctx.fillRect(x,y,p.w,p.h);ctx.strokeStyle='#000';ctx.lineWidth=5;ctx.strokeRect(x,y,p.w,p.h);}
         for(const d of _creatorDraft.doors){ctx.strokeStyle='#000';ctx.lineWidth=6;ctx.strokeRect(d.x-d.w/2,d.y-d.h/2,d.w,d.h);sketchText(d.is_goal?'终':'生',d.x,d.y,28);}
         for(const c of _creatorDraft.crates||[]){ctx.strokeStyle='#000';ctx.lineWidth=5;ctx.strokeRect(c.x-c.w/2,c.y-c.h/2,c.w,c.h);sketchText('箱',c.x,c.y,24);}
         for(const k of _creatorDraft.keys||[]){sketchBold('🔑',k.x,k.y,35);}
         for(const q of _creatorDraft.question_blocks||[]){ctx.strokeStyle='#000';ctx.lineWidth=5;ctx.strokeRect(q.x-q.w/2,q.y-q.h/2,q.w,q.h);sketchBold('?',q.x,q.y+5,42);}
+        const bound=[...(_creatorDraft.platforms||[]),...(_creatorDraft.doors||[]),...(_creatorDraft.crates||[]),...(_creatorDraft.keys||[]),...(_creatorDraft.question_blocks||[])].filter(x=>x.hold_to_stop);
+        for(const o of bound)sketchBold('≋',o.x,o.y-(o.h||90)/2-24,30);
+        if(_creatorBindingMode){ctx.save();ctx.fillStyle='rgba(0,0,0,.42)';ctx.fillRect(0,0,W,H);ctx.restore();sketchBold('选择要添加“会动，按住不动”的元素',W/2,335,38,'center','#fff');sketchText('带 ≋ 的元素已绑定；再次选择可取消',W/2,382,24,'center',false,'#fff');}
         sketchText('选择上方组件，再点击虚线区域放置；平台会自动生成合适尺寸。',W/2,925,25);
     }
     function _playCreatorDraft() {
@@ -2527,8 +2574,8 @@
             }
             for(const b of uiBTN.creatorBtns||[]) if(inRect(p,b)){
                 if(b.action==='back') gameState='menu';
-                else if(b.action==='new'){_creatorDraft=_newCreatorDraft();_creatorTool='platform';_creatorMechanics=[];_creatorHistory=[];gameState='creatorEdit';}
-                else if(b.action==='open'){_creatorDraft=JSON.parse(JSON.stringify(_creatorLevels[b.index]));_creatorMechanics=_mechanicsOf(_creatorDraft);_creatorHistory=[];gameState='creatorEdit';}
+                else if(b.action==='new'){_creatorDraft=_newCreatorDraft();_creatorTool='platform';_creatorMechanics=[];_creatorHistory=[];_creatorBindingMode=false;gameState='creatorEdit';}
+                else if(b.action==='open'){_creatorDraft=JSON.parse(JSON.stringify(_creatorLevels[b.index]));_creatorMechanics=_mechanicsOf(_creatorDraft);_creatorHistory=[];_creatorBindingMode=false;gameState='creatorEdit';}
                 else if(b.action==='play'){_creatorDraft=JSON.parse(JSON.stringify(_creatorLevels[b.index]));_creatorMechanics=_mechanicsOf(_creatorDraft);_playCreatorDraft();}
                 else if(b.action==='delete'){_creatorDeleteConfirmIndex=b.index;logStep('creator','level-delete-request',{id:_creatorLevels[b.index]&&_creatorLevels[b.index].id,index:b.index});}
                 return;
@@ -2536,6 +2583,12 @@
             return;
         }
         if (gameState === 'creatorEdit') {
+            if(_creatorBindingMode){
+                const groups=[...(_creatorDraft.doors||[]).map(obj=>({obj,w:obj.w||150,h:obj.h||210})),...(_creatorDraft.platforms||[]).map(obj=>({obj,w:obj.w||260,h:obj.h||52})),...(_creatorDraft.crates||[]).map(obj=>({obj,w:obj.w||130,h:obj.h||140})),...(_creatorDraft.keys||[]).map(obj=>({obj,w:90,h:90})),...(_creatorDraft.question_blocks||[]).map(obj=>({obj,w:obj.w||105,h:obj.h||105}))];
+                const hit=groups.reverse().find(t=>inRect(p,{x:t.obj.x-t.w/2-20,y:t.obj.y-t.h/2-20,w:t.w+40,h:t.h+40}));
+                if(hit){_pushCreatorHistory();hit.obj.hold_to_stop=!hit.obj.hold_to_stop;_creatorBindingMode=false;logStep('creator','moving-element-binding',{id:hit.obj.id||hit.obj.kind,bound:hit.obj.hold_to_stop});}
+                return;
+            }
             for(const b of uiBTN.editorTools||[]) if(inRect(p,b)){
                 if(b.action==='tool') _creatorTool=b.tool;
                 else if(b.action==='mechanic') _toggleCreatorMechanic(b.mechanic);
@@ -2704,8 +2757,9 @@
     }
     function handleUp() {
         pressInput('left', false); pressInput('right', false); pressInput('jump', false);
+        _mouseMovingTarget=null;
     }
-    canvas.addEventListener('mousedown', e => handleDown(getMousePos(e)));
+    canvas.addEventListener('mousedown', e => {const p=getMousePos(e),t=gameState==='playing'?_movingTargetAt(p):null;if(t){_mouseMovingTarget=t.obj;logStep('input','moving-element-hold',{kind:t.kind,id:t.obj.id,pointer:'mouse'});}else handleDown(p);});
     canvas.addEventListener('mouseup',   () => handleUp());
     canvas.addEventListener('mouseleave',() => handleUp());
     const _activeTouchControls = new Map();
@@ -2724,6 +2778,8 @@
         _ensureAudio(); _startBgm();
         for (const touch of Array.from(e.changedTouches)) {
             const p = _touchPos(touch);
+            const moving = gameState === 'playing' ? _movingTargetAt(p) : null;
+            if(moving){_heldMovingTargets.set(touch.identifier,moving.obj);logStep('input','moving-element-hold',{kind:moving.kind,id:moving.obj.id,pointer:touch.identifier});continue;}
             const control = gameState === 'playing' ? _controlAt(p) : null;
             if (control) {
                 _activeTouchControls.set(touch.identifier, control);
@@ -2738,6 +2794,7 @@
     function _releaseChangedTouches(e, reason) {
         e.preventDefault();
         for (const touch of Array.from(e.changedTouches)) {
+            if(_heldMovingTargets.has(touch.identifier)){const obj=_heldMovingTargets.get(touch.identifier);_heldMovingTargets.delete(touch.identifier);logStep('input','moving-element-release',{id:obj&&obj.id,pointer:touch.identifier,reason});continue;}
             const control = _activeTouchControls.get(touch.identifier);
             if (!control) continue;
             _activeTouchControls.delete(touch.identifier);
@@ -2863,6 +2920,7 @@
     function loadLevelAndStart() {
         showSuccess = false; successTimer = SUCCESS_TOTAL; doorOpenT = 0; showDead = false;
         _validKnockCount = 0;
+        _heldMovingTargets.clear();_mouseMovingTarget=null;
         _knockEffects = [];
         _passwordVisible = false; _passwordInput = ''; _passwordSolved = false;
         _completeTimer = 0;
