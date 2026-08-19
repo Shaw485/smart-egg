@@ -5,6 +5,7 @@
   "type": "moving_door",
   "mechanics": ["hold_to_stop"],
   "no_fall": true,
+  "infinite_horizontal": true,
   "description": {
     "定位": "触控脑洞关。目标门会模仿玩家移动和跳跃，并始终逃开。",
     "正解": "用一根手指持续按住目标门，同时用另一根手指控制人物走到门前。",
@@ -12,7 +13,7 @@
   },
   "world_size": { "w": 1920, "h": 1080 },
   "spawn": { "x": 420, "y": 810 },
-  "platforms": [{ "x": 960, "y": 1090, "w": 1920, "h": 440, "kind": "ground" }],
+  "platforms": [{ "x": 500000, "y": 1090, "w": 1000000, "h": 440, "kind": "ground" }],
   "doors": [
     { "id": "entry_door_6", "x": 300, "y": 765, "w": 150, "h": 210, "is_goal": false },
     { "id": "goal_door_6", "x": 1450, "y": 765, "w": 150, "h": 210, "is_goal": true, "hold_to_stop": true }
