@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 150;   // 跟 index.html 的 ?v=150 保持一致
+    const GAME_CODE_VERSION = 151;   // 跟 index.html 的 ?v=151 保持一致
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
         const last = parseInt(localStorage.getItem(LAST_KNOWN_KEY) || '0', 10);
@@ -133,10 +133,12 @@
                 o._runLift+=(0-o._runLift)*Math.min(1,dt*14);
                 continue;
             }
-            if(Math.abs(player.x-o.x)<540){
+            if(Math.abs(player.x-o.x)<540)o._moveActivated=true;
+            if(o._moveActivated){
                 // 逃跑元素模仿人物当前的横向方向，而不是永远朝元素所在侧逃跑。
                 // 这样人物左跑时门也左跑，右跑时二者同速，可持续追逐。
-                const dir=player.moveDir||0;
+                // 直接读取本帧输入，避免 updateMovingTargets 早于 moveDir 更新造成方向迟滞。
+                const dir=(input.right?1:0)-(input.left?1:0);
                 o._isRunning=dir!==0;
                 o._runLift+=((o._isRunning?22:0)-o._runLift)*Math.min(1,dt*14);
                 if(dir!==0)o.x+=dir*MOVE_SPEED*dt;
