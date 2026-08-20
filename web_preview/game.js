@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 154;   // 跟 index.html 的 ?v=154 保持一致
+    const GAME_CODE_VERSION = 155;   // 跟 index.html 的 ?v=155 保持一致
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
         const last = parseInt(localStorage.getItem(LAST_KNOWN_KEY) || '0', 10);
@@ -95,6 +95,7 @@
     let _cameraX = 0, _cameraY = 0;
     let _creatorCameraX = 0, _creatorCameraY = 0;
     let _creatorMapOverview = false;
+    let _creatorSelected = null;
     let _creatorRangeNotice = '', _creatorRangeNoticeUntil = 0;
     let _creatorShareCode = '';
     let _creatorShareIndex = -1;
@@ -2299,6 +2300,29 @@
         _creatorMechanics=_mechanicsOf(_creatorDraft);
         logStep('creator','undo',{remaining_steps:_creatorHistory.length});
     }
+    function _creatorEditableTargets() {
+        if(!_creatorDraft)return [];
+        return [
+            ...(_creatorDraft.doors||[]).map(obj=>({obj,w:obj.w||150,h:obj.h||210,kind:obj.is_goal?'goal':'spawn'})),
+            ...(_creatorDraft.platforms||[]).filter(obj=>obj.kind!=='ground').map(obj=>({obj,w:obj.w||260,h:obj.h||52,kind:'platform'})),
+            ...(_creatorDraft.crates||[]).map(obj=>({obj,w:obj.w||130,h:obj.h||140,kind:'crate'})),
+            ...(_creatorDraft.keys||[]).map(obj=>({obj,w:90,h:90,kind:'key'})),
+            ...(_creatorDraft.question_blocks||[]).map(obj=>({obj,w:obj.w||105,h:obj.h||105,kind:'question'}))
+        ];
+    }
+    function _creatorTargetAt(worldPoint) {
+        return _creatorEditableTargets().reverse().find(t=>inRect(worldPoint,{x:t.obj.x-t.w/2-20,y:t.obj.y-t.h/2-20,w:t.w+40,h:t.h+40}))||null;
+    }
+    function _moveCreatorSelection(x,y) {
+        if(!_creatorSelected)return;
+        _pushCreatorHistory();
+        const t=_creatorSelected,o=t.obj,from={x:o.x,y:o.y};
+        o.x=x;o.y=y;
+        if(t.kind==='spawn'){
+            _creatorDraft.spawn={x,y:y+45};
+        }
+        logStep('creator','element-move',{kind:t.kind,id:o.id||o.kind,from,to:{x,y}});
+    }
     function _toggleCreatorMechanic(kind) {
         if(kind==='hold_to_stop'){
             if(!_creatorMechanics.includes(kind))_creatorMechanics.push(kind);
@@ -2482,8 +2506,8 @@
     }
     function drawCreatorEditor() {
         sketchBold('关卡编辑器',W/2,48,44); sketchText(_creatorDraft.name,W/2,92,23);
-        const tools=[['platform','平台'],['spawn','出生门'],['goal','终点门'],['crate','木箱'],['key','钥匙']];uiBTN.editorTools=[];
-        tools.forEach((it,i)=>{const r=_button(45+i*190,120,170,68,it[1],86200+i,23);r.action='tool';r.tool=it[0];if(_creatorTool===it[0]){ctx.strokeStyle='#000';ctx.lineWidth=7;ctx.strokeRect(r.x+5,r.y+5,r.w-10,r.h-10);}uiBTN.editorTools.push(r);});
+        const tools=[['select','选择'],['platform','平台'],['spawn','出生门'],['goal','终点门'],['crate','木箱'],['key','钥匙']];uiBTN.editorTools=[];
+        tools.forEach((it,i)=>{const r=_button(38+i*158,120,142,68,it[1],86200+i,21);r.action='tool';r.tool=it[0];if(_creatorTool===it[0]){ctx.strokeStyle='#000';ctx.lineWidth=7;ctx.strokeRect(r.x+5,r.y+5,r.w-10,r.h-10);}uiBTN.editorTools.push(r);});
         [['save','保存'],['play','试玩'],['undo','撤销'],['back','返回']].forEach((it,i)=>{const r=_button(W-585+i*145,120,132,68,it[1],86300+i,21);r.action=it[0];uiBTN.editorTools.push(r);});
         sketchText('特殊玩法：',55,230,24,'left');
         const mechanics=[['normal','普通'],['double_jump','多跳'],['knock_twice','敲门'],['flower_password','顶花'],['key','钥匙'],['hold_to_stop','会动']];
@@ -2503,11 +2527,15 @@
         for(const q of _creatorDraft.question_blocks||[]){ctx.strokeStyle='#000';ctx.lineWidth=5;ctx.strokeRect(q.x-q.w/2,q.y-q.h/2,q.w,q.h);sketchBold('?',q.x,q.y+5,42);}
         const bound=[...(_creatorDraft.platforms||[]),...(_creatorDraft.doors||[]),...(_creatorDraft.crates||[]),...(_creatorDraft.keys||[]),...(_creatorDraft.question_blocks||[])].filter(x=>x.hold_to_stop);
         for(const o of bound)sketchBold('≋',o.x,o.y-(o.h||90)/2-24,30);
+        if(_creatorSelected&&_creatorTool==='select'){
+            const t=_creatorSelected,o=t.obj;
+            ctx.save();ctx.strokeStyle='#efb400';ctx.lineWidth=9;ctx.setLineDash([18,10]);ctx.strokeRect(o.x-t.w/2-14,o.y-t.h/2-14,t.w+28,t.h+28);ctx.restore();
+        }
         ctx.restore();
         const pans=[['pan-left','← 左移'],['pan-origin','回原点'],['pan-right','右移 →'],['pan-up','↑ 上移'],['pan-down','下移 ↓']];
         pans.forEach((it,i)=>{const r=_button(445+i*210,900,185,58,it[1],86520+i,20);r.action=it[0];uiBTN.editorTools.push(r);});
         if(_creatorBindingMode){ctx.save();ctx.fillStyle='rgba(0,0,0,.42)';ctx.fillRect(0,0,W,H);ctx.restore();sketchBold('选择要添加“会动，按住不动”的元素',W/2,335,38,'center','#fff');sketchText('带 ≋ 的元素已绑定；再次选择可取消',W/2,382,24,'center',false,'#fff');}
-        sketchText('移动视野后可在上方、左侧、右侧继续摆放元素。',W/2,995,23);
+        sketchText(_creatorTool==='select'?'选择/移动：先点已有元素，再点目标位置。':'移动视野后可在上方、左侧、右侧继续摆放元素。',W/2,995,23);
     }
     function _playCreatorDraft() {
         _playingCustom=true; levelData=JSON.parse(JSON.stringify(_creatorDraft)); currentLevelIndex=-1;
@@ -2797,7 +2825,7 @@
                 return;
             }
             for(const b of uiBTN.editorTools||[]) if(inRect(p,b)){
-                if(b.action==='tool') _creatorTool=b.tool;
+                if(b.action==='tool'){_creatorTool=b.tool;if(b.tool!=='select')_creatorSelected=null;}
                 else if(b.action==='mechanic') _toggleCreatorMechanic(b.mechanic);
                 else if(b.action==='map-overview'){_creatorMapOverview=true;_creatorBindingMode=false;}
                 else if(b.action==='edge')_changeCreatorMapEdge(b.edge,b.delta);
@@ -2815,6 +2843,12 @@
             }
             if(p.x>45&&p.x<W-45&&p.y>350&&p.y<880){
                 const wx=Math.round(p.x+_creatorCameraX),wy=Math.round(p.y+_creatorCameraY);
+                if(_creatorTool==='select'){
+                    const hit=_creatorTargetAt({x:wx,y:wy});
+                    if(hit){_creatorSelected=hit;logStep('creator','element-select',{kind:hit.kind,id:hit.obj.id||hit.obj.kind,x:hit.obj.x,y:hit.obj.y});}
+                    else if(_creatorSelected)_moveCreatorSelection(wx,wy);
+                    return;
+                }
                 _pushCreatorHistory();
                 if(_creatorTool==='platform') _creatorDraft.platforms.push({x:wx,y:wy,w:260,h:52,kind:'step_custom'});
                 else if(_creatorTool==='spawn') {_creatorDraft.spawn={x:wx,y:wy};_creatorDraft.doors=_creatorDraft.doors.filter(d=>d.is_goal);_creatorDraft.doors.unshift({id:'custom_entry',x:wx,y:wy-45,w:150,h:210,is_goal:false});}
