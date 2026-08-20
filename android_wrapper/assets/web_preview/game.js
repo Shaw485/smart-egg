@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 149;   // 跟 index.html 的 ?v=149 保持一致
+    const GAME_CODE_VERSION = 150;   // 跟 index.html 的 ?v=150 保持一致
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
         const last = parseInt(localStorage.getItem(LAST_KNOWN_KEY) || '0', 10);
@@ -127,13 +127,27 @@
         for(const t of _movingTargets()){
             const o=t.obj;
             if(o._moveBaseY==null)o._moveBaseY=o.y;
-            if(_isMovingHeld(o))continue;
+            if(o._runLift==null)o._runLift=0;
+            if(_isMovingHeld(o)){
+                o._isRunning=false;
+                o._runLift+=(0-o._runLift)*Math.min(1,dt*14);
+                continue;
+            }
             if(Math.abs(player.x-o.x)<540){
-                const dir=o.x>=player.x?1:-1;
-                o.x+=dir*MOVE_SPEED*dt;
+                // 逃跑元素模仿人物当前的横向方向，而不是永远朝元素所在侧逃跑。
+                // 这样人物左跑时门也左跑，右跑时二者同速，可持续追逐。
+                const dir=player.moveDir||0;
+                o._isRunning=dir!==0;
+                o._runLift+=((o._isRunning?22:0)-o._runLift)*Math.min(1,dt*14);
+                if(dir!==0)o.x+=dir*MOVE_SPEED*dt;
                 if(!levelData.infinite_horizontal)o.x=Math.max(t.w/2+16,Math.min(W-t.w/2-16,o.x));
-                o.y=o._moveBaseY+Math.max(-190,Math.min(80,player.y-levelData.spawn.y));
-            } else if(Math.abs(o.y-o._moveBaseY)>1) o.y+=(o._moveBaseY-o.y)*Math.min(1,dt*9);
+                // 完整复制人物的连续纵向轨迹，去掉顶部限幅，避免门在跳跃顶点停住。
+                o.y=o._moveBaseY+(player.y-levelData.spawn.y)-o._runLift;
+            } else {
+                o._isRunning=false;
+                o._runLift+=(0-o._runLift)*Math.min(1,dt*14);
+                if(Math.abs(o.y-o._moveBaseY)>1)o.y+=(o._moveBaseY-o.y)*Math.min(1,dt*9);
+            }
         }
     }
 
@@ -1440,7 +1454,8 @@
         const k = Math.min(1, dt * 10);
         player.sH = player.sH + (tgtH - player.sH) * k;
         player.sF = player.sF + (tgtF - player.sF) * k;
-        const targetCamera=levelData.infinite_horizontal?Math.max(0,player.x-W*0.38):0;
+        // 无限关卡以出生点为镜头原点，左右移动都保持人物在稳定的屏幕位置。
+        const targetCamera=levelData.infinite_horizontal?player.x-levelData.spawn.x:0;
         _cameraX+=(targetCamera-_cameraX)*Math.min(1,dt*7);
 
         // 跌落致死判定：只有没成功时才检查（showSuccess时永远不会触发死亡）
@@ -1564,11 +1579,22 @@
                 ctx.stroke();
                 ctx.restore();
                 // 4) 顶部表面线上散列小草对
-                const grassCount = Math.floor(w / 110);
-                for (let gi = 0; gi < grassCount; gi++) {
-                    const gx = x + 60 + gi * (w - 120) / (grassCount - 1);
-                    const gy = topLineY;
-                    _drawGrassPair(gx + wobbleStatic(seedBase + 500 + gi, 4), gy, seedBase + 600 + gi * 7);
+                if(levelData.infinite_horizontal){
+                    // 草固定在世界坐标中，镜头追随时会反向滚动，作为持续奔跑的参照物。
+                    const spacing=150;
+                    const first=Math.floor((_cameraX-180)/spacing)*spacing;
+                    const last=_cameraX+W+180;
+                    for(let gx=first;gx<=last;gx+=spacing){
+                        const gi=Math.floor(gx/spacing);
+                        _drawGrassPair(gx+wobbleStatic(seedBase+500+gi,4),topLineY,seedBase+600+gi*7);
+                    }
+                }else{
+                    const grassCount = Math.floor(w / 110);
+                    for (let gi = 0; gi < grassCount; gi++) {
+                        const gx = x + 60 + gi * (w - 120) / (grassCount - 1);
+                        const gy = topLineY;
+                        _drawGrassPair(gx + wobbleStatic(seedBase + 500 + gi, 4), gy, seedBase + 600 + gi * 7);
+                    }
                 }
             } else {
                 // === 台阶：手绘长条胶囊（扁椭圆），两端各一组小草芽 ===
@@ -1741,16 +1767,17 @@
                 ctx.stroke();
                 ctx.restore();
             }
-            // 所有门都有两只手绘小脚；逃跑时交替迈步，按住后立即站稳。
-            ctx.save();
-            ctx.strokeStyle='#000';ctx.lineWidth=6;ctx.lineCap='round';ctx.lineJoin='round';
-            const walking=d.hold_to_stop&&!_isMovingHeld(d)&&gameState==='playing';
-            const step=walking?Math.sin(frameCount*0.28)*10:0;
-            const footY=y+h+20;
-            ctx.beginPath();
-            ctx.moveTo(d.x-w*0.27,y+h-2);ctx.lineTo(d.x-w*0.27+step,footY);ctx.lineTo(d.x-w*0.27-10+step,footY+3);
-            ctx.moveTo(d.x+w*0.27,y+h-2);ctx.lineTo(d.x+w*0.27-step,footY);ctx.lineTo(d.x+w*0.27+10-step,footY+3);
-            ctx.stroke();ctx.restore();
+            // 只有逃跑中的门才长出小脚；门身跑动时上提，脚底保持在地面轮廓上方。
+            if(d.hold_to_stop&&d._isRunning&&d._runLift>18&&!_isMovingHeld(d)&&gameState==='playing'){
+                ctx.save();
+                ctx.strokeStyle='#000';ctx.lineWidth=6;ctx.lineCap='round';ctx.lineJoin='round';
+                const step=Math.sin(frameCount*0.28)*9;
+                const footY=y+h+18;
+                ctx.beginPath();
+                ctx.moveTo(d.x-w*0.27,y+h-2);ctx.lineTo(d.x-w*0.27+step,footY);ctx.lineTo(d.x-w*0.27-9+step,footY+2);
+                ctx.moveTo(d.x+w*0.27,y+h-2);ctx.lineTo(d.x+w*0.27-step,footY);ctx.lineTo(d.x+w*0.27+9-step,footY+2);
+                ctx.stroke();ctx.restore();
+            }
             // 第三关锁门：钥匙到达前显示手绘锁链和挂锁，到达后自动消失。
             if (d.locked && !unlockedDoors.has(d.id)) {
                 ctx.save();
