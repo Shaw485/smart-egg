@@ -18,11 +18,14 @@
     ctx.fillStyle='#ffd990';ctx.beginPath();ctx.arc(W*.76,H*.27,46,0,Math.PI*2);ctx.fill();
     for(let i=0;i<7;i++)mountain(i*W/6,floorY,W*.2,i%2?'#66556f':'#554c68');
     ctx.fillStyle='#394a45';ctx.beginPath();ctx.moveTo(0,floorY);for(let x=0;x<=W;x+=60)ctx.lineTo(x,floorY-32-Math.sin(x*.015)*17);ctx.lineTo(W,H);ctx.lineTo(0,H);ctx.fill();
-    // 新地面：暖色草坡、碎石小路和分层土壤
-    ctx.fillStyle='#78845b';ctx.fillRect(0,floorY,W,H-floorY);ctx.fillStyle='#d7a86b';ctx.fillRect(0,floorY,W,11);ctx.fillStyle='#4e5544';ctx.fillRect(0,floorY+68,W,H-floorY-68);
-    ctx.fillStyle='#a99168';ctx.beginPath();ctx.moveTo(0,H);for(let x=0;x<=W;x+=90)ctx.lineTo(x,floorY+38+Math.sin(x*.012)*13);ctx.lineTo(W,H);ctx.fill();
-    for(let x=18;x<W;x+=70){const sway=Math.sin(x*1.7)*7;line([[x,floorY+3],[x+sway,floorY-14]],'#38483d',3);ctx.fillStyle='#efc56f';ctx.beginPath();ctx.arc(x+sway,floorY-17,3.5,0,7);ctx.fill();}
-    for(let i=0;i<12;i++){const x=(i*137+48)%W,y=floorY+34+(i%3)*24;ctx.fillStyle=i%2?'#786d5d':'#8e7b63';ctx.beginPath();ctx.ellipse(x,y,22+(i%3)*7,8+(i%2)*4,-.08,0,7);ctx.fill();line([[x-13,y],[x+11,y-2]],'#514c47',2);}
+    // 新地面：起伏草甸 + 深色岩土断面 + 根系纹理
+    ctx.fillStyle='#53634b';ctx.fillRect(0,floorY,W,H-floorY);
+    ctx.fillStyle='#77865a';ctx.beginPath();ctx.moveTo(0,H);ctx.lineTo(0,floorY+8);for(let x=0;x<=W;x+=55)ctx.lineTo(x,floorY+8-Math.sin(x*.018)*8);ctx.lineTo(W,H);ctx.closePath();ctx.fill();
+    ctx.fillStyle='#d9b668';ctx.beginPath();ctx.moveTo(0,floorY+8);for(let x=0;x<=W;x+=55)ctx.lineTo(x,floorY+8-Math.sin(x*.018)*8);ctx.lineTo(W,floorY+20);ctx.lineTo(0,floorY+20);ctx.fill();
+    ctx.fillStyle='#414b42';ctx.beginPath();ctx.moveTo(0,H);ctx.lineTo(0,floorY+85);for(let x=0;x<=W;x+=110)ctx.lineTo(x,floorY+73+Math.sin(x*.009)*14);ctx.lineTo(W,H);ctx.closePath();ctx.fill();
+    for(let x=22;x<W;x+=76){const sway=Math.sin(x*1.7)*6;line([[x,floorY+5],[x+sway,floorY-15]],'#34463c',3);ctx.fillStyle='#efc76d';ctx.beginPath();ctx.arc(x+sway,floorY-18,3.5,0,7);ctx.fill();}
+    for(let i=0;i<10;i++){const x=(i*157+52)%W,y=floorY+42+(i%2)*20;line([[x,y-17],[x-8,y],[x+5,y+17]],i%2?'#927b55':'#695f4d',3);}
+    for(let i=0;i<8;i++){const x=(i*181+75)%W,y=H-24-(i%2)*20;ctx.fillStyle=i%2?'#56615a':'#687069';ctx.beginPath();ctx.ellipse(x,y,34,13,-.08,0,7);ctx.fill();}
   }
   function drawDoor(){
     const x=W*.82, h=Math.min(205,H*.32), w=h*.58, y=floorY-h;
@@ -42,16 +45,19 @@
     const run=Math.abs(state.dir),wave=Math.sin(state.time*15)*7*run;
     ctx.fillStyle='#b83f3f';ctx.beginPath();ctx.moveTo(-8,25);ctx.bezierCurveTo(-30-run*22,36-wave,-50-run*34,58-wave*.45,-35-run*26,79-run*18);ctx.quadraticCurveTo(-7-run*17,70+wave*.25,18,68);ctx.closePath();ctx.fill();
     ctx.strokeStyle='#3b3040';ctx.lineWidth=5;ctx.stroke();
-    // body and tunic
+    // 短上衣、腰带与裤子，避免裙摆轮廓
     ctx.fillStyle='#f6d999';ctx.beginPath();ctx.ellipse(0,16,28,30,0,0,7);ctx.fill();ctx.strokeStyle='#173b40';ctx.lineWidth=5;ctx.stroke();
-    ctx.fillStyle='#2d7770';ctx.beginPath();ctx.moveTo(-24,42);ctx.lineTo(26,42);ctx.lineTo(35,82);ctx.lineTo(-30,82);ctx.closePath();ctx.fill();ctx.stroke();
-    // hair and face
-    ctx.fillStyle='#7b4a2b';ctx.beginPath();ctx.arc(-4,3,28,Math.PI,Math.PI*2);ctx.lineTo(22,18);ctx.lineTo(11,12);ctx.lineTo(2,22);ctx.lineTo(-8,12);ctx.lineTo(-22,20);ctx.closePath();ctx.fill();
+    ctx.fillStyle='#2d7770';ctx.beginPath();ctx.moveTo(-23,41);ctx.lineTo(25,41);ctx.lineTo(27,72);ctx.quadraticCurveTo(0,78,-26,72);ctx.closePath();ctx.fill();ctx.stroke();
+    ctx.fillStyle='#d6aa55';ctx.fillRect(-26,67,53,9);ctx.strokeStyle='#173b40';ctx.lineWidth=4;ctx.strokeRect(-26,67,53,9);ctx.fillStyle='#f1cf72';ctx.fillRect(-5,66,12,11);ctx.strokeRect(-5,66,12,11);
+    ctx.fillStyle='#334b52';ctx.beginPath();ctx.moveTo(-22,76);ctx.lineTo(-2,76);ctx.lineTo(-5,88);ctx.lineTo(-24,88);ctx.closePath();ctx.fill();ctx.stroke();ctx.beginPath();ctx.moveTo(2,76);ctx.lineTo(23,76);ctx.lineTo(25,88);ctx.lineTo(5,88);ctx.closePath();ctx.fill();ctx.stroke();
+    // 新发型：短碎发、斜刘海和小侧束
+    ctx.fillStyle='#68432f';ctx.beginPath();ctx.moveTo(-27,8);ctx.quadraticCurveTo(-22,-21,3,-20);ctx.quadraticCurveTo(28,-17,28,7);ctx.lineTo(19,3);ctx.lineTo(13,15);ctx.lineTo(4,7);ctx.lineTo(-4,18);ctx.lineTo(-13,9);ctx.lineTo(-22,17);ctx.closePath();ctx.fill();
+    ctx.beginPath();ctx.ellipse(-26,8,9,18,-.25,0,7);ctx.fill();ctx.beginPath();ctx.moveTo(-25,17);ctx.quadraticCurveTo(-40,28,-30,38);ctx.quadraticCurveTo(-15,31,-20,17);ctx.fill();
     ctx.fillStyle='#173b40';ctx.beginPath();ctx.arc(8,16,3.5,0,7);ctx.fill();
     // 双手与脚使用相同的深色线条
     const armSwing=state.dir?Math.sin(state.time*11)*7:0;
     line([[-23,50],[-42-armSwing,72]],'#263943',6);line([[23,50],[42+armSwing,69]],'#263943',6);
-    const stride=state.dir?Math.sin(state.time*11)*8:0;line([[-12,80],[-14+stride,99]],'#173b40',6);line([[17,80],[18-stride,99]],'#173b40',6);
+    const stride=state.dir?Math.sin(state.time*11)*8:0;line([[-14,87],[-15+stride,104]],'#173b40',6);line([[15,87],[17-stride,104]],'#173b40',6);
     ctx.restore();
   }
   function drawMotes(dt){
