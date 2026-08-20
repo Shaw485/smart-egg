@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 153;   // 跟 index.html 的 ?v=153 保持一致
+    const GAME_CODE_VERSION = 154;   // 跟 index.html 的 ?v=154 保持一致
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
         const last = parseInt(localStorage.getItem(LAST_KNOWN_KEY) || '0', 10);
@@ -94,6 +94,8 @@
     let _mouseMovingTarget = null;
     let _cameraX = 0, _cameraY = 0;
     let _creatorCameraX = 0, _creatorCameraY = 0;
+    let _creatorMapOverview = false;
+    let _creatorRangeNotice = '', _creatorRangeNoticeUntil = 0;
     let _creatorShareCode = '';
     let _creatorShareIndex = -1;
     let _creatorImportPreview = null;
@@ -107,6 +109,11 @@
         return result;
     }
     function _hasMechanic(name) { return _mechanicsOf(levelData).includes(name); }
+    function _mapExtent(lv){
+        const e=(lv&&lv.map_extent)||{};
+        return {left:Math.max(0,Math.floor(e.left||0)),right:Math.max(0,Math.floor(e.right||0)),up:Math.max(0,Math.floor(e.up||0))};
+    }
+    function _mapBounds(lv){const e=_mapExtent(lv);return{minX:-e.left*W,maxX:(e.right+1)*W,minY:-e.up*H,maxY:H,e};}
     function _isMovingHeld(obj) { return Array.from(_heldMovingTargets.values()).includes(obj) || _mouseMovingTarget === obj; }
     function _movingTargets() {
         if (!levelData) return [];
@@ -143,7 +150,7 @@
                 o._isRunning=dir!==0;
                 o._runLift+=((o._isRunning?22:0)-o._runLift)*Math.min(1,dt*14);
                 if(dir!==0)o.x+=dir*MOVE_SPEED*dt;
-                if(!levelData.infinite_horizontal)o.x=Math.max(t.w/2+16,Math.min(W-t.w/2-16,o.x));
+                if(!levelData.infinite_horizontal){const mb=_mapBounds(levelData);o.x=Math.max(mb.minX+t.w/2+16,Math.min(mb.maxX-t.w/2-16,o.x));}
                 // 完整复制人物的连续纵向轨迹，去掉顶部限幅，避免门在跳跃顶点停住。
                 o.y=o._moveBaseY+(player.y-levelData.spawn.y)-o._runLift;
             } else {
@@ -1316,7 +1323,7 @@
         // 木箱重力与平台碰撞。木箱可坠落，重开关卡时由 JSON 初始位置恢复。
         for (const c of crates) {
             if(c.hold_to_stop&&_isMovingHeld(c)){c.vy=0;continue;}
-            if (levelData.no_fall&&!levelData.infinite_horizontal) c.x = Math.max(c.w / 2, Math.min(W - c.w / 2, c.x));
+            if (levelData.no_fall&&!levelData.infinite_horizontal){const mb=_mapBounds(levelData);c.x=Math.max(mb.minX+c.w/2,Math.min(mb.maxX-c.w/2,c.x));}
             c.vy = Math.min(MAX_FALL, c.vy + GRAVITY * dt);
             c.y += c.vy * dt;
             if (levelData.no_fall && c.y > H + 200) {
@@ -1339,7 +1346,8 @@
         // X 方向
         player.x += player.vx * dt;
         if (levelData.no_fall && !levelData.infinite_horizontal) {
-            player.x = Math.max(HALF_W, Math.min(W - HALF_W, player.x));
+            const mb=_mapBounds(levelData);
+            player.x = Math.max(mb.minX+HALF_W, Math.min(mb.maxX-HALF_W, player.x));
         }
         player.onGround = false;
         for (const p of plats) {
@@ -1358,8 +1366,9 @@
             if (player.vx === 0) continue;
             const desiredX = player.vx > 0 ? player.x + HALF_W + c.w / 2 : player.x - HALF_W - c.w / 2;
             const oldX = c.x;
+            const mbPush=_mapBounds(levelData);
             c.x = levelData.no_fall&&!levelData.infinite_horizontal
-                ? Math.max(c.w / 2, Math.min(W - c.w / 2, desiredX))
+                ? Math.max(mbPush.minX+c.w/2, Math.min(mbPush.maxX-c.w/2, desiredX))
                 : desiredX;
             let blocked = false;
             for (const p of plats) {
@@ -1458,9 +1467,11 @@
         player.sH = player.sH + (tgtH - player.sH) * k;
         player.sF = player.sF + (tgtF - player.sF) * k;
         // 无限关卡以出生点为镜头原点，左右移动都保持人物在稳定的屏幕位置。
-        const targetCamera=levelData.infinite_horizontal?player.x-420:0;
+        const mbCamera=_mapBounds(levelData),hasWideMap=levelData.infinite_horizontal||mbCamera.e.left>0||mbCamera.e.right>0;
+        const rawCameraX=hasWideMap?player.x-420:0;
+        const targetCamera=levelData.infinite_horizontal?rawCameraX:Math.max(mbCamera.minX,Math.min(mbCamera.maxX-W,rawCameraX));
         _cameraX+=(targetCamera-_cameraX)*Math.min(1,dt*7);
-        const targetCameraY=levelData.expand_up?Math.min(0,player.y-810):0;
+        const targetCameraY=(levelData.expand_up||mbCamera.e.up>0)?Math.max(mbCamera.minY,Math.min(0,player.y-810)):0;
         _cameraY+=(targetCameraY-_cameraY)*Math.min(1,dt*7);
 
         // 跌落致死判定：只有没成功时才检查（showSuccess时永远不会触发死亡）
@@ -2266,7 +2277,7 @@
     }
 
     function _newCreatorDraft() {
-        return { id:'custom-'+Date.now(), name:'我的脑洞关卡 '+(_creatorLevels.length+1), type:'custom', mechanics:[], no_fall:true, infinite_horizontal:false, expand_up:false, description:{hint_l1:'找到办法进入终点门。'}, world_size:{w:1920,h:1080}, spawn:{x:300,y:810}, platforms:[{x:960,y:1090,w:1920,h:440,kind:'ground'}], doors:[{id:'custom_entry',x:300,y:765,w:150,h:210,is_goal:false},{id:'custom_goal',x:1540,y:765,w:150,h:210,is_goal:true}], crates:[], keys:[], question_blocks:[], decor:[] };
+        return { id:'custom-'+Date.now(), name:'我的脑洞关卡 '+(_creatorLevels.length+1), type:'custom', mechanics:[], no_fall:true, infinite_horizontal:false, expand_up:false, map_extent:{left:0,right:0,up:0}, description:{hint_l1:'找到办法进入终点门。'}, world_size:{w:1920,h:1080}, spawn:{x:300,y:810}, platforms:[{x:960,y:1090,w:1920,h:440,kind:'ground'}], doors:[{id:'custom_entry',x:300,y:765,w:150,h:210,is_goal:false},{id:'custom_goal',x:1540,y:765,w:150,h:210,is_goal:true}], crates:[], keys:[], question_blocks:[], decor:[] };
     }
     function _saveCreatorLevels() { localStorage.setItem(CREATOR_LS_KEY,JSON.stringify(_creatorLevels)); }
     function _saveCreatorDraftToList() {
@@ -2372,21 +2383,30 @@
         _codeInput.addEventListener('keydown',e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();_submitCodeInput();}});
     }
 
-    function _toggleCreatorRange(kind){
+    function _syncCreatorGround(){
+        const b=_mapBounds(_creatorDraft),ground=(_creatorDraft.platforms||[]).find(p=>p.kind==='ground');
+        if(ground){ground.x=(b.minX+b.maxX)/2;ground.w=b.maxX-b.minX;}
+        _creatorDraft.world_size={w:b.maxX-b.minX,h:b.maxY-b.minY};
+        _creatorDraft.expand_up=b.e.up>0;
+        _creatorDraft.infinite_horizontal=false;
+    }
+    function _creatorObjectsOutside(bounds){
+        const objects=[_creatorDraft.spawn,...(_creatorDraft.doors||[]),...(_creatorDraft.platforms||[]).filter(p=>p.kind!=='ground'),...(_creatorDraft.crates||[]),...(_creatorDraft.keys||[]),...(_creatorDraft.question_blocks||[])];
+        return objects.some(o=>o&&(o.x<bounds.minX||o.x>bounds.maxX||o.y<bounds.minY||o.y>bounds.maxY));
+    }
+    function _changeCreatorMapEdge(edge,delta){
         if(!_creatorDraft)return;
-        _pushCreatorHistory();
-        if(kind==='horizontal'){
-            _creatorDraft.infinite_horizontal=!_creatorDraft.infinite_horizontal;
-            const ground=(_creatorDraft.platforms||[]).find(p=>p.kind==='ground');
-            if(ground){
-                if(_creatorDraft.infinite_horizontal){ground.x=0;ground.w=2000000;}
-                else{ground.x=960;ground.w=1920;_creatorCameraX=0;}
-            }
-        }else if(kind==='up'){
-            _creatorDraft.expand_up=!_creatorDraft.expand_up;
-            if(!_creatorDraft.expand_up)_creatorCameraY=0;
+        const old=_mapExtent(_creatorDraft),next={...old};
+        next[edge]=Math.max(0,Math.min(99,next[edge]+delta));
+        if(next[edge]===old[edge])return;
+        const nextBounds={minX:-next.left*W,maxX:(next.right+1)*W,minY:-next.up*H,maxY:H,e:next};
+        if(delta<0&&_creatorObjectsOutside(nextBounds)){
+            _creatorRangeNotice='这一边还有元素，不能减少';_creatorRangeNoticeUntil=performance.now()+1800;
+            logStep('creator','map-edge-reduce-blocked',{edge,next});return;
         }
-        logStep('creator','map-range-toggle',{kind,infinite_horizontal:!!_creatorDraft.infinite_horizontal,expand_up:!!_creatorDraft.expand_up});
+        _pushCreatorHistory();_creatorDraft.map_extent=next;_syncCreatorGround();
+        const b=_mapBounds(_creatorDraft);_creatorCameraX=Math.max(b.minX,Math.min(b.maxX-W,_creatorCameraX));_creatorCameraY=Math.max(b.minY,Math.min(0,_creatorCameraY));
+        logStep('creator','map-edge-change',{edge,delta,map_extent:next});
     }
     function drawCreatorList() {
         sketchBold('创造模式',W/2,100,66); sketchText('把脑洞做成可以分享的关卡',W/2,165,28);
@@ -2435,6 +2455,31 @@
             r=_button(mx+720,my+300,250,82,'取消',86703,27);r.action='cancel-import';uiBTN.creatorConfirmBtns.push(r);
         }
     }
+    function _drawCreatorMapOverview(){
+        uiBTN.editorTools=[];
+        const b=_mapBounds(_creatorDraft),box={x:120,y:135,w:1680,h:700},pad=55;
+        ctx.save();ctx.fillStyle='rgba(255,255,255,.96)';ctx.fillRect(0,0,W,H);ctx.restore();
+        sketchBold('调整地图范围',W/2,70,44);
+        sketchText('整张地图已缩小显示；每次点击增加或减少一整屏',W/2,112,23);
+        const scale=Math.min((box.w-pad*2)/(b.maxX-b.minX),(box.h-pad*2)/(b.maxY-b.minY));
+        const ox=box.x+(box.w-(b.maxX-b.minX)*scale)/2-b.minX*scale;
+        const oy=box.y+(box.h-(b.maxY-b.minY)*scale)/2-b.minY*scale;
+        ctx.save();ctx.beginPath();ctx.rect(box.x,box.y,box.w,box.h);ctx.clip();ctx.translate(ox,oy);ctx.scale(scale,scale);
+        ctx.fillStyle='#fafafa';ctx.fillRect(b.minX,b.minY,b.maxX-b.minX,b.maxY-b.minY);
+        ctx.strokeStyle='#000';ctx.lineWidth=Math.max(3/scale,2);ctx.strokeRect(b.minX,b.minY,b.maxX-b.minX,b.maxY-b.minY);
+        ctx.strokeStyle='rgba(0,0,0,.25)';ctx.lineWidth=Math.max(2/scale,1);
+        for(let x=Math.ceil(b.minX/W)*W;x<b.maxX;x+=W){ctx.beginPath();ctx.moveTo(x,b.minY);ctx.lineTo(x,b.maxY);ctx.stroke();}
+        for(let y=Math.ceil(b.minY/H)*H;y<b.maxY;y+=H){ctx.beginPath();ctx.moveTo(b.minX,y);ctx.lineTo(b.maxX,y);ctx.stroke();}
+        for(const p of _creatorDraft.platforms||[]){ctx.fillStyle=p.kind==='ground'?'#111':'#fff';ctx.strokeStyle='#000';ctx.lineWidth=Math.max(4/scale,2);ctx.fillRect(p.x-p.w/2,p.y-p.h/2,p.w,p.h);ctx.strokeRect(p.x-p.w/2,p.y-p.h/2,p.w,p.h);}
+        for(const d of _creatorDraft.doors||[]){ctx.fillStyle='#fff';ctx.strokeStyle='#000';ctx.lineWidth=Math.max(5/scale,2);ctx.fillRect(d.x-d.w/2,d.y-d.h/2,d.w,d.h);ctx.strokeRect(d.x-d.w/2,d.y-d.h/2,d.w,d.h);}
+        for(const c of _creatorDraft.crates||[]){ctx.strokeStyle='#000';ctx.lineWidth=Math.max(4/scale,2);ctx.strokeRect(c.x-c.w/2,c.y-c.h/2,c.w,c.h);}
+        ctx.fillStyle='#000';ctx.beginPath();ctx.arc(_creatorDraft.spawn.x,_creatorDraft.spawn.y,Math.max(16/scale,12),0,Math.PI*2);ctx.fill();
+        ctx.restore();
+        sketchText(`左 ${b.e.left} 屏　右 ${b.e.right} 屏　上 ${b.e.up} 屏`,W/2,868,27);
+        const actions=[['edge','＋左','left',1],['edge','－左','left',-1],['edge','＋右','right',1],['edge','－右','right',-1],['edge','＋上','up',1],['edge','－上','up',-1],['map-done','完成','',0]];
+        actions.forEach((it,i)=>{const r=_button(205+i*220,910,190,70,it[1],86800+i,24);r.action=it[0];r.edge=it[2];r.delta=it[3];uiBTN.editorTools.push(r);});
+        if(performance.now()<_creatorRangeNoticeUntil)sketchBold(_creatorRangeNotice,W/2,1025,25,'center','#b00020');
+    }
     function drawCreatorEditor() {
         sketchBold('关卡编辑器',W/2,48,44); sketchText(_creatorDraft.name,W/2,92,23);
         const tools=[['platform','平台'],['spawn','出生门'],['goal','终点门'],['crate','木箱'],['key','钥匙']];uiBTN.editorTools=[];
@@ -2443,11 +2488,11 @@
         sketchText('特殊玩法：',55,230,24,'left');
         const mechanics=[['normal','普通'],['double_jump','多跳'],['knock_twice','敲门'],['flower_password','顶花'],['key','钥匙'],['hold_to_stop','会动']];
         mechanics.forEach((it,i)=>{const r=_button(180+i*190,198,165,65,it[1],86400+i,22);r.action='mechanic';r.mechanic=it[0];const selected=it[0]==='normal'?!_creatorMechanics.length:_creatorMechanics.includes(it[0]);if(selected){ctx.strokeStyle='#000';ctx.lineWidth=7;ctx.strokeRect(r.x+5,r.y+5,r.w-10,r.h-10);}uiBTN.editorTools.push(r);});
+        if(_creatorMapOverview){_drawCreatorMapOverview();return;}
         sketchText('地图范围：',55,312,23,'left');
-        let rr=_button(195,275,210,58,'左右无限',86480,21);rr.action='range';rr.range='horizontal';uiBTN.editorTools.push(rr);
-        if(_creatorDraft.infinite_horizontal){ctx.strokeStyle='#000';ctx.lineWidth=7;ctx.strokeRect(rr.x+5,rr.y+5,rr.w-10,rr.h-10);}
-        rr=_button(430,275,210,58,'向上扩展',86481,21);rr.action='range';rr.range='up';uiBTN.editorTools.push(rr);
-        if(_creatorDraft.expand_up){ctx.strokeStyle='#000';ctx.lineWidth=7;ctx.strokeRect(rr.x+5,rr.y+5,rr.w-10,rr.h-10);}
+        const ext=_mapExtent(_creatorDraft);
+        let rr=_button(195,275,240,58,'调整地图',86480,21);rr.action='map-overview';uiBTN.editorTools.push(rr);
+        sketchText(`左${ext.left} 右${ext.right} 上${ext.up}`,465,312,20,'left');
         sketchText('视野：'+Math.round(_creatorCameraX)+','+Math.round(_creatorCameraY),W-70,312,19,'right');
         ctx.save();ctx.strokeStyle='rgba(0,0,0,.35)';ctx.setLineDash([12,10]);ctx.strokeRect(45,350,W-90,530);ctx.restore();
         ctx.save();ctx.beginPath();ctx.rect(45,350,W-90,530);ctx.clip();ctx.translate(-_creatorCameraX,-_creatorCameraY);
@@ -2733,8 +2778,8 @@
             }
             for(const b of uiBTN.creatorBtns||[]) if(inRect(p,b)){
                 if(b.action==='back') gameState='menu';
-                else if(b.action==='new'){_creatorDraft=_newCreatorDraft();_creatorTool='platform';_creatorMechanics=[];_creatorHistory=[];_creatorBindingMode=false;_creatorCameraX=0;_creatorCameraY=0;gameState='creatorEdit';}
-                else if(b.action==='open'){_creatorDraft=JSON.parse(JSON.stringify(_creatorLevels[b.index]));_creatorMechanics=_mechanicsOf(_creatorDraft);_creatorHistory=[];_creatorBindingMode=false;_creatorCameraX=0;_creatorCameraY=0;gameState='creatorEdit';}
+                else if(b.action==='new'){_creatorDraft=_newCreatorDraft();_creatorTool='platform';_creatorMechanics=[];_creatorHistory=[];_creatorBindingMode=false;_creatorCameraX=0;_creatorCameraY=0;_creatorMapOverview=false;gameState='creatorEdit';}
+                else if(b.action==='open'){_creatorDraft=JSON.parse(JSON.stringify(_creatorLevels[b.index]));_creatorMechanics=_mechanicsOf(_creatorDraft);_creatorHistory=[];_creatorBindingMode=false;_creatorCameraX=0;_creatorCameraY=0;_creatorMapOverview=false;gameState='creatorEdit';}
                 else if(b.action==='play'){_creatorDraft=JSON.parse(JSON.stringify(_creatorLevels[b.index]));_creatorMechanics=_mechanicsOf(_creatorDraft);_playCreatorDraft();}
                 else if(b.action==='share'){_creatorShareIndex=b.index;_creatorShareCode=_encodeLevelCode(_creatorLevels[b.index]);logStep('creator','share-code-generate',{index:b.index,chars:_creatorShareCode.length});}
                 else if(b.action==='import')_openCodeInput();
@@ -2754,11 +2799,13 @@
             for(const b of uiBTN.editorTools||[]) if(inRect(p,b)){
                 if(b.action==='tool') _creatorTool=b.tool;
                 else if(b.action==='mechanic') _toggleCreatorMechanic(b.mechanic);
-                else if(b.action==='range') _toggleCreatorRange(b.range);
-                else if(b.action==='pan-left'&&_creatorDraft.infinite_horizontal)_creatorCameraX-=960;
-                else if(b.action==='pan-right'&&_creatorDraft.infinite_horizontal)_creatorCameraX+=960;
-                else if(b.action==='pan-up'&&_creatorDraft.expand_up)_creatorCameraY-=480;
-                else if(b.action==='pan-down'&&_creatorDraft.expand_up)_creatorCameraY=Math.min(0,_creatorCameraY+480);
+                else if(b.action==='map-overview'){_creatorMapOverview=true;_creatorBindingMode=false;}
+                else if(b.action==='edge')_changeCreatorMapEdge(b.edge,b.delta);
+                else if(b.action==='map-done')_creatorMapOverview=false;
+                else if(b.action==='pan-left'){const mb=_mapBounds(_creatorDraft);_creatorCameraX=Math.max(mb.minX,_creatorCameraX-W);}
+                else if(b.action==='pan-right'){const mb=_mapBounds(_creatorDraft);_creatorCameraX=Math.min(mb.maxX-W,_creatorCameraX+W);}
+                else if(b.action==='pan-up'){const mb=_mapBounds(_creatorDraft);_creatorCameraY=Math.max(mb.minY,_creatorCameraY-H);}
+                else if(b.action==='pan-down')_creatorCameraY=Math.min(0,_creatorCameraY+H);
                 else if(b.action==='pan-origin'){_creatorCameraX=0;_creatorCameraY=0;}
                 else if(b.action==='back') gameState='creatorList';
                 else if(b.action==='play') _playCreatorDraft();
