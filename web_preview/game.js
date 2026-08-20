@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 152;   // 跟 index.html 的 ?v=152 保持一致
+    const GAME_CODE_VERSION = 153;   // 跟 index.html 的 ?v=153 保持一致
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
         const last = parseInt(localStorage.getItem(LAST_KNOWN_KEY) || '0', 10);
@@ -92,7 +92,8 @@
     let _creatorBindingMode = false;
     const _heldMovingTargets = new Map();
     let _mouseMovingTarget = null;
-    let _cameraX = 0;
+    let _cameraX = 0, _cameraY = 0;
+    let _creatorCameraX = 0, _creatorCameraY = 0;
     let _creatorShareCode = '';
     let _creatorShareIndex = -1;
     let _creatorImportPreview = null;
@@ -118,7 +119,7 @@
         return out;
     }
     function _movingTargetAt(p) {
-        const wp={x:p.x+_cameraX,y:p.y};
+        const wp={x:p.x+_cameraX,y:p.y+_cameraY};
         for(const t of _movingTargets().reverse())if(inRect(wp,{x:t.obj.x-t.w/2-18,y:t.obj.y-t.h/2-18,w:t.w+36,h:t.h+36}))return t;
         return null;
     }
@@ -1457,8 +1458,10 @@
         player.sH = player.sH + (tgtH - player.sH) * k;
         player.sF = player.sF + (tgtF - player.sF) * k;
         // 无限关卡以出生点为镜头原点，左右移动都保持人物在稳定的屏幕位置。
-        const targetCamera=levelData.infinite_horizontal?player.x-levelData.spawn.x:0;
+        const targetCamera=levelData.infinite_horizontal?player.x-420:0;
         _cameraX+=(targetCamera-_cameraX)*Math.min(1,dt*7);
+        const targetCameraY=levelData.expand_up?Math.min(0,player.y-810):0;
+        _cameraY+=(targetCameraY-_cameraY)*Math.min(1,dt*7);
 
         // 跌落致死判定：只有没成功时才检查（showSuccess时永远不会触发死亡）
         if (levelData.no_fall && player.y > H + 120) {
@@ -2263,7 +2266,7 @@
     }
 
     function _newCreatorDraft() {
-        return { id:'custom-'+Date.now(), name:'我的脑洞关卡 '+(_creatorLevels.length+1), type:'custom', mechanics:[], no_fall:true, description:{hint_l1:'找到办法进入终点门。'}, world_size:{w:1920,h:1080}, spawn:{x:300,y:810}, platforms:[{x:960,y:1090,w:1920,h:440,kind:'ground'}], doors:[{id:'custom_entry',x:300,y:765,w:150,h:210,is_goal:false},{id:'custom_goal',x:1540,y:765,w:150,h:210,is_goal:true}], crates:[], keys:[], question_blocks:[], decor:[] };
+        return { id:'custom-'+Date.now(), name:'我的脑洞关卡 '+(_creatorLevels.length+1), type:'custom', mechanics:[], no_fall:true, infinite_horizontal:false, expand_up:false, description:{hint_l1:'找到办法进入终点门。'}, world_size:{w:1920,h:1080}, spawn:{x:300,y:810}, platforms:[{x:960,y:1090,w:1920,h:440,kind:'ground'}], doors:[{id:'custom_entry',x:300,y:765,w:150,h:210,is_goal:false},{id:'custom_goal',x:1540,y:765,w:150,h:210,is_goal:true}], crates:[], keys:[], question_blocks:[], decor:[] };
     }
     function _saveCreatorLevels() { localStorage.setItem(CREATOR_LS_KEY,JSON.stringify(_creatorLevels)); }
     function _saveCreatorDraftToList() {
@@ -2334,10 +2337,56 @@
         else{const ta=document.createElement('textarea');ta.value=text;document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();}
         _creatorSavedUntil=performance.now()+1800;logStep('creator','share-code-copy',{chars:text.length});
     }
+    const _codeDialog=document.getElementById('level-code-dialog');
+    const _codeInput=document.getElementById('level-code-input');
+    const _codeError=document.getElementById('level-code-error');
+    function _closeCodeInput(){
+        if(!_codeDialog)return;
+        _codeDialog.hidden=true;_codeInput.blur();_codeError.textContent='';
+        logStep('creator','share-code-input-close',{});
+    }
+    function _submitCodeInput(){
+        const raw=_codeInput.value.trim();
+        if(!raw){_codeError.textContent='请先粘贴关卡码';_codeInput.focus();return;}
+        try{
+            _creatorImportPreview=_decodeLevelCode(raw);
+            logStep('creator','share-code-read',{name:_creatorImportPreview.name,mechanics:_mechanicsOf(_creatorImportPreview)});
+            _codeDialog.hidden=true;_codeInput.blur();_codeError.textContent='';
+        }catch(e){
+            _codeError.textContent='无法读取：'+e.message;
+            logStep('creator','share-code-invalid',{reason:e.message});
+            _codeInput.focus();
+        }
+    }
     function _openCodeInput(){
-        const raw=window.prompt('粘贴朋友分享的关卡码：','');if(!raw)return;
-        try{_creatorImportPreview=_decodeLevelCode(raw);logStep('creator','share-code-read',{name:_creatorImportPreview.name,mechanics:_mechanicsOf(_creatorImportPreview)});}
-        catch(e){window.alert('无法读取这个关卡码：'+e.message);logStep('creator','share-code-invalid',{reason:e.message});}
+        if(!_codeDialog)return;
+        _codeDialog.hidden=false;_codeInput.value='';_codeError.textContent='';
+        // 必须由点击事件直接触发真实表单 focus，Android/iOS 才会拉起系统键盘。
+        _codeInput.focus({preventScroll:true});
+        setTimeout(()=>_codeInput.focus({preventScroll:true}),50);
+        logStep('creator','share-code-input-open',{keyboard_focus:true});
+    }
+    if(_codeInput){
+        document.getElementById('level-code-submit').addEventListener('click',_submitCodeInput);
+        document.getElementById('level-code-cancel').addEventListener('click',_closeCodeInput);
+        _codeInput.addEventListener('keydown',e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();_submitCodeInput();}});
+    }
+
+    function _toggleCreatorRange(kind){
+        if(!_creatorDraft)return;
+        _pushCreatorHistory();
+        if(kind==='horizontal'){
+            _creatorDraft.infinite_horizontal=!_creatorDraft.infinite_horizontal;
+            const ground=(_creatorDraft.platforms||[]).find(p=>p.kind==='ground');
+            if(ground){
+                if(_creatorDraft.infinite_horizontal){ground.x=0;ground.w=2000000;}
+                else{ground.x=960;ground.w=1920;_creatorCameraX=0;}
+            }
+        }else if(kind==='up'){
+            _creatorDraft.expand_up=!_creatorDraft.expand_up;
+            if(!_creatorDraft.expand_up)_creatorCameraY=0;
+        }
+        logStep('creator','map-range-toggle',{kind,infinite_horizontal:!!_creatorDraft.infinite_horizontal,expand_up:!!_creatorDraft.expand_up});
     }
     function drawCreatorList() {
         sketchBold('创造模式',W/2,100,66); sketchText('把脑洞做成可以分享的关卡',W/2,165,28);
@@ -2394,7 +2443,14 @@
         sketchText('特殊玩法：',55,230,24,'left');
         const mechanics=[['normal','普通'],['double_jump','多跳'],['knock_twice','敲门'],['flower_password','顶花'],['key','钥匙'],['hold_to_stop','会动']];
         mechanics.forEach((it,i)=>{const r=_button(180+i*190,198,165,65,it[1],86400+i,22);r.action='mechanic';r.mechanic=it[0];const selected=it[0]==='normal'?!_creatorMechanics.length:_creatorMechanics.includes(it[0]);if(selected){ctx.strokeStyle='#000';ctx.lineWidth=7;ctx.strokeRect(r.x+5,r.y+5,r.w-10,r.h-10);}uiBTN.editorTools.push(r);});
-        ctx.save();ctx.strokeStyle='rgba(0,0,0,.35)';ctx.setLineDash([12,10]);ctx.strokeRect(45,290,W-90,590);ctx.restore();
+        sketchText('地图范围：',55,312,23,'left');
+        let rr=_button(195,275,210,58,'左右无限',86480,21);rr.action='range';rr.range='horizontal';uiBTN.editorTools.push(rr);
+        if(_creatorDraft.infinite_horizontal){ctx.strokeStyle='#000';ctx.lineWidth=7;ctx.strokeRect(rr.x+5,rr.y+5,rr.w-10,rr.h-10);}
+        rr=_button(430,275,210,58,'向上扩展',86481,21);rr.action='range';rr.range='up';uiBTN.editorTools.push(rr);
+        if(_creatorDraft.expand_up){ctx.strokeStyle='#000';ctx.lineWidth=7;ctx.strokeRect(rr.x+5,rr.y+5,rr.w-10,rr.h-10);}
+        sketchText('视野：'+Math.round(_creatorCameraX)+','+Math.round(_creatorCameraY),W-70,312,19,'right');
+        ctx.save();ctx.strokeStyle='rgba(0,0,0,.35)';ctx.setLineDash([12,10]);ctx.strokeRect(45,350,W-90,530);ctx.restore();
+        ctx.save();ctx.beginPath();ctx.rect(45,350,W-90,530);ctx.clip();ctx.translate(-_creatorCameraX,-_creatorCameraY);
         for(const p of _creatorDraft.platforms){const x=p.x-p.w/2,y=p.y-p.h/2;ctx.fillStyle='#fff';ctx.fillRect(x,y,p.w,p.h);ctx.strokeStyle='#000';ctx.lineWidth=5;ctx.strokeRect(x,y,p.w,p.h);}
         for(const d of _creatorDraft.doors){ctx.strokeStyle='#000';ctx.lineWidth=6;ctx.strokeRect(d.x-d.w/2,d.y-d.h/2,d.w,d.h);sketchText(d.is_goal?'终':'生',d.x,d.y,28);}
         for(const c of _creatorDraft.crates||[]){ctx.strokeStyle='#000';ctx.lineWidth=5;ctx.strokeRect(c.x-c.w/2,c.y-c.h/2,c.w,c.h);sketchText('箱',c.x,c.y,24);}
@@ -2402,8 +2458,11 @@
         for(const q of _creatorDraft.question_blocks||[]){ctx.strokeStyle='#000';ctx.lineWidth=5;ctx.strokeRect(q.x-q.w/2,q.y-q.h/2,q.w,q.h);sketchBold('?',q.x,q.y+5,42);}
         const bound=[...(_creatorDraft.platforms||[]),...(_creatorDraft.doors||[]),...(_creatorDraft.crates||[]),...(_creatorDraft.keys||[]),...(_creatorDraft.question_blocks||[])].filter(x=>x.hold_to_stop);
         for(const o of bound)sketchBold('≋',o.x,o.y-(o.h||90)/2-24,30);
+        ctx.restore();
+        const pans=[['pan-left','← 左移'],['pan-origin','回原点'],['pan-right','右移 →'],['pan-up','↑ 上移'],['pan-down','下移 ↓']];
+        pans.forEach((it,i)=>{const r=_button(445+i*210,900,185,58,it[1],86520+i,20);r.action=it[0];uiBTN.editorTools.push(r);});
         if(_creatorBindingMode){ctx.save();ctx.fillStyle='rgba(0,0,0,.42)';ctx.fillRect(0,0,W,H);ctx.restore();sketchBold('选择要添加“会动，按住不动”的元素',W/2,335,38,'center','#fff');sketchText('带 ≋ 的元素已绑定；再次选择可取消',W/2,382,24,'center',false,'#fff');}
-        sketchText('选择上方组件，再点击虚线区域放置；平台会自动生成合适尺寸。',W/2,925,25);
+        sketchText('移动视野后可在上方、左侧、右侧继续摆放元素。',W/2,995,23);
     }
     function _playCreatorDraft() {
         _playingCustom=true; levelData=JSON.parse(JSON.stringify(_creatorDraft)); currentLevelIndex=-1;
@@ -2674,8 +2733,8 @@
             }
             for(const b of uiBTN.creatorBtns||[]) if(inRect(p,b)){
                 if(b.action==='back') gameState='menu';
-                else if(b.action==='new'){_creatorDraft=_newCreatorDraft();_creatorTool='platform';_creatorMechanics=[];_creatorHistory=[];_creatorBindingMode=false;gameState='creatorEdit';}
-                else if(b.action==='open'){_creatorDraft=JSON.parse(JSON.stringify(_creatorLevels[b.index]));_creatorMechanics=_mechanicsOf(_creatorDraft);_creatorHistory=[];_creatorBindingMode=false;gameState='creatorEdit';}
+                else if(b.action==='new'){_creatorDraft=_newCreatorDraft();_creatorTool='platform';_creatorMechanics=[];_creatorHistory=[];_creatorBindingMode=false;_creatorCameraX=0;_creatorCameraY=0;gameState='creatorEdit';}
+                else if(b.action==='open'){_creatorDraft=JSON.parse(JSON.stringify(_creatorLevels[b.index]));_creatorMechanics=_mechanicsOf(_creatorDraft);_creatorHistory=[];_creatorBindingMode=false;_creatorCameraX=0;_creatorCameraY=0;gameState='creatorEdit';}
                 else if(b.action==='play'){_creatorDraft=JSON.parse(JSON.stringify(_creatorLevels[b.index]));_creatorMechanics=_mechanicsOf(_creatorDraft);_playCreatorDraft();}
                 else if(b.action==='share'){_creatorShareIndex=b.index;_creatorShareCode=_encodeLevelCode(_creatorLevels[b.index]);logStep('creator','share-code-generate',{index:b.index,chars:_creatorShareCode.length});}
                 else if(b.action==='import')_openCodeInput();
@@ -2686,28 +2745,36 @@
         }
         if (gameState === 'creatorEdit') {
             if(_creatorBindingMode){
+                const wp={x:p.x+_creatorCameraX,y:p.y+_creatorCameraY};
                 const groups=[...(_creatorDraft.doors||[]).map(obj=>({obj,w:obj.w||150,h:obj.h||210})),...(_creatorDraft.platforms||[]).map(obj=>({obj,w:obj.w||260,h:obj.h||52})),...(_creatorDraft.crates||[]).map(obj=>({obj,w:obj.w||130,h:obj.h||140})),...(_creatorDraft.keys||[]).map(obj=>({obj,w:90,h:90})),...(_creatorDraft.question_blocks||[]).map(obj=>({obj,w:obj.w||105,h:obj.h||105}))];
-                const hit=groups.reverse().find(t=>inRect(p,{x:t.obj.x-t.w/2-20,y:t.obj.y-t.h/2-20,w:t.w+40,h:t.h+40}));
+                const hit=groups.reverse().find(t=>inRect(wp,{x:t.obj.x-t.w/2-20,y:t.obj.y-t.h/2-20,w:t.w+40,h:t.h+40}));
                 if(hit){_pushCreatorHistory();hit.obj.hold_to_stop=!hit.obj.hold_to_stop;_creatorBindingMode=false;logStep('creator','moving-element-binding',{id:hit.obj.id||hit.obj.kind,bound:hit.obj.hold_to_stop});}
                 return;
             }
             for(const b of uiBTN.editorTools||[]) if(inRect(p,b)){
                 if(b.action==='tool') _creatorTool=b.tool;
                 else if(b.action==='mechanic') _toggleCreatorMechanic(b.mechanic);
+                else if(b.action==='range') _toggleCreatorRange(b.range);
+                else if(b.action==='pan-left'&&_creatorDraft.infinite_horizontal)_creatorCameraX-=960;
+                else if(b.action==='pan-right'&&_creatorDraft.infinite_horizontal)_creatorCameraX+=960;
+                else if(b.action==='pan-up'&&_creatorDraft.expand_up)_creatorCameraY-=480;
+                else if(b.action==='pan-down'&&_creatorDraft.expand_up)_creatorCameraY=Math.min(0,_creatorCameraY+480);
+                else if(b.action==='pan-origin'){_creatorCameraX=0;_creatorCameraY=0;}
                 else if(b.action==='back') gameState='creatorList';
                 else if(b.action==='play') _playCreatorDraft();
                 else if(b.action==='undo') _undoCreatorStep();
                 else if(b.action==='save')_saveCreatorDraftToList();
                 return;
             }
-            if(p.x>45&&p.x<W-45&&p.y>290&&p.y<880){
+            if(p.x>45&&p.x<W-45&&p.y>350&&p.y<880){
+                const wx=Math.round(p.x+_creatorCameraX),wy=Math.round(p.y+_creatorCameraY);
                 _pushCreatorHistory();
-                if(_creatorTool==='platform') _creatorDraft.platforms.push({x:Math.round(p.x),y:Math.round(p.y),w:260,h:52,kind:'step_custom'});
-                else if(_creatorTool==='spawn') {_creatorDraft.spawn={x:Math.round(p.x),y:Math.round(p.y)};_creatorDraft.doors=_creatorDraft.doors.filter(d=>d.is_goal);_creatorDraft.doors.unshift({id:'custom_entry',x:Math.round(p.x),y:Math.round(p.y)-45,w:150,h:210,is_goal:false});}
-                else if(_creatorTool==='goal'){_creatorDraft.doors=_creatorDraft.doors.filter(d=>!d.is_goal);_creatorDraft.doors.push({id:'custom_goal',x:Math.round(p.x),y:Math.round(p.y),w:150,h:210,is_goal:true});}
-                else if(_creatorTool==='crate') (_creatorDraft.crates||(_creatorDraft.crates=[])).push({id:'box_'+Date.now(),x:Math.round(p.x),y:Math.round(p.y),w:130,h:140});
-                else if(_creatorTool==='key'){(_creatorDraft.keys||(_creatorDraft.keys=[])).push({id:'key_'+Date.now(),x:Math.round(p.x),y:Math.round(p.y),target_door:'custom_goal'});const gd=_creatorDraft.doors.find(d=>d.is_goal);if(gd)gd.locked=true;}
-                logStep('creator','element-place',{tool:_creatorTool,x:Math.round(p.x),y:Math.round(p.y)});
+                if(_creatorTool==='platform') _creatorDraft.platforms.push({x:wx,y:wy,w:260,h:52,kind:'step_custom'});
+                else if(_creatorTool==='spawn') {_creatorDraft.spawn={x:wx,y:wy};_creatorDraft.doors=_creatorDraft.doors.filter(d=>d.is_goal);_creatorDraft.doors.unshift({id:'custom_entry',x:wx,y:wy-45,w:150,h:210,is_goal:false});}
+                else if(_creatorTool==='goal'){_creatorDraft.doors=_creatorDraft.doors.filter(d=>!d.is_goal);_creatorDraft.doors.push({id:'custom_goal',x:wx,y:wy,w:150,h:210,is_goal:true});}
+                else if(_creatorTool==='crate') (_creatorDraft.crates||(_creatorDraft.crates=[])).push({id:'box_'+Date.now(),x:wx,y:wy,w:130,h:140});
+                else if(_creatorTool==='key'){(_creatorDraft.keys||(_creatorDraft.keys=[])).push({id:'key_'+Date.now(),x:wx,y:wy,target_door:'custom_goal'});const gd=_creatorDraft.doors.find(d=>d.is_goal);if(gd)gd.locked=true;}
+                logStep('creator','element-place',{tool:_creatorTool,x:wx,y:wy,cameraX:_creatorCameraX,cameraY:_creatorCameraY});
             }
             return;
         }
@@ -2831,7 +2898,8 @@
                         w: goalDoor.w + 36,
                         h: goalDoor.h + 48
                     };
-                    if (inRect(p, doorRect)) {
+                    const worldTap={x:p.x+_cameraX,y:p.y+_cameraY};
+                    if (inRect(worldTap, doorRect)) {
                         const playerAtDoor = Math.abs(player.x - goalDoor.x) <= 75
                             && Math.abs(player.y - goalDoor.y) <= 170;
                         playSfx('knock');
@@ -3022,7 +3090,7 @@
     function loadLevelAndStart() {
         showSuccess = false; successTimer = SUCCESS_TOTAL; doorOpenT = 0; showDead = false;
         _validKnockCount = 0;
-        _heldMovingTargets.clear();_mouseMovingTarget=null;_cameraX=0;
+        _heldMovingTargets.clear();_mouseMovingTarget=null;_cameraX=0;_cameraY=0;
         _knockEffects = [];
         _passwordVisible = false; _passwordInput = ''; _passwordSolved = false;
         _completeTimer = 0;
@@ -3362,7 +3430,7 @@
             else if (gameState === 'creatorEdit') drawCreatorEditor();
             else if (gameState === 'complete' || gameState === 'completeIntro') drawComplete();
             else {
-                ctx.save();ctx.translate(-_cameraX,0);
+                ctx.save();ctx.translate(-_cameraX,-_cameraY);
                 drawPlatforms();
                 drawDecor();
                 drawCrates();

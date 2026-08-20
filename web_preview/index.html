@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>大聪明脑洞蛋 · 第1关（Web预览版）</title>
-    <link rel="stylesheet" href="style.css?v=152">
+    <link rel="stylesheet" href="style.css?v=153">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
@@ -12,6 +12,17 @@
 <body class="web-mode">
     <div id="game-wrapper">
         <canvas id="game-canvas"></canvas>
+        <div id="level-code-dialog" class="code-dialog" hidden>
+            <div class="code-card">
+                <div class="code-title">输入关卡码</div>
+                <textarea id="level-code-input" inputmode="text" enterkeyhint="done" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="粘贴 SE1- 开头的关卡码"></textarea>
+                <div id="level-code-error" class="code-error"></div>
+                <div class="code-actions">
+                    <button id="level-code-cancel" type="button">取消</button>
+                    <button id="level-code-submit" type="button">读取关卡</button>
+                </div>
+            </div>
+        </div>
         <div id="hint-bar">← → 移动 &nbsp;|&nbsp; 空格 跳跃 &nbsp;|&nbsp; 手机：底部按键</div>
     </div>
     <script>
@@ -19,8 +30,8 @@
             document.body.className = 'android-app';
         }
     </script>
-    <script src="../godot_project/levels/levels_bundle.js?v=152"></script>
-    <script src="game.js?v=152"></script>
+    <script src="../godot_project/levels/levels_bundle.js?v=153"></script>
+    <script src="game.js?v=153"></script>
 <!-- 注：每次 game.js 升级都改 v 参数（?v=xxx）强制浏览器刷新缓存，避免用户看到旧代码导致死循环 -->
 </body>
 </html>
