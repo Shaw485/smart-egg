@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 151;   // 跟 index.html 的 ?v=151 保持一致
+    const GAME_CODE_VERSION = 152;   // 跟 index.html 的 ?v=152 保持一致
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
         const last = parseInt(localStorage.getItem(LAST_KNOWN_KEY) || '0', 10);
@@ -3045,11 +3045,13 @@
         //   导致死亡"重来"时 player.y 还是死亡时的高空值 → 立刻又死 → 循环
         // 改为：先同步用缓存或fallback，然后同步复位 player。fetch 异步加载。
         if (_cachedLevels[idx]) {
-            levelData = _cachedLevels[idx];
+            // 运行关卡必须使用原始缓存的深拷贝；门、箱子等运行时坐标不能反写缓存。
+            // 因此点击“重来”会重新获得初始位置，并清除 _moveActivated/_runLift 等临时状态。
+            levelData = JSON.parse(JSON.stringify(_cachedLevels[idx]));
         } else {
             // 同步先用 fallback（保证立即生效），然后后台 fetch 更新缓存
-            levelData = _makeLevelFallback(idx);
-            _cachedLevels[idx] = levelData;
+            _cachedLevels[idx] = _makeLevelFallback(idx);
+            levelData = JSON.parse(JSON.stringify(_cachedLevels[idx]));
             // 后台异步更新缓存（不阻塞）
             _fetchLevelIntoCache(idx);
         }
