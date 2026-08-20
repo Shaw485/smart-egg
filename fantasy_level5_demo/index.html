@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>第五关 · 风之遗迹视觉试验</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main id="app">
+    <canvas id="game" aria-label="原创赛璐璐奇幻风格第五关演示"></canvas>
+    <div class="top-ui">
+      <div class="level"><small>CHAPTER</small><strong>05</strong></div>
+      <div class="mission"><span>风之遗迹</span><b>以礼叩响古门</b></div>
+      <button id="hint" type="button">提示</button>
+      <button id="restart" type="button">重来</button>
+    </div>
+    <div id="toast" class="toast">靠近石门，然后轻触它两次</div>
+    <div class="controls">
+      <div class="move-group">
+        <button id="left" aria-label="向左">‹</button>
+        <button id="right" aria-label="向右">›</button>
+      </div>
+      <button id="jump" class="jump" aria-label="跳跃">⌃</button>
+    </div>
+    <div id="finish" class="finish" hidden>
+      <div class="finish-card">
+        <div class="sigil">✦</div>
+        <h1>遗迹回应了你</h1>
+        <p>古门在第二次叩响后开启</p>
+        <button id="again" type="button">再看一次</button>
+      </div>
+    </div>
+  </main>
+  <script src="game.js"></script>
+</body>
+</html>
