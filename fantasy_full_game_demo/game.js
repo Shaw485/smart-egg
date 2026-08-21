@@ -618,11 +618,14 @@
     }
 
     function drawGrid() {
-        const sky=ctx.createLinearGradient(0,0,0,H);sky.addColorStop(0,'#70577d');sky.addColorStop(.46,'#d27d70');sky.addColorStop(1,'#efb775');ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
-        const glow=ctx.createRadialGradient(W*.76,H*.23,12,W*.76,H*.23,210);glow.addColorStop(0,'rgba(255,235,151,.92)');glow.addColorStop(.5,'rgba(255,171,99,.38)');glow.addColorStop(1,'rgba(255,126,82,0)');ctx.fillStyle=glow;ctx.fillRect(0,0,W,H);
-        ctx.fillStyle='#ffda91';ctx.beginPath();ctx.arc(W*.76,H*.23,60,0,Math.PI*2);ctx.fill();
-        const ridgeY=H*.69;for(let i=0;i<8;i++){const x=i*W/7,r=W*.17;ctx.fillStyle=i%2?'#62576f':'#514c67';ctx.beginPath();ctx.moveTo(x-r,ridgeY);ctx.lineTo(x,ridgeY-r*.62);ctx.lineTo(x+r,ridgeY);ctx.closePath();ctx.fill();ctx.strokeStyle='#413b55';ctx.lineWidth=4;ctx.stroke();}
-        ctx.fillStyle='#3c5049';ctx.beginPath();ctx.moveTo(0,H);ctx.lineTo(0,ridgeY);for(let x=0;x<=W;x+=80)ctx.lineTo(x,ridgeY-32-Math.sin(x*.012)*18);ctx.lineTo(W,H);ctx.fill();
+        // 辽阔高空：清透蓝天、暖色天际与大块高云
+        const sky=ctx.createLinearGradient(0,0,0,H);sky.addColorStop(0,'#63a9c8');sky.addColorStop(.48,'#b9d9c8');sky.addColorStop(.76,'#ead39b');sky.addColorStop(1,'#9bb18a');ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
+        const glow=ctx.createRadialGradient(W*.78,H*.2,12,W*.78,H*.2,230);glow.addColorStop(0,'rgba(255,244,181,.9)');glow.addColorStop(.55,'rgba(255,222,141,.28)');glow.addColorStop(1,'rgba(255,220,150,0)');ctx.fillStyle=glow;ctx.fillRect(0,0,W,H);
+        ctx.fillStyle='rgba(255,249,222,.68)';for(const cloud of [[.16,.17,150,38],[.47,.11,190,46],[.72,.3,130,32]]){ctx.beginPath();ctx.ellipse(W*cloud[0],H*cloud[1],cloud[2],cloud[3],-.05,0,Math.PI*2);ctx.ellipse(W*cloud[0]+cloud[2]*.45,H*cloud[1]+4,cloud[2]*.58,cloud[3]*.72,.03,0,Math.PI*2);ctx.fill();}
+        // 极远台地与群峰，多层低对比制造纵深
+        const horizon=H*.7;for(let layer=0;layer<3;layer++){ctx.fillStyle=['#87a59a','#708f86','#58766e'][layer];ctx.globalAlpha=[.55,.68,.82][layer];ctx.beginPath();ctx.moveTo(0,H);ctx.lineTo(0,horizon+layer*45);for(let x=0;x<=W;x+=120){const mesa=(Math.sin(x*.006+layer*1.7)+1)*34;ctx.lineTo(x,horizon+layer*45-mesa-(x%(360)<170?38:0));}ctx.lineTo(W,H);ctx.closePath();ctx.fill();}ctx.globalAlpha=1;
+        // 谷底薄雾与蜿蜒河光，强调玩家所在位置很高
+        ctx.fillStyle='rgba(238,238,205,.42)';ctx.beginPath();ctx.ellipse(W*.53,H*.82,W*.48,H*.12,0,0,Math.PI*2);ctx.fill();ctx.strokeStyle='rgba(211,236,223,.72)';ctx.lineWidth=18;ctx.beginPath();ctx.moveTo(W*.15,H*.88);ctx.bezierCurveTo(W*.38,H*.78,W*.55,H*.96,W*.83,H*.8);ctx.stroke();
     }
 
     function drawLevelTopBar() {
@@ -3293,9 +3296,12 @@
         for(let i=0;i<(levelData&&levelData.platforms||[]).length;i++){
             const p=levelData.platforms[i],kind=p.kind||'ground';let x=p.x-p.w/2,w=p.w,y=p.y-p.h/2,h=p.h;if(levelData.infinite_horizontal&&kind==='ground'){x=_cameraX-200;w=W+400;}
             if(kind==='ground'){
-                ctx.fillStyle='#657456';ctx.fillRect(x,y,w,h);ctx.fillStyle='#91a665';ctx.fillRect(x,y,w,26);ctx.fillStyle='#e0ba61';ctx.fillRect(x,y,w,8);_fantasyLine([[x,y],[x+w,y]],'#17343a',6);
+                // 玩家活动层是高处悬崖：薄草顶、明亮岩沿、向下延伸的峭壁
+                const cliff=ctx.createLinearGradient(0,y,0,y+h);cliff.addColorStop(0,'#777b63');cliff.addColorStop(.25,'#655f54');cliff.addColorStop(1,'#3e4442');ctx.fillStyle=cliff;ctx.fillRect(x,y,w,h);ctx.fillStyle='#83975e';ctx.fillRect(x,y,w,24);ctx.fillStyle='#d7bb6e';ctx.fillRect(x,y,w,8);_fantasyLine([[x,y],[x+w,y]],'#17343a',6);
                 if(x>1)_fantasyLine([[x,y],[x,y+h]],'#17343a',6);if(x+w<W-1)_fantasyLine([[x+w,y],[x+w,y+h]],'#17343a',6);
                 const first=levelData.infinite_horizontal?Math.floor((_cameraX-150)/150)*150:x+60,last=levelData.infinite_horizontal?_cameraX+W+150:x+w-40;for(let gx=first;gx<last;gx+=150){_fantasyLine([[gx,y],[gx-5,y-15]],'#34483e',3);_fantasyLine([[gx,y],[gx+7,y-12]],'#34483e',3);}
+                ctx.strokeStyle='rgba(38,48,48,.72)';ctx.lineWidth=4;for(let rx=x+95,ri=0;rx<x+w-40;rx+=170,ri++){const len=50+(ri%3)*34;ctx.beginPath();ctx.moveTo(rx,y+38);ctx.lineTo(rx-12,y+38+len*.45);ctx.lineTo(rx+7,y+38+len);ctx.stroke();}
+                ctx.fillStyle='rgba(228,205,142,.18)';for(let sx=x+60; sx<x+w; sx+=210){ctx.beginPath();ctx.ellipse(sx,y+75,42,9,-.08,0,Math.PI*2);ctx.fill();}
             }else{
                 ctx.save();ctx.fillStyle='#d9bd71';ctx.strokeStyle='#17343a';ctx.lineWidth=5;ctx.beginPath();ctx.roundRect(x,y,w,h,Math.min(15,h*.25));ctx.fill();ctx.stroke();ctx.fillStyle='#f3dc96';ctx.fillRect(x+12,y+9,w-24,Math.max(7,h*.22));ctx.strokeStyle='#9b7e42';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(x+w*.2,y+h*.67);ctx.lineTo(x+w*.42,y+h*.64);ctx.moveTo(x+w*.65,y+h*.7);ctx.lineTo(x+w*.8,y+h*.66);ctx.stroke();ctx.restore();
             }
@@ -3670,7 +3676,7 @@
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 ctx.font = 'bold 14px system-ui, "PingFang SC", sans-serif';
-                ctx.fillText('奇幻版 F3', vbx + vbw / 2, vby + vbh / 2);
+                ctx.fillText('奇幻版 F4', vbx + vbw / 2, vby + vbh / 2);
                 ctx.restore();
             } catch(_vErr) { /* 不影响玩 */ }
             // ===== v17.0 debug=1：顶部大字彩色「通关状态机」标签（用户不看console也知道当前阶段）=====
