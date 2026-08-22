@@ -618,9 +618,12 @@
     }
 
     function drawGrid() {
-        // 极简背景：大面积留白，仅保留一个很淡的圆月。
+        // 极简背景：大面积留白、淡月，以及左右各一小段远山。
         ctx.fillStyle='#f2efe6';ctx.fillRect(0,0,W,H);
         ctx.strokeStyle='rgba(25,25,24,.16)';ctx.lineWidth=2;ctx.beginPath();ctx.arc(W*.8,H*.19,66,0,Math.PI*2);ctx.stroke();
+        ctx.strokeStyle='rgba(25,25,24,.22)';ctx.lineWidth=2.5;ctx.lineCap='round';
+        ctx.beginPath();ctx.moveTo(0,H*.88);ctx.quadraticCurveTo(W*.065,H*.81,W*.13,H*.86);ctx.quadraticCurveTo(W*.18,H*.84,W*.23,H*.88);ctx.stroke();
+        ctx.beginPath();ctx.moveTo(W*.78,H*.88);ctx.quadraticCurveTo(W*.845,H*.82,W*.9,H*.86);ctx.quadraticCurveTo(W*.95,H*.84,W,H*.88);ctx.stroke();
     }
 
     function drawLevelTopBar() {
@@ -3301,10 +3304,13 @@
         if(showSuccess&&doorOpenT<1)doorOpenT=Math.min(1,doorOpenT+1/40);else if(!showSuccess)doorOpenT=Math.max(0,doorOpenT-.1);
         for(const d of levelData&&levelData.doors||[]){const w=d.w,h=d.h,x=d.x-w/2,y=d.y-h/2,opening=d.is_goal&&showSuccess?doorOpenT:0;
             ctx.save();ctx.translate(d.x,y);ctx.strokeStyle='#17343a';ctx.lineJoin='round';ctx.lineCap='round';
-            ctx.lineWidth=7;ctx.beginPath();ctx.moveTo(-w*.62,h);ctx.lineTo(-w*.58,40);ctx.quadraticCurveTo(-w*.42,-20,0,-34);ctx.quadraticCurveTo(w*.42,-20,w*.58,40);ctx.lineTo(w*.62,h);ctx.stroke();
-            ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(-w*.43,h);ctx.lineTo(-w*.4,51);ctx.quadraticCurveTo(0,4,w*.4,51);ctx.lineTo(w*.43,h);ctx.stroke();ctx.beginPath();ctx.moveTo(-w*.54,48);ctx.lineTo(-w*.46,h-8);ctx.moveTo(w*.54,48);ctx.lineTo(w*.46,h-8);ctx.stroke();
-            ctx.save();ctx.translate(w*.34,0);ctx.scale(Math.max(.04,1-opening),1);ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(-w*.68,h-5);ctx.lineTo(-w*.68,55);ctx.quadraticCurveTo(-w*.34,13,0,55);ctx.lineTo(0,h-5);ctx.stroke();ctx.lineWidth=3;ctx.beginPath();ctx.arc(-w*.34,h*.48,Math.min(20,w*.15),0,Math.PI*2);ctx.moveTo(-w*.34,h*.28);ctx.lineTo(-w*.34,h*.67);ctx.moveTo(-w*.5,h*.48);ctx.lineTo(-w*.18,h*.48);ctx.stroke();ctx.restore();
-            ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(-w*.7,h);ctx.lineTo(w*.7,h);ctx.stroke();ctx.restore();
+            // 中式上翘屋檐，只有两条干净轮廓线。
+            ctx.lineWidth=6;ctx.beginPath();ctx.moveTo(-w*.78,42);ctx.quadraticCurveTo(-w*.7,28,-w*.64,15);ctx.quadraticCurveTo(-w*.32,29,0,16);ctx.quadraticCurveTo(w*.32,29,w*.64,15);ctx.quadraticCurveTo(w*.7,28,w*.78,42);ctx.stroke();
+            ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(-w*.67,40);ctx.quadraticCurveTo(0,28,w*.67,40);ctx.stroke();
+            // 双立柱与门槛。
+            ctx.lineWidth=6;ctx.beginPath();ctx.moveTo(-w*.55,40);ctx.lineTo(-w*.55,h);ctx.moveTo(-w*.4,43);ctx.lineTo(-w*.4,h);ctx.moveTo(w*.4,43);ctx.lineTo(w*.4,h);ctx.moveTo(w*.55,40);ctx.lineTo(w*.55,h);ctx.moveTo(-w*.68,h);ctx.lineTo(w*.68,h);ctx.stroke();
+            // 双开门板随通关动画向中间收拢，保留传统圆门环。
+            ctx.save();ctx.scale(Math.max(.04,1-opening),1);ctx.lineWidth=4;ctx.beginPath();ctx.rect(-w*.38,48,w*.76,h-53);ctx.moveTo(0,48);ctx.lineTo(0,h-5);ctx.stroke();ctx.lineWidth=3;ctx.beginPath();ctx.arc(-w*.1,h*.52,8,0,Math.PI*2);ctx.arc(w*.1,h*.52,8,0,Math.PI*2);ctx.stroke();ctx.restore();ctx.restore();
             if(d.hold_to_stop&&d._isRunning&&!_isMovingHeld(d)&&gameState==='playing'){const step=Math.sin(frameCount*.28)*9,fy=y+h+17;_fantasyLine([[d.x-w*.22,y+h],[d.x-w*.22+step,fy],[d.x-w*.22-8+step,fy]],'#17343a',6);_fantasyLine([[d.x+w*.22,y+h],[d.x+w*.22-step,fy],[d.x+w*.22+8-step,fy]],'#17343a',6);}
             if(d.locked&&!unlockedDoors.has(d.id)){ctx.save();ctx.strokeStyle='#17343a';ctx.lineWidth=6;ctx.beginPath();ctx.moveTo(x-5,y+h*.3);ctx.quadraticCurveTo(d.x,y+h*.48,x+w+5,y+h*.3);ctx.stroke();ctx.beginPath();ctx.roundRect(d.x-24,y+h*.49,48,45,8);ctx.stroke();ctx.restore();}
         }
@@ -3313,14 +3319,16 @@
     function drawFantasyPlayer(){
         let ax=player.x,ay=player.y,scale=1;if(showSuccess){const e=SUCCESS_TOTAL-successTimer;if(e>=40&&e<100){const t=(e-40)/60,q=t*t;ax=_animStartX+(_animTargetX-_animStartX)*q;ay=_animStartY+(_animTargetY-_animStartY)*q;scale=1-q;}else if(e>=100)return;}
         const air=!player.onGround,walking=player.onGround&&Math.abs(player.vx)>10,rising=air&&player.vy<0,clock=performance.now()*.001,dir=player.vx<0?-1:1,bob=walking?-Math.max(0,Math.sin(player.walkT))*5:0;
-        ctx.save();ctx.translate(ax,ay-24+bob);ctx.scale(dir*scale,scale);const run=walking?1:0,lift=air?1:0,wave=Math.sin(clock*14)*6*run+Math.sin(clock*8)*3*lift;
-        ctx.strokeStyle='#17343a';ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(-7,-31);ctx.bezierCurveTo(-31-run*20-lift*12,-15-wave,-50-run*28,24-wave*.5-lift*10,-36-run*20,50-lift*14);ctx.quadraticCurveTo(-6,39-wave*.2,15,31);ctx.stroke();
-        ctx.fillStyle='#f2efe6';ctx.beginPath();ctx.ellipse(0,-34,27,30,0,0,Math.PI*2);ctx.fill();ctx.stroke();
-        const hs=Math.sin(clock*(walking?12:7))*(walking?3:1)+Math.sin(clock*8)*lift*2;ctx.save();ctx.translate(0,-lift*2);ctx.rotate(hs*.012);ctx.strokeStyle='#17343a';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(-27,-40);ctx.quadraticCurveTo(-20,-68,4,-67);ctx.quadraticCurveTo(28,-63,27,-40);ctx.lineTo(18,-44);ctx.lineTo(10,-31);ctx.lineTo(1,-43);ctx.lineTo(-8,-28);ctx.lineTo(-18,-39);ctx.stroke();ctx.beginPath();ctx.ellipse(-25,-39,8,19,-.25+hs*.02,0,Math.PI*2);ctx.stroke();ctx.restore();
-        ctx.fillStyle='#17343a';ctx.beginPath();ctx.arc(9,-33,4,0,Math.PI*2);ctx.fill();
-        ctx.fillStyle='#f2efe6';ctx.strokeStyle='#17343a';ctx.beginPath();ctx.moveTo(-24,-6);ctx.lineTo(25,-6);ctx.lineTo(27,28);ctx.quadraticCurveTo(0,34,-26,28);ctx.closePath();ctx.fill();ctx.stroke();ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(-26,23);ctx.lineTo(27,23);ctx.stroke();ctx.strokeRect(-22,32,20,14);ctx.strokeRect(3,32,20,14);
-        const arm=Math.sin(player.walkT||0)*7;_fantasyLine([[-23,2],[-42-(walking?arm:0),rising?-22:22]],'#17343a',6);_fantasyLine([[23,2],[42+(walking?arm:0),rising?-22:20]],'#17343a',6);
-        const p=Math.sin(player.walkT||0),p2=-p,k1=[-13+p*5,64-bob*.45-Math.max(0,p)*4],f1=[-14+p*12,84-bob-Math.max(0,p)*8],k2=[14+p2*5,64-bob*.45-Math.max(0,p2)*4],f2=[16+p2*12,84-bob-Math.max(0,p2)*8];_fantasyLine([[-14,45],k1,f1],'#17343a',6);_fantasyLine([[15,45],k2,f2],'#17343a',6);_fantasyLine([[f1[0]-2,f1[1]],[f1[0]+7,f1[1]]],'#17343a',5);_fantasyLine([[f2[0]-2,f2[1]],[f2[0]+7,f2[1]]],'#17343a',5);ctx.restore();
+        ctx.save();ctx.translate(ax,ay-24+bob);ctx.scale(dir*scale,scale);const lift=air?1:0;
+        ctx.strokeStyle='#17343a';ctx.fillStyle='#f2efe6';ctx.lineCap='round';ctx.lineJoin='round';ctx.lineWidth=5;
+        // 圆润头部与简单发髻，不再绘制碎发和披风。
+        ctx.beginPath();ctx.ellipse(0,-34,26,29,0,0,Math.PI*2);ctx.fill();ctx.stroke();
+        const hairSway=Math.sin(clock*(walking?10:6))*(walking?2:1)+Math.sin(clock*8)*lift*1.5;ctx.save();ctx.translate(0,-lift);ctx.rotate(hairSway*.012);ctx.beginPath();ctx.arc(0,-66,8,Math.PI*.15,Math.PI*.85,true);ctx.stroke();ctx.beginPath();ctx.moveTo(-20,-48);ctx.quadraticCurveTo(0,-61,21,-47);ctx.stroke();ctx.restore();
+        ctx.fillStyle='#17343a';ctx.beginPath();ctx.arc(9,-34,4,0,Math.PI*2);ctx.fill();ctx.lineWidth=3;ctx.beginPath();ctx.arc(10,-23,7,.15,1.15);ctx.stroke();
+        // 短衣、腰带和裤装采用少量独立轮廓。
+        ctx.fillStyle='#f2efe6';ctx.lineWidth=5;ctx.beginPath();ctx.roundRect(-23,-4,46,42,7);ctx.fill();ctx.stroke();ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(-22,25);ctx.lineTo(22,25);ctx.stroke();
+        const arm=Math.sin(player.walkT||0)*6;_fantasyLine([[-22,4],[-38-(walking?arm:0),rising?-16:21]],'#17343a',5);_fantasyLine([[22,4],[38+(walking?arm:0),rising?-16:20]],'#17343a',5);
+        const p=Math.sin(player.walkT||0),p2=-p,k1=[-10+p*4,58-Math.max(0,p)*4],f1=[-11+p*11,82-Math.max(0,p)*7],k2=[10+p2*4,58-Math.max(0,p2)*4],f2=[12+p2*11,82-Math.max(0,p2)*7];_fantasyLine([[-11,38],k1,f1],'#17343a',5);_fantasyLine([[11,38],k2,f2],'#17343a',5);_fantasyLine([[f1[0]-2,f1[1]],[f1[0]+6,f1[1]]],'#17343a',4);_fantasyLine([[f2[0]-2,f2[1]],[f2[0]+6,f2[1]]],'#17343a',4);ctx.restore();
     }
 
     function loop(now) {
@@ -3663,7 +3671,7 @@
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 ctx.font = 'bold 14px system-ui, "PingFang SC", sans-serif';
-                ctx.fillText('极简版 M2.2', vbx + vbw / 2, vby + vbh / 2);
+                ctx.fillText('国风版 M2.3', vbx + vbw / 2, vby + vbh / 2);
                 ctx.restore();
             } catch(_vErr) { /* 不影响玩 */ }
             // ===== v17.0 debug=1：顶部大字彩色「通关状态机」标签（用户不看console也知道当前阶段）=====
