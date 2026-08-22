@@ -621,14 +621,8 @@
         const sky=ctx.createLinearGradient(0,0,0,H);sky.addColorStop(0,'#70577d');sky.addColorStop(.46,'#d27d70');sky.addColorStop(1,'#efb775');ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
         const glow=ctx.createRadialGradient(W*.76,H*.23,12,W*.76,H*.23,210);glow.addColorStop(0,'rgba(255,235,151,.92)');glow.addColorStop(.5,'rgba(255,171,99,.38)');glow.addColorStop(1,'rgba(255,126,82,0)');ctx.fillStyle=glow;ctx.fillRect(0,0,W,H);
         ctx.fillStyle='#ffda91';ctx.beginPath();ctx.arc(W*.76,H*.23,60,0,Math.PI*2);ctx.fill();
-        // 远山缩小、抬高并降低对比，和人物脚下的平台拉开距离。
-        const ridgeY=H*.52;for(const [ratio,scale] of [[.17,.9],[.5,1.08],[.83,.94]]){const x=W*ratio,r=W*.13*scale;ctx.fillStyle='rgba(84,79,105,.72)';ctx.beginPath();ctx.moveTo(x-r,ridgeY);ctx.lineTo(x,ridgeY-r*.56);ctx.lineTo(x+r,ridgeY);ctx.closePath();ctx.fill();ctx.strokeStyle='rgba(65,59,85,.46)';ctx.lineWidth=2.5;ctx.stroke();}
-        // 山脚到高处平台之间是一片俯瞰平原，不再使用整块深绿色遮挡层。
-        const plain=ctx.createLinearGradient(0,ridgeY,0,H*.8);plain.addColorStop(0,'#aaa77e');plain.addColorStop(1,'#c7b17a');ctx.fillStyle=plain;ctx.fillRect(0,ridgeY,W,H-ridgeY);
-        ctx.fillStyle='rgba(137,139,92,.2)';ctx.beginPath();ctx.moveTo(0,H*.64);ctx.bezierCurveTo(W*.22,H*.59,W*.38,H*.66,W*.56,H*.62);ctx.bezierCurveTo(W*.73,H*.58,W*.86,H*.64,W,H*.6);ctx.lineTo(W,H*.7);ctx.bezierCurveTo(W*.72,H*.68,W*.26,H*.7,0,H*.69);ctx.closePath();ctx.fill();
-        // 河流和小路在靠近画面处略微变宽，形成从高处向远方俯瞰的透视。
-        ctx.strokeStyle='rgba(180,220,211,.7)';ctx.lineCap='round';ctx.lineWidth=11;ctx.beginPath();ctx.moveTo(W*.08,H*.75);ctx.bezierCurveTo(W*.25,H*.68,W*.42,H*.74,W*.56,H*.63);ctx.bezierCurveTo(W*.69,H*.54,W*.82,H*.62,W*.92,H*.55);ctx.stroke();
-        ctx.strokeStyle='rgba(112,91,61,.2)';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(W*.78,H*.78);ctx.bezierCurveTo(W*.68,H*.7,W*.62,H*.66,W*.57,H*.56);ctx.stroke();
+        // 不再绘制中间平原层：四座彼此分开的远山直接落到人物站立层后方。
+        const ridgeY=H*.785;for(const [ratio,scale] of [[.12,.88],[.38,1.04],[.66,.82],[.9,.96]]){const x=W*ratio,r=W*.105*scale;ctx.fillStyle='rgba(84,79,105,.74)';ctx.beginPath();ctx.moveTo(x-r,ridgeY);ctx.lineTo(x,ridgeY-r*.72);ctx.lineTo(x+r,ridgeY);ctx.closePath();ctx.fill();ctx.strokeStyle='rgba(65,59,85,.5)';ctx.lineWidth=3;ctx.stroke();}
     }
 
     function drawLevelTopBar() {
@@ -3676,7 +3670,7 @@
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 ctx.font = 'bold 14px system-ui, "PingFang SC", sans-serif';
-                ctx.fillText('奇幻版 F3.3', vbx + vbw / 2, vby + vbh / 2);
+                ctx.fillText('奇幻版 F3.4', vbx + vbw / 2, vby + vbh / 2);
                 ctx.restore();
             } catch(_vErr) { /* 不影响玩 */ }
             // ===== v17.0 debug=1：顶部大字彩色「通关状态机」标签（用户不看console也知道当前阶段）=====
