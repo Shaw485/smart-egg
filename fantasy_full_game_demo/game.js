@@ -622,7 +622,6 @@
         const glow=ctx.createRadialGradient(W*.76,H*.23,12,W*.76,H*.23,210);glow.addColorStop(0,'rgba(255,235,151,.92)');glow.addColorStop(.5,'rgba(255,171,99,.38)');glow.addColorStop(1,'rgba(255,126,82,0)');ctx.fillStyle=glow;ctx.fillRect(0,0,W,H);
         ctx.fillStyle='#ffda91';ctx.beginPath();ctx.arc(W*.76,H*.23,60,0,Math.PI*2);ctx.fill();
         const ridgeY=H*.69;for(let i=0;i<8;i++){const x=i*W/7,r=W*.17;ctx.fillStyle=i%2?'#62576f':'#514c67';ctx.beginPath();ctx.moveTo(x-r,ridgeY);ctx.lineTo(x,ridgeY-r*.62);ctx.lineTo(x+r,ridgeY);ctx.closePath();ctx.fill();ctx.strokeStyle='#413b55';ctx.lineWidth=4;ctx.stroke();}
-        ctx.fillStyle='#3c5049';ctx.beginPath();ctx.moveTo(0,H);ctx.lineTo(0,ridgeY);for(let x=0;x<=W;x+=80)ctx.lineTo(x,ridgeY-32-Math.sin(x*.012)*18);ctx.lineTo(W,H);ctx.fill();
     }
 
     function drawLevelTopBar() {
@@ -3670,7 +3669,7 @@
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 ctx.font = 'bold 14px system-ui, "PingFang SC", sans-serif';
-                ctx.fillText('奇幻版 F3', vbx + vbw / 2, vby + vbh / 2);
+                ctx.fillText('奇幻版 F3.1', vbx + vbw / 2, vby + vbh / 2);
                 ctx.restore();
             } catch(_vErr) { /* 不影响玩 */ }
             // ===== v17.0 debug=1：顶部大字彩色「通关状态机」标签（用户不看console也知道当前阶段）=====
