@@ -3350,32 +3350,36 @@
         const air=!player.onGround,walking=player.onGround&&Math.abs(player.vx)>10,rising=air&&player.vy<0,clock=performance.now()*.001,dir=player.vx<0?-1:1,bob=walking?-Math.max(0,Math.sin(player.walkT))*5:0;
         ctx.save();ctx.translate(ax,ay-24+bob);ctx.scale(dir*scale,scale);const lift=air?1:0;
         ctx.strokeStyle='#17343a';ctx.fillStyle='#f2efe6';ctx.lineCap='round';ctx.lineJoin='round';ctx.lineWidth=5;
-        // 方案 4：斗笠江湖旅人。两片短披风是折角下摆，不画成半圆；动作时仅轻微摆动。
-        const clothWave=walking?Math.sin(clock*11)*4:(lift?Math.sin(clock*7)*3:0),clothLift=lift*6;
+        // 侧身斗笠旅人：默认面向右侧，ctx.scale 会在向左走时镜像整个人物。
+        const clothWave=walking?Math.sin(clock*11)*4:(lift?Math.sin(clock*7)*3:0),clothLift=lift*6,arm=Math.sin(player.walkT||0)*6;
         ctx.fillStyle='#f2efe6';ctx.lineWidth=5;
-        ctx.beginPath();ctx.moveTo(-13,-8);ctx.quadraticCurveTo(-29-clothWave*.25,-4-clothLift*.2,-38-clothWave,21-clothLift);ctx.lineTo(-29-clothWave*.55,43-clothLift*.7);ctx.lineTo(-15,31-clothLift*.25);ctx.lineTo(-8,7);ctx.closePath();ctx.fill();ctx.stroke();
-        ctx.beginPath();ctx.moveTo(13,-8);ctx.quadraticCurveTo(28+clothWave*.15,-3-clothLift*.2,37+clothWave*.4,19-clothLift);ctx.lineTo(30+clothWave*.2,41-clothLift*.65);ctx.lineTo(15,31-clothLift*.2);ctx.lineTo(8,7);ctx.closePath();ctx.fill();ctx.stroke();
+        ctx.beginPath();ctx.moveTo(-10,-8);ctx.quadraticCurveTo(-29-clothWave*.25,-3-clothLift*.2,-41-clothWave,22-clothLift);ctx.lineTo(-32-clothWave*.55,46-clothLift*.7);ctx.lineTo(-14,33-clothLift*.25);ctx.lineTo(-6,8);ctx.closePath();ctx.fill();ctx.stroke();
+        ctx.save();ctx.strokeStyle='rgba(23,52,58,.45)';ctx.lineWidth=2.4;ctx.beginPath();ctx.moveTo(-15,0);ctx.quadraticCurveTo(-24-clothWave*.2,20-clothLift*.35,-25-clothWave*.3,37-clothLift*.55);ctx.stroke();ctx.restore();
 
-        // 圆脸、短发与对称表情，保持小尺寸下也清楚友善。
-        ctx.fillStyle='#f2efe6';ctx.beginPath();ctx.ellipse(-25,-32,5.5,7.5,0,0,Math.PI*2);ctx.fill();ctx.stroke();ctx.beginPath();ctx.ellipse(25,-32,5.5,7.5,0,0,Math.PI*2);ctx.fill();ctx.stroke();
-        ctx.beginPath();ctx.ellipse(0,-34,26,28,0,0,Math.PI*2);ctx.fill();ctx.stroke();
-        ctx.fillStyle='#17343a';ctx.beginPath();ctx.moveTo(-22,-47);ctx.quadraticCurveTo(-11,-57,1,-53);ctx.quadraticCurveTo(12,-58,22,-46);ctx.lineTo(14,-43);ctx.quadraticCurveTo(7,-49,2,-43);ctx.quadraticCurveTo(-4,-50,-10,-43);ctx.quadraticCurveTo(-16,-48,-22,-41);ctx.closePath();ctx.fill();
-        ctx.beginPath();ctx.arc(-8,-33,3.7,0,Math.PI*2);ctx.fill();ctx.beginPath();ctx.arc(8,-33,3.7,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#17343a';ctx.lineWidth=2.6;ctx.beginPath();ctx.moveTo(-8,-22);ctx.quadraticCurveTo(0,-17,8,-22);ctx.stroke();
+        // 远侧手臂先画在身体后方，强化侧身层次。
+        _fantasyLine([[-9,7],[-25-(walking?arm*.55:0),rising?-12:23]],'#17343a',4.5);
 
-        // 宽斗笠会随步伐和跳跃轻微摆动，帽檐始终压在头顶，不脱离人物。
+        // 侧脸：后脑、耳朵、向前的鼻尖、单只正视前方的眼睛和微笑。
+        ctx.fillStyle='#f2efe6';ctx.strokeStyle='#17343a';ctx.lineWidth=5;ctx.beginPath();ctx.ellipse(-18,-33,6,8,0,0,Math.PI*2);ctx.fill();ctx.stroke();
+        ctx.beginPath();ctx.moveTo(-17,-52);ctx.quadraticCurveTo(2,-61,17,-50);ctx.quadraticCurveTo(23,-45,22,-39);ctx.quadraticCurveTo(30,-36,22,-31);ctx.quadraticCurveTo(21,-18,8,-13);ctx.quadraticCurveTo(-7,-10,-17,-19);ctx.quadraticCurveTo(-25,-29,-22,-41);ctx.quadraticCurveTo(-21,-47,-17,-52);ctx.closePath();ctx.fill();ctx.stroke();
+        ctx.fillStyle='#17343a';ctx.beginPath();ctx.moveTo(-18,-51);ctx.quadraticCurveTo(-6,-60,9,-55);ctx.quadraticCurveTo(17,-53,20,-47);ctx.lineTo(11,-44);ctx.quadraticCurveTo(6,-50,1,-44);ctx.quadraticCurveTo(-6,-50,-12,-42);ctx.quadraticCurveTo(-16,-46,-18,-40);ctx.closePath();ctx.fill();
+        ctx.beginPath();ctx.ellipse(10,-38,3.8,4.3,0,0,Math.PI*2);ctx.fill();ctx.fillStyle='#f2efe6';ctx.beginPath();ctx.arc(11,-39.5,1,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#17343a';ctx.lineWidth=2.6;ctx.beginPath();ctx.moveTo(11,-23);ctx.quadraticCurveTo(17,-19,21,-24);ctx.stroke();ctx.lineWidth=2;ctx.beginPath();ctx.arc(-18,-33,2.6,-1.1,1.1);ctx.stroke();
+
+        // 侧面斗笠保持宽檐，帽尖略偏后，移动时只做很小的旋转。
         const hatSway=(walking?Math.sin(clock*10)*1.7:Math.sin(clock*4)*.35)+lift*Math.sin(clock*7)*1.2;
         ctx.save();ctx.translate(0,-54);ctx.rotate(hatSway*.012);ctx.translate(0,54);ctx.fillStyle='#f2efe6';ctx.strokeStyle='#17343a';ctx.lineWidth=4;
-        ctx.beginPath();ctx.moveTo(-40,-54);ctx.quadraticCurveTo(-12,-79,0,-84);ctx.quadraticCurveTo(13,-79,40,-54);ctx.quadraticCurveTo(0,-48,-40,-54);ctx.closePath();ctx.fill();ctx.stroke();
-        ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(0,-82);ctx.lineTo(-22,-56);ctx.moveTo(0,-82);ctx.lineTo(0,-53);ctx.moveTo(0,-82);ctx.lineTo(22,-56);ctx.stroke();ctx.beginPath();ctx.ellipse(0,-84,7,3,0,0,Math.PI*2);ctx.fill();ctx.stroke();ctx.restore();
+        ctx.beginPath();ctx.moveTo(-42,-54);ctx.quadraticCurveTo(-14,-79,-2,-84);ctx.quadraticCurveTo(11,-79,41,-54);ctx.quadraticCurveTo(5,-48,-42,-54);ctx.closePath();ctx.fill();ctx.stroke();
+        ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(-2,-82);ctx.lineTo(-23,-56);ctx.moveTo(-2,-82);ctx.lineTo(2,-53);ctx.moveTo(-2,-82);ctx.lineTo(23,-55);ctx.stroke();ctx.beginPath();ctx.ellipse(-2,-84,7,3,0,0,Math.PI*2);ctx.fill();ctx.stroke();ctx.restore();
 
-        // 交领短衣、肩披、腰带与束脚裤，对应候选图 4 的简洁轮廓。
-        ctx.fillStyle='#f2efe6';ctx.strokeStyle='#17343a';ctx.lineWidth=5;ctx.beginPath();ctx.roundRect(-22,-5,44,43,7);ctx.fill();ctx.stroke();
-        ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(-17,-2);ctx.lineTo(12,20);ctx.moveTo(17,-2);ctx.lineTo(-6,18);ctx.moveTo(-21,25);ctx.lineTo(21,25);ctx.stroke();
-        ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(0,-5);ctx.lineTo(-18,-9);ctx.quadraticCurveTo(-27,-5,-29,4);ctx.lineTo(-13,10);ctx.closePath();ctx.fill();ctx.stroke();ctx.beginPath();ctx.moveTo(0,-5);ctx.lineTo(18,-9);ctx.quadraticCurveTo(27,-5,29,4);ctx.lineTo(13,10);ctx.closePath();ctx.fill();ctx.stroke();ctx.beginPath();ctx.arc(0,-3,4.5,0,Math.PI*2);ctx.fill();ctx.stroke();
+        // 窄一些的侧身交领上衣、后肩披和腰带。
+        ctx.fillStyle='#f2efe6';ctx.strokeStyle='#17343a';ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(-14,-5);ctx.quadraticCurveTo(1,-9,15,-3);ctx.lineTo(18,34);ctx.quadraticCurveTo(2,40,-14,36);ctx.closePath();ctx.fill();ctx.stroke();
+        ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(-8,-3);ctx.lineTo(12,14);ctx.moveTo(10,-2);ctx.lineTo(-3,14);ctx.moveTo(-14,25);ctx.lineTo(17,25);ctx.stroke();
+        ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(1,-5);ctx.lineTo(-16,-9);ctx.quadraticCurveTo(-26,-5,-28,5);ctx.lineTo(-10,12);ctx.closePath();ctx.fill();ctx.stroke();ctx.beginPath();ctx.arc(1,-3,4.2,0,Math.PI*2);ctx.fill();ctx.stroke();
+        // 近侧手臂在身体前方，行走时与远侧手臂反向摆动。
+        _fantasyLine([[14,6],[29+(walking?arm:0),rising?-14:24]],'#17343a',5);
 
-        const arm=Math.sin(player.walkT||0)*6;_fantasyLine([[-22,7],[-37-(walking?arm:0),rising?-14:24]],'#17343a',5);_fantasyLine([[22,7],[37+(walking?arm:0),rising?-14:23]],'#17343a',5);
-        ctx.fillStyle='#f2efe6';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(-20,37);ctx.lineTo(-2,37);ctx.lineTo(-5,56);ctx.lineTo(-20,56);ctx.closePath();ctx.fill();ctx.stroke();ctx.beginPath();ctx.moveTo(2,37);ctx.lineTo(20,37);ctx.lineTo(20,56);ctx.lineTo(5,56);ctx.closePath();ctx.fill();ctx.stroke();
-        const p=Math.sin(player.walkT||0),p2=-p,k1=[-12+p*4,67-Math.max(0,p)*4],f1=[-12+p*11,82-Math.max(0,p)*7],k2=[12+p2*4,67-Math.max(0,p2)*4],f2=[13+p2*11,82-Math.max(0,p2)*7];_fantasyLine([[-12,56],k1,f1],'#17343a',5);_fantasyLine([[12,56],k2,f2],'#17343a',5);_fantasyLine([[f1[0]-3,f1[1]],[f1[0]+7,f1[1]]],'#17343a',5);_fantasyLine([[f2[0]-3,f2[1]],[f2[0]+7,f2[1]]],'#17343a',5);ctx.restore();
+        ctx.fillStyle='#f2efe6';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(-14,36);ctx.lineTo(1,37);ctx.lineTo(-2,56);ctx.lineTo(-15,56);ctx.closePath();ctx.fill();ctx.stroke();ctx.beginPath();ctx.moveTo(1,37);ctx.lineTo(17,35);ctx.lineTo(18,55);ctx.lineTo(5,56);ctx.closePath();ctx.fill();ctx.stroke();
+        const p=Math.sin(player.walkT||0),p2=-p,k1=[-9+p*4,67-Math.max(0,p)*4],f1=[-10+p*11,82-Math.max(0,p)*7],k2=[10+p2*4,67-Math.max(0,p2)*4],f2=[12+p2*11,82-Math.max(0,p2)*7];_fantasyLine([[-9,56],k1,f1],'#17343a',5);_fantasyLine([[10,56],k2,f2],'#17343a',5);_fantasyLine([[f1[0]-3,f1[1]],[f1[0]+8,f1[1]]],'#17343a',5);_fantasyLine([[f2[0]-3,f2[1]],[f2[0]+8,f2[1]]],'#17343a',5);ctx.restore();
     }
 
     function loop(now) {
@@ -3718,7 +3722,7 @@
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 ctx.font = 'bold 14px system-ui, "PingFang SC", sans-serif';
-                ctx.fillText('斗笠侠 M3.4', vbx + vbw / 2, vby + vbh / 2);
+                ctx.fillText('侧身侠 M3.5', vbx + vbw / 2, vby + vbh / 2);
                 ctx.restore();
             } catch(_vErr) { /* 不影响玩 */ }
             // ===== v17.0 debug=1：顶部大字彩色「通关状态机」标签（用户不看console也知道当前阶段）=====
