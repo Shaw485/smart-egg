@@ -3350,8 +3350,10 @@
         const air=!player.onGround,walking=player.onGround&&Math.abs(player.vx)>10,rising=air&&player.vy<0,clock=performance.now()*.001,dir=player.vx<0?-1:1,bob=walking?-Math.max(0,Math.sin(player.walkT))*5:0;
         ctx.save();ctx.translate(ax,ay-24+bob);ctx.scale(dir*scale,scale);const lift=air?1:0;
         ctx.strokeStyle='#17343a';ctx.fillStyle='#f2efe6';ctx.lineCap='round';ctx.lineJoin='round';ctx.lineWidth=5;
-        // 原创忍者轮廓：恢复上一版的纸白披风，以黑色主线勾勒；头罩与绑带仍保持深色。
-        const capeWave=Math.sin(clock*(walking?12:7))*(walking?8:3)+Math.sin(clock*8)*lift*5;ctx.fillStyle='#f2efe6';ctx.beginPath();ctx.moveTo(-13,-8);ctx.bezierCurveTo(-48-capeWave,-5-lift*8,-69-capeWave,17-lift*13,-67-capeWave,44-lift*17);ctx.quadraticCurveTo(-60-capeWave,63-lift*12,-42-capeWave,72-lift*9);ctx.quadraticCurveTo(-18,56,7,33);ctx.quadraticCurveTo(-3,11,-13,-8);ctx.closePath();ctx.fill();ctx.stroke();
+        // 披风贴住后肩自然下垂；走路时向身后展开，跳跃时仅抬起下摆，不再像一整块硬片。
+        const moveRatio=Math.min(1,Math.abs(player.vx)/430),capeWave=Math.sin(clock*(walking?10:5))*(walking?4:1.5),capeBack=5+moveRatio*14+lift*5,capeLift=lift*10;
+        ctx.fillStyle='#f2efe6';ctx.beginPath();ctx.moveTo(-14,-7);ctx.bezierCurveTo(-21,-2,-27-capeBack,9-capeLift*.25,-30-capeBack+capeWave,25-capeLift*.7);ctx.bezierCurveTo(-34-capeBack+capeWave,40-capeLift,-27-capeBack*.65+capeWave,54-capeLift,-16-capeBack*.25,58-capeLift*.7);ctx.quadraticCurveTo(-7,54-capeLift*.35,-8,39);ctx.quadraticCurveTo(-8,16,-14,-7);ctx.closePath();ctx.fill();ctx.stroke();
+        ctx.save();ctx.strokeStyle='rgba(23,52,58,.55)';ctx.lineWidth=2.5;ctx.beginPath();ctx.moveTo(-18,-1);ctx.bezierCurveTo(-22-capeBack*.35,15-capeLift*.3,-23-capeBack*.45+capeWave*.4,35-capeLift*.65,-17-capeBack*.2,49-capeLift*.55);ctx.stroke();ctx.restore();
         ctx.fillStyle='#17343a';
         ctx.beginPath();ctx.moveTo(-18,-49);ctx.lineTo(-47,-61);ctx.lineTo(-38,-47);ctx.lineTo(-50,-35);ctx.lineTo(-18,-41);ctx.closePath();ctx.fill();
         ctx.beginPath();ctx.ellipse(0,-34,28,31,0,0,Math.PI*2);ctx.fill();ctx.stroke();
@@ -3703,7 +3705,7 @@
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 ctx.font = 'bold 14px system-ui, "PingFang SC", sans-serif';
-                ctx.fillText('忍者版 M2.8', vbx + vbw / 2, vby + vbh / 2);
+                ctx.fillText('忍者版 M2.9', vbx + vbw / 2, vby + vbh / 2);
                 ctx.restore();
             } catch(_vErr) { /* 不影响玩 */ }
             // ===== v17.0 debug=1：顶部大字彩色「通关状态机」标签（用户不看console也知道当前阶段）=====
