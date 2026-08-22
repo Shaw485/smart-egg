@@ -618,21 +618,9 @@
     }
 
     function drawGrid() {
-        // 宣纸底与细微纸纹。
+        // 极简背景：大面积留白，仅保留一个很淡的圆月。
         ctx.fillStyle='#f2efe6';ctx.fillRect(0,0,W,H);
-        ctx.strokeStyle='rgba(40,40,36,.035)';ctx.lineWidth=1;for(let i=0;i<34;i++){const y=(i*79+23)%H;ctx.beginPath();ctx.moveTo(0,y);ctx.bezierCurveTo(W*.3,y+3,W*.68,y-4,W,y+1);ctx.stroke();}
-        for(let i=0;i<75;i++){const x=(i*149+37)%W,y=(i*83+19)%H;ctx.fillStyle='rgba(20,20,18,'+(0.018+(i%4)*.008)+')';ctx.beginPath();ctx.arc(x,y,1+(i%3),0,Math.PI*2);ctx.fill();}
-        // 淡月、飞鸟与大片留白。
-        ctx.strokeStyle='rgba(25,25,24,.34)';ctx.lineWidth=3;ctx.beginPath();ctx.arc(W*.78,H*.2,72,0,Math.PI*2);ctx.stroke();
-        ctx.strokeStyle='rgba(25,25,24,.62)';ctx.lineWidth=4;ctx.lineCap='round';for(const [x,y,s] of [[W*.18,H*.22,1],[W*.23,H*.17,.75],[W*.67,H*.3,.8]]){ctx.beginPath();ctx.quadraticCurveTo(x+s*12,y-s*8,x+s*24,y);ctx.quadraticCurveTo(x+s*36,y-s*8,x+s*48,y);ctx.stroke();}
-        // 清爽线描远山：三段分离轮廓，不互相穿插，也不经过标题和按钮。
-        ctx.strokeStyle='rgba(24,24,22,.34)';ctx.lineWidth=3;ctx.lineCap='round';ctx.lineJoin='round';
-        const mountainLines=[
-            [[0,.86],[.055,.82],[.12,.76],[.18,.8],[.27,.86]],
-            [[.36,.86],[.43,.81],[.5,.75],[.57,.8],[.65,.86]],
-            [[.73,.86],[.8,.82],[.86,.77],[.92,.81],[1,.86]]
-        ];
-        for(const points of mountainLines){ctx.beginPath();ctx.moveTo(points[0][0]*W,points[0][1]*H);for(let i=1;i<points.length-1;i++){const p=points[i],n=points[i+1],mx=(p[0]+n[0])*.5*W,my=(p[1]+n[1])*.5*H;ctx.quadraticCurveTo(p[0]*W,p[1]*H,mx,my);}const last=points[points.length-1];ctx.lineTo(last[0]*W,last[1]*H);ctx.stroke();}
+        ctx.strokeStyle='rgba(25,25,24,.16)';ctx.lineWidth=2;ctx.beginPath();ctx.arc(W*.8,H*.19,66,0,Math.PI*2);ctx.stroke();
     }
 
     function drawLevelTopBar() {
@@ -3675,7 +3663,7 @@
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 ctx.font = 'bold 14px system-ui, "PingFang SC", sans-serif';
-                ctx.fillText('线描版 M2.1', vbx + vbw / 2, vby + vbh / 2);
+                ctx.fillText('极简版 M2.2', vbx + vbw / 2, vby + vbh / 2);
                 ctx.restore();
             } catch(_vErr) { /* 不影响玩 */ }
             // ===== v17.0 debug=1：顶部大字彩色「通关状态机」标签（用户不看console也知道当前阶段）=====
