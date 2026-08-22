@@ -3355,10 +3355,12 @@
         ctx.fillStyle='#f2efe6';ctx.beginPath();ctx.moveTo(-12,-7);ctx.bezierCurveTo(-21-capeReach*.14,1-capeLift*.25,-30-capeReach*.64,24-capeWave-capeLift*.65,-34-capeReach,61-capeReach*.22-capeLift);ctx.lineTo(-20-capeReach*.44,52-capeReach*.15-capeLift*.72);ctx.lineTo(-9-capeReach*.18,60-capeReach*.1-capeLift*.55);ctx.bezierCurveTo(-7,42-capeLift*.25,-7,12,-12,-7);ctx.closePath();ctx.fill();ctx.stroke();
         ctx.save();ctx.strokeStyle='rgba(23,52,58,.5)';ctx.lineWidth=2.5;ctx.beginPath();ctx.moveTo(-17,2);ctx.bezierCurveTo(-22-capeReach*.2,21-capeWave*.2-capeLift*.35,-24-capeReach*.34,38-capeWave*.3-capeLift*.55,-20-capeReach*.2,51-capeLift*.5);ctx.stroke();ctx.restore();
         ctx.fillStyle='#17343a';
-        ctx.beginPath();ctx.moveTo(-18,-49);ctx.lineTo(-47,-61);ctx.lineTo(-38,-47);ctx.lineTo(-50,-35);ctx.lineTo(-18,-41);ctx.closePath();ctx.fill();
-        ctx.beginPath();ctx.ellipse(0,-34,28,31,0,0,Math.PI*2);ctx.fill();ctx.stroke();
-        ctx.fillStyle='#f2efe6';ctx.beginPath();ctx.roundRect(-12,-43,34,18,8);ctx.fill();
-        ctx.fillStyle='#17343a';ctx.beginPath();ctx.arc(10,-34,4,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#f2efe6';ctx.lineWidth=2.5;ctx.beginPath();ctx.moveTo(-18,-49);ctx.lineTo(20,-49);ctx.stroke();ctx.strokeStyle='#17343a';
+        // 圆润的忍者头罩与短绑带尾；面窗居中，双眼对称，避免旧版单眼斜视感。
+        ctx.beginPath();ctx.moveTo(-18,-49);ctx.lineTo(-39,-56);ctx.lineTo(-33,-47);ctx.lineTo(-42,-39);ctx.lineTo(-18,-42);ctx.closePath();ctx.fill();
+        ctx.beginPath();ctx.ellipse(0,-34,29,30,0,0,Math.PI*2);ctx.fill();ctx.stroke();
+        ctx.fillStyle='#f2efe6';ctx.beginPath();ctx.roundRect(-19,-44,38,20,10);ctx.fill();
+        ctx.fillStyle='#17343a';ctx.beginPath();ctx.ellipse(-7,-34,3.7,4.5,0,0,Math.PI*2);ctx.fill();ctx.beginPath();ctx.ellipse(7,-34,3.7,4.5,0,0,Math.PI*2);ctx.fill();
+        ctx.fillStyle='#f2efe6';ctx.beginPath();ctx.arc(-6,-35.5,1,0,Math.PI*2);ctx.fill();ctx.beginPath();ctx.arc(8,-35.5,1,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#17343a';
         // 交叉短衣、腰带和裤装保持清楚，不增加多余衣褶。
         ctx.fillStyle='#f2efe6';ctx.lineWidth=5;ctx.beginPath();ctx.roundRect(-23,-4,46,42,7);ctx.fill();ctx.stroke();ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(-18,-1);ctx.lineTo(18,23);ctx.moveTo(-22,25);ctx.lineTo(22,25);ctx.stroke();
         const arm=Math.sin(player.walkT||0)*6;_fantasyLine([[-22,4],[-38-(walking?arm:0),rising?-16:21]],'#17343a',5);_fantasyLine([[22,4],[38+(walking?arm:0),rising?-16:20]],'#17343a',5);
@@ -3705,7 +3707,7 @@
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 ctx.font = 'bold 14px system-ui, "PingFang SC", sans-serif';
-                ctx.fillText('忍者版 M3.2', vbx + vbw / 2, vby + vbh / 2);
+                ctx.fillText('忍者版 M3.3', vbx + vbw / 2, vby + vbh / 2);
                 ctx.restore();
             } catch(_vErr) { /* 不影响玩 */ }
             // ===== v17.0 debug=1：顶部大字彩色「通关状态机」标签（用户不看console也知道当前阶段）=====
