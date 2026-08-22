@@ -662,19 +662,21 @@
         ctx.restore();
         sketchBold(_playingCustom ? '自定义关卡' : ('第 ' + (currentLevelIndex + 1) + ' 关'), bx + bw / 2, by + bh / 2 + 8, _playingCustom ? 29 : 34);
 
-        // === 2. ? ↻ ⏸ 三个手绘不规则方按钮（盒子不变，用Canvas线条/形状自画3个图标→绝对居中+放大）===
+        // === 2. ? ↻ ⏸ 三个轻削角纸片按钮：保留原点击区域，只更新视觉形象。===
         const bs = 96, bgap = 34;
         const by2 = 26;
         const bx0 = bx + bw + 44;
         for (let i = 0; i < 3; i++) {
             const cx = bx0 + i * (bs + bgap);
             const icx = cx + bs / 2, icy = by2 + bs / 2;
-            // 不规则圆角方按钮（每个按钮独立种子）
+            // 轻微不对称的削角纸片，比旧圆角方框更利落，也更贴合忍者线描风。
             ctx.save();
             ctx.fillStyle = '#fff0bd';
-            _wonkyRectPath(cx, by2, bs, bs, 22, 6000 + i * 137, 2.8); ctx.fill();
-            ctx.strokeStyle = '#17343a'; ctx.lineWidth = 6;
-            _wonkyRectPath(cx, by2, bs, bs, 22, 6000 + i * 137, 2.8); ctx.stroke();
+            _cutCornerPanelPath(cx, by2, bs, bs, 16, 6000 + i * 137); ctx.fill();
+            ctx.strokeStyle = '#17343a'; ctx.lineWidth = 5;
+            _cutCornerPanelPath(cx, by2, bs, bs, 16, 6000 + i * 137); ctx.stroke();
+            ctx.strokeStyle = 'rgba(23,52,58,.35)'; ctx.lineWidth = 2;
+            _cutCornerPanelPath(cx + 7, by2 + 7, bs - 14, bs - 14, 10, 6100 + i * 137); ctx.stroke();
             ctx.restore();
 
             if (i === 0) {
@@ -682,7 +684,7 @@
                 ctx.save();
                 ctx.strokeStyle = '#17343a';
                 ctx.fillStyle = '#17343a';
-                ctx.lineWidth = 7;
+                ctx.lineWidth = 6;
                 ctx.lineCap = 'round';
                 ctx.lineJoin = 'round';
                 // 问号的钩子：从顶部开始绕圆弧+下降
@@ -705,7 +707,7 @@
                 ctx.save();
                 ctx.strokeStyle = '#17343a';
                 ctx.fillStyle = '#17343a';
-                ctx.lineWidth = 7;
+                ctx.lineWidth = 6;
                 ctx.lineCap = 'round';
                 ctx.lineJoin = 'round';
                 // 更大、更饱满的回转箭头：接近一整圈，并用单个大箭头收尾
@@ -738,7 +740,7 @@
                 // 第3个：暂停「||」两条粗竖线（居中并排）
                 ctx.save();
                 ctx.strokeStyle = '#17343a';
-                ctx.lineWidth = 9;
+                ctx.lineWidth = 8;
                 ctx.lineCap = 'round';
                 const barH = 42;
                 const barGap = 12;
@@ -789,6 +791,21 @@
         ctx.restore();
     }
 
+    // 略带手绘偏差的削角面板。按钮碰撞区仍使用原矩形，不改变操作手感。
+    function _cutCornerPanelPath(x, y, w, h, cut = 14, seed = 0) {
+        const n = (i, amp = 1.2) => wobbleStatic(seed + i, amp);
+        ctx.beginPath();
+        ctx.moveTo(x + cut + n(1), y + n(2));
+        ctx.lineTo(x + w - cut + n(3), y + n(4));
+        ctx.lineTo(x + w + n(5), y + cut + n(6));
+        ctx.lineTo(x + w + n(7), y + h - cut + n(8));
+        ctx.lineTo(x + w - cut + n(9), y + h + n(10));
+        ctx.lineTo(x + cut + n(11), y + h + n(12));
+        ctx.lineTo(x + n(13), y + h - cut + n(14));
+        ctx.lineTo(x + n(15), y + cut + n(16));
+        ctx.closePath();
+    }
+
     function drawBottomControls() {
         // 参考稿：底部三个黑色手绘大按键，白色粗线箭头；左右键分开，跳跃键靠右。
         const by = H - 172;
@@ -799,15 +816,17 @@
         const x3 = W - 190 - sz;
 
         function drawBigBtn(x, y, seed) {
-            // 纯线稿按钮：双层手绘轮廓，不再涂黑主体。
+            // 削角纸片：减少旧版规则虚线边框的机械感，点击区域保持不变。
             ctx.save();
-            ctx.strokeStyle = '#17343a';
-            ctx.lineWidth = 4;
-            ctx.setLineDash([28, 9, 5, 12]);
-            _wonkyRectPath(x - 9, y - 9, sz + 18, sz + 18, r + 7, seed + 1, 4); ctx.stroke();
-            ctx.setLineDash([]);
+            ctx.fillStyle = 'rgba(255,240,189,.26)';
+            _cutCornerPanelPath(x, y, sz, sz, 22, seed); ctx.fill();
             ctx.strokeStyle = '#17343a'; ctx.lineWidth = 6;
-            _wonkyRectPath(x, y, sz, sz, r, seed, 3); ctx.stroke();
+            _cutCornerPanelPath(x, y, sz, sz, 22, seed); ctx.stroke();
+            ctx.strokeStyle = 'rgba(23,52,58,.35)'; ctx.lineWidth = 3;
+            _cutCornerPanelPath(x + 9, y + 9, sz - 18, sz - 18, 15, seed + 80); ctx.stroke();
+            // 两个短角记号保留一点手绘感，但不再绕整圈使用规律虚线。
+            _fantasyLine([[x - 8, y + 30], [x - 8, y + 12], [x + 10, y + 12]], '#17343a', 3);
+            _fantasyLine([[x + sz - 10, y + sz - 12], [x + sz + 8, y + sz - 12], [x + sz + 8, y + sz - 30]], '#17343a', 3);
             ctx.restore();
         }
         drawBigBtn(x1, by, 7001);
@@ -818,7 +837,7 @@
             const arm = dir === 'up' ? 36 : 33;
             ctx.save();
             ctx.strokeStyle = '#17343a';
-            ctx.lineWidth = 18;
+            ctx.lineWidth = 15;
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
             ctx.beginPath();
@@ -3296,7 +3315,15 @@
             if(kind==='ground'){
                 _fantasyLine([[x,y],[x+w,y]],'#17343a',6);_fantasyLine([[x,y+16],[x+w,y+16]],'rgba(23,52,58,.45)',3);
                 if(x>1)_fantasyLine([[x,y],[x,y+h]],'#17343a',6);if(x+w<W-1)_fantasyLine([[x+w,y],[x+w,y+h]],'#17343a',6);
-                const first=levelData.infinite_horizontal?Math.floor((_cameraX-150)/150)*150:x+60,last=levelData.infinite_horizontal?_cameraX+W+150:x+w-40;for(let gx=first;gx<last;gx+=150){_fantasyLine([[gx,y],[gx-5,y-15]],'#34483e',3);_fantasyLine([[gx,y],[gx+7,y-12]],'#34483e',3);}
+                // 稀疏、稳定的世界坐标草丛：间距、位置和高度各不相同，卷屏时不会闪烁。
+                const grassCell=310,grassStart=levelData.infinite_horizontal?Math.floor((_cameraX-220)/grassCell):Math.floor((x+45)/grassCell),grassEnd=levelData.infinite_horizontal?Math.ceil((_cameraX+W+220)/grassCell):Math.ceil((x+w-45)/grassCell);
+                for(let cell=grassStart;cell<=grassEnd;cell++){
+                    if(Math.abs(cell*17+5)%5===1)continue;
+                    const gx=cell*grassCell+132+wobbleStatic(18200+cell*19,58),blade=10+wobbleStatic(18400+cell*23,5);
+                    if(gx<x+35||gx>x+w-35)continue;
+                    _fantasyLine([[gx,y],[gx-4+wobbleStatic(18600+cell,2),y-blade]],'#242422',2.5);
+                    if(Math.abs(cell)%3!==1)_fantasyLine([[gx+1,y],[gx+6+wobbleStatic(18800+cell,2),y-blade*.72]],'#242422',2.5);
+                }
             }else{
                 ctx.save();ctx.strokeStyle='#17343a';ctx.lineWidth=5;ctx.beginPath();ctx.roundRect(x,y,w,h,Math.min(15,h*.25));ctx.stroke();ctx.strokeStyle='rgba(23,52,58,.48)';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(x+12,y+10);ctx.lineTo(x+w-12,y+10);ctx.moveTo(x+w*.2,y+h*.67);ctx.lineTo(x+w*.42,y+h*.64);ctx.moveTo(x+w*.65,y+h*.7);ctx.lineTo(x+w*.8,y+h*.66);ctx.stroke();ctx.restore();
             }
@@ -3323,8 +3350,9 @@
         const air=!player.onGround,walking=player.onGround&&Math.abs(player.vx)>10,rising=air&&player.vy<0,clock=performance.now()*.001,dir=player.vx<0?-1:1,bob=walking?-Math.max(0,Math.sin(player.walkT))*5:0;
         ctx.save();ctx.translate(ax,ay-24+bob);ctx.scale(dir*scale,scale);const lift=air?1:0;
         ctx.strokeStyle='#17343a';ctx.fillStyle='#f2efe6';ctx.lineCap='round';ctx.lineJoin='round';ctx.lineWidth=5;
-        // 原创忍者轮廓：黑色披风、头罩、露眼面窗与简洁绑带。
-        const capeWave=Math.sin(clock*(walking?12:7))*(walking?8:3)+Math.sin(clock*8)*lift*5;ctx.fillStyle='#17343a';ctx.beginPath();ctx.moveTo(-13,-8);ctx.bezierCurveTo(-48-capeWave,-5-lift*8,-69-capeWave,17-lift*13,-67-capeWave,44-lift*17);ctx.quadraticCurveTo(-60-capeWave,63-lift*12,-42-capeWave,72-lift*9);ctx.quadraticCurveTo(-18,56,7,33);ctx.quadraticCurveTo(-3,11,-13,-8);ctx.closePath();ctx.fill();ctx.stroke();
+        // 原创忍者轮廓：恢复上一版的纸白披风，以黑色主线勾勒；头罩与绑带仍保持深色。
+        const capeWave=Math.sin(clock*(walking?12:7))*(walking?8:3)+Math.sin(clock*8)*lift*5;ctx.fillStyle='#f2efe6';ctx.beginPath();ctx.moveTo(-13,-8);ctx.bezierCurveTo(-48-capeWave,-5-lift*8,-69-capeWave,17-lift*13,-67-capeWave,44-lift*17);ctx.quadraticCurveTo(-60-capeWave,63-lift*12,-42-capeWave,72-lift*9);ctx.quadraticCurveTo(-18,56,7,33);ctx.quadraticCurveTo(-3,11,-13,-8);ctx.closePath();ctx.fill();ctx.stroke();
+        ctx.fillStyle='#17343a';
         ctx.beginPath();ctx.moveTo(-18,-49);ctx.lineTo(-47,-61);ctx.lineTo(-38,-47);ctx.lineTo(-50,-35);ctx.lineTo(-18,-41);ctx.closePath();ctx.fill();
         ctx.beginPath();ctx.ellipse(0,-34,28,31,0,0,Math.PI*2);ctx.fill();ctx.stroke();
         ctx.fillStyle='#f2efe6';ctx.beginPath();ctx.roundRect(-12,-43,34,18,8);ctx.fill();
@@ -3675,7 +3703,7 @@
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 ctx.font = 'bold 14px system-ui, "PingFang SC", sans-serif';
-                ctx.fillText('忍者版 M2.7', vbx + vbw / 2, vby + vbh / 2);
+                ctx.fillText('忍者版 M2.8', vbx + vbw / 2, vby + vbh / 2);
                 ctx.restore();
             } catch(_vErr) { /* 不影响玩 */ }
             // ===== v17.0 debug=1：顶部大字彩色「通关状态机」标签（用户不看console也知道当前阶段）=====
