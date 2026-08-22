@@ -618,13 +618,14 @@
     }
 
     function drawGrid() {
-        // 极简背景：大面积留白、淡月，以及三组不交叉的低位山脉。
+        // 极简背景：关卡内山脉抬到远方，与地面之间保留明显空白。
         ctx.fillStyle='#f2efe6';ctx.fillRect(0,0,W,H);
         ctx.strokeStyle='rgba(25,25,24,.16)';ctx.lineWidth=2;ctx.beginPath();ctx.arc(W*.8,H*.19,66,0,Math.PI*2);ctx.stroke();
-        ctx.strokeStyle='rgba(25,25,24,.24)';ctx.lineWidth=2.5;ctx.lineCap='round';ctx.lineJoin='round';
-        ctx.beginPath();ctx.moveTo(0,H*.88);ctx.bezierCurveTo(W*.07,H*.83,W*.09,H*.75,W*.15,H*.78);ctx.bezierCurveTo(W*.21,H*.8,W*.24,H*.86,W*.3,H*.88);ctx.stroke();
-        ctx.beginPath();ctx.moveTo(W*.34,H*.88);ctx.bezierCurveTo(W*.4,H*.82,W*.43,H*.72,W*.49,H*.75);ctx.bezierCurveTo(W*.55,H*.78,W*.6,H*.85,W*.66,H*.88);ctx.stroke();
-        ctx.beginPath();ctx.moveTo(W*.7,H*.88);ctx.bezierCurveTo(W*.77,H*.83,W*.8,H*.75,W*.86,H*.78);ctx.bezierCurveTo(W*.92,H*.81,W*.95,H*.86,W,H*.88);ctx.stroke();
+        const inLevelBackground=gameState==='playing'||gameState==='paused',mountainBase=inLevelBackground ? .63 : .88,mountainHeight=inLevelBackground ? .12 : .15;
+        ctx.strokeStyle=inLevelBackground?'rgba(25,25,24,.14)':'rgba(25,25,24,.24)';ctx.lineWidth=inLevelBackground?2:2.5;ctx.lineCap='round';ctx.lineJoin='round';
+        ctx.beginPath();ctx.moveTo(0,H*mountainBase);ctx.bezierCurveTo(W*.07,H*(mountainBase-mountainHeight*.34),W*.09,H*(mountainBase-mountainHeight),W*.15,H*(mountainBase-mountainHeight*.78));ctx.bezierCurveTo(W*.21,H*(mountainBase-mountainHeight*.56),W*.24,H*(mountainBase-mountainHeight*.14),W*.3,H*mountainBase);ctx.stroke();
+        ctx.beginPath();ctx.moveTo(W*.34,H*mountainBase);ctx.bezierCurveTo(W*.4,H*(mountainBase-mountainHeight*.42),W*.43,H*(mountainBase-mountainHeight*1.08),W*.49,H*(mountainBase-mountainHeight*.88));ctx.bezierCurveTo(W*.55,H*(mountainBase-mountainHeight*.62),W*.6,H*(mountainBase-mountainHeight*.18),W*.66,H*mountainBase);ctx.stroke();
+        ctx.beginPath();ctx.moveTo(W*.7,H*mountainBase);ctx.bezierCurveTo(W*.77,H*(mountainBase-mountainHeight*.34),W*.8,H*(mountainBase-mountainHeight),W*.86,H*(mountainBase-mountainHeight*.78));ctx.bezierCurveTo(W*.92,H*(mountainBase-mountainHeight*.54),W*.95,H*(mountainBase-mountainHeight*.14),W,H*mountainBase);ctx.stroke();
     }
 
     function drawLevelTopBar() {
@@ -3673,7 +3674,7 @@
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 ctx.font = 'bold 14px system-ui, "PingFang SC", sans-serif';
-                ctx.fillText('山岚版 M2.4', vbx + vbw / 2, vby + vbh / 2);
+                ctx.fillText('远山版 M2.5', vbx + vbw / 2, vby + vbh / 2);
                 ctx.restore();
             } catch(_vErr) { /* 不影响玩 */ }
             // ===== v17.0 debug=1：顶部大字彩色「通关状态机」标签（用户不看console也知道当前阶段）=====
