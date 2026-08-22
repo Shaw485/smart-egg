@@ -542,7 +542,7 @@
         ctx.fillStyle = color;
         ctx.textAlign = align;
         ctx.textBaseline = 'middle';
-        ctx.font = `800 ${size}px -apple-system, "PingFang SC", "Heiti SC", sans-serif`;
+        ctx.font = `800 ${size}px "Kaiti SC", "STKaiti", "Songti SC", serif`;
         ctx.fillText(text, 0, 0);
         ctx.restore();
     }
@@ -553,7 +553,7 @@
         ctx.textAlign = align;
         ctx.textBaseline = 'middle';
         const w = bold ? '800 ' : '500 ';
-        ctx.font = `${w}${size}px -apple-system, "PingFang SC", sans-serif`;
+        ctx.font = `${w}${size}px "Songti SC", "STSong", serif`;
         ctx.fillText(text, 0, 0);
         ctx.restore();
     }
@@ -618,11 +618,16 @@
     }
 
     function drawGrid() {
-        const sky=ctx.createLinearGradient(0,0,0,H);sky.addColorStop(0,'#70577d');sky.addColorStop(.46,'#d27d70');sky.addColorStop(1,'#efb775');ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
-        const glow=ctx.createRadialGradient(W*.76,H*.23,12,W*.76,H*.23,210);glow.addColorStop(0,'rgba(255,235,151,.92)');glow.addColorStop(.5,'rgba(255,171,99,.38)');glow.addColorStop(1,'rgba(255,126,82,0)');ctx.fillStyle=glow;ctx.fillRect(0,0,W,H);
-        ctx.fillStyle='#ffda91';ctx.beginPath();ctx.arc(W*.76,H*.23,60,0,Math.PI*2);ctx.fill();
-        // 不再绘制中间平原层：四座彼此分开的远山直接落到人物站立层后方。
-        const ridgeY=H*.785;for(const [ratio,scale] of [[.12,.88],[.38,1.04],[.66,.82],[.9,.96]]){const x=W*ratio,r=W*.105*scale;ctx.fillStyle='rgba(84,79,105,.74)';ctx.beginPath();ctx.moveTo(x-r,ridgeY);ctx.lineTo(x,ridgeY-r*.72);ctx.lineTo(x+r,ridgeY);ctx.closePath();ctx.fill();ctx.strokeStyle='rgba(65,59,85,.5)';ctx.lineWidth=3;ctx.stroke();}
+        // 宣纸底与细微纸纹。
+        ctx.fillStyle='#f2efe6';ctx.fillRect(0,0,W,H);
+        ctx.strokeStyle='rgba(40,40,36,.035)';ctx.lineWidth=1;for(let i=0;i<34;i++){const y=(i*79+23)%H;ctx.beginPath();ctx.moveTo(0,y);ctx.bezierCurveTo(W*.3,y+3,W*.68,y-4,W,y+1);ctx.stroke();}
+        for(let i=0;i<75;i++){const x=(i*149+37)%W,y=(i*83+19)%H;ctx.fillStyle='rgba(20,20,18,'+(0.018+(i%4)*.008)+')';ctx.beginPath();ctx.arc(x,y,1+(i%3),0,Math.PI*2);ctx.fill();}
+        // 淡月、飞鸟与大片留白。
+        ctx.fillStyle='rgba(60,60,56,.09)';ctx.beginPath();ctx.arc(W*.78,H*.2,72,0,Math.PI*2);ctx.fill();
+        ctx.strokeStyle='rgba(25,25,24,.62)';ctx.lineWidth=4;ctx.lineCap='round';for(const [x,y,s] of [[W*.18,H*.22,1],[W*.23,H*.17,.75],[W*.67,H*.3,.8]]){ctx.beginPath();ctx.quadraticCurveTo(x+s*12,y-s*8,x+s*24,y);ctx.quadraticCurveTo(x+s*36,y-s*8,x+s*48,y);ctx.stroke();}
+        // 三组泼墨远山，山脚以雾气消隐，保留国画留白。
+        const base=H*.79;for(const [ratio,scale,alpha] of [[.2,1,.2],[.53,1.22,.3],[.86,.9,.22]]){const cx=W*ratio,r=W*.19*scale,top=base-r*.58;const wash=ctx.createLinearGradient(0,top,0,base);wash.addColorStop(0,'rgba(18,18,18,'+(alpha+.28)+')');wash.addColorStop(1,'rgba(55,55,52,'+alpha+')');ctx.fillStyle=wash;ctx.beginPath();ctx.moveTo(cx-r,base);ctx.bezierCurveTo(cx-r*.72,base-r*.18,cx-r*.48,top+r*.12,cx-r*.2,top+r*.04);ctx.quadraticCurveTo(cx,top-r*.08,cx+r*.16,top+r*.09);ctx.bezierCurveTo(cx+r*.42,top+r*.17,cx+r*.66,base-r*.2,cx+r,base);ctx.closePath();ctx.fill();}
+        ctx.fillStyle='rgba(242,239,230,.72)';ctx.beginPath();ctx.ellipse(W*.5,H*.74,W*.55,H*.075,0,0,Math.PI*2);ctx.fill();
     }
 
     function drawLevelTopBar() {
@@ -2192,8 +2197,8 @@
         _wonkyRectPath(sx, sy, sw, sh, 28, 44444, 2.5);
         ctx.fillStyle = '#fff0bd'; ctx.fill();
         ctx.strokeStyle = '#17343a'; ctx.lineWidth = 4.5; ctx.stroke();
-        sketchBold('暮光旅人！', W / 2, H / 2 - 50, 64);
-        sketchBold('脑洞 +1', W / 2, H / 2 + 20, 32);
+        sketchBold('墨境已破！', W / 2, H / 2 - 50, 64);
+        sketchBold('灵思 +1', W / 2, H / 2 + 20, 32);
         ctx.restore();
         if (successTimer <= 0) {
             logStep('state', 'transition-to-complete', {
@@ -2252,8 +2257,8 @@
         sketchBold('导出日志', logX + logW / 2, logY + logH / 2 + 5, 30);
         uiBTN.exportLog = { x: logX, y: logY, w: logW, h: logH };
         // 主菜单保持简单风格
-        sketchBold('暮光旅人', W / 2, H * 0.24, 100);
-        sketchBold('遗迹之谜', W / 2, H * 0.40, 120);
+        sketchBold('墨 境 旅 人', W / 2, H * 0.24, 100);
+        sketchBold('机 关 七 卷', W / 2, H * 0.40, 112);
         const bw = W * 0.28, bh = 135, gap=70, bx = W/2-bw-gap/2, by = H * 0.58;
         // 开始按钮（不规则圆角方形白底黑描边）
         ctx.save();
@@ -2262,10 +2267,10 @@
         ctx.strokeStyle = '#17343a'; ctx.lineWidth = 5;
         _wonkyRectPath(bx, by, bw, bh, 52, 55555, 2.5); ctx.stroke();
         ctx.restore();
-        sketchBold('踏上旅途', bx + bw / 2, by + bh / 2 + 10, 50);
+        sketchBold('踏 入 墨 境', bx + bw / 2, by + bh / 2 + 10, 50);
         const cbx=W/2+gap/2;
         ctx.save();ctx.fillStyle='#fff0bd';_wonkyRectPath(cbx,by,bw,bh,52,55595,2.5);ctx.fill();ctx.strokeStyle='#17343a';ctx.lineWidth=5;_wonkyRectPath(cbx,by,bw,bh,52,55595,2.5);ctx.stroke();ctx.restore();
-        sketchBold('创造秘境',cbx+bw/2,by+bh/2+10,50);
+        sketchBold('绘 制 新 卷',cbx+bw/2,by+bh/2+10,50);
         sketchText('© 2024 MVP Demo', W / 2, H - 52, 24, 'center', false, 'rgba(0,0,0,0.4)');
         uiBTN.start = { x: bx, y: by, w: bw, h: bh };
         uiBTN.creator = { x: cbx, y: by, w: bw, h: bh };
@@ -2628,7 +2633,7 @@
     function drawLevelSelect() {
         drawGrid();
         // 标题
-        sketchBold('旅途篇章', W / 2, H * 0.12, 72);
+        sketchBold('主 线 画 卷', W / 2, H * 0.12, 72);
         sketchText('已通关: ' + _progress.completed.length + ' / ' + TOTAL_LEVELS, W / 2, H * 0.18, 28, 'center', false, 'rgba(0,0,0,0.5)');
 
         // 布局：2 排 × 5 列
@@ -2695,7 +2700,7 @@
         ctx.strokeStyle = '#17343a'; ctx.lineWidth = 4;
         _wonkyRectPath(backX, backY, backW, backH, 28, 99999, 2); ctx.stroke();
         ctx.restore();
-        sketchBold('返回营地', backX + backW / 2, backY + backH / 2 + 6, 32);
+        sketchBold('返回卷首', backX + backW / 2, backY + backH / 2 + 6, 32);
         uiBTN.levelSelect_back = { x: backX, y: backY, w: backW, h: backH };
     }
 
@@ -3670,7 +3675,7 @@
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 ctx.font = 'bold 14px system-ui, "PingFang SC", sans-serif';
-                ctx.fillText('奇幻版 F3.4', vbx + vbw / 2, vby + vbh / 2);
+                ctx.fillText('水墨版 M1', vbx + vbw / 2, vby + vbh / 2);
                 ctx.restore();
             } catch(_vErr) { /* 不影响玩 */ }
             // ===== v17.0 debug=1：顶部大字彩色「通关状态机」标签（用户不看console也知道当前阶段）=====
