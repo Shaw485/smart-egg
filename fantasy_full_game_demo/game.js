@@ -622,7 +622,7 @@
         ctx.fillStyle='#f2efe6';ctx.fillRect(0,0,W,H);
         ctx.strokeStyle='rgba(25,25,24,.16)';ctx.lineWidth=2;ctx.beginPath();ctx.arc(W*.8,H*.19,66,0,Math.PI*2);ctx.stroke();
         const inLevelBackground=gameState==='playing'||gameState==='paused',mountainBase=inLevelBackground ? .63 : .88,mountainHeight=inLevelBackground ? .12 : .15;
-        ctx.strokeStyle=inLevelBackground?'rgba(0,0,0,.22)':'rgba(0,0,0,.3)';ctx.lineWidth=inLevelBackground?2.2:2.7;ctx.lineCap='round';ctx.lineJoin='round';
+        ctx.strokeStyle='#000';ctx.lineWidth=inLevelBackground?2.2:2.7;ctx.lineCap='round';ctx.lineJoin='round';
         ctx.beginPath();ctx.moveTo(0,H*mountainBase);ctx.bezierCurveTo(W*.07,H*(mountainBase-mountainHeight*.34),W*.09,H*(mountainBase-mountainHeight),W*.15,H*(mountainBase-mountainHeight*.78));ctx.bezierCurveTo(W*.21,H*(mountainBase-mountainHeight*.56),W*.24,H*(mountainBase-mountainHeight*.14),W*.3,H*mountainBase);ctx.stroke();
         ctx.beginPath();ctx.moveTo(W*.34,H*mountainBase);ctx.bezierCurveTo(W*.4,H*(mountainBase-mountainHeight*.42),W*.43,H*(mountainBase-mountainHeight*1.08),W*.49,H*(mountainBase-mountainHeight*.88));ctx.bezierCurveTo(W*.55,H*(mountainBase-mountainHeight*.62),W*.6,H*(mountainBase-mountainHeight*.18),W*.66,H*mountainBase);ctx.stroke();
         ctx.beginPath();ctx.moveTo(W*.7,H*mountainBase);ctx.bezierCurveTo(W*.77,H*(mountainBase-mountainHeight*.34),W*.8,H*(mountainBase-mountainHeight),W*.86,H*(mountainBase-mountainHeight*.78));ctx.bezierCurveTo(W*.92,H*(mountainBase-mountainHeight*.54),W*.95,H*(mountainBase-mountainHeight*.14),W,H*mountainBase);ctx.stroke();
@@ -3323,15 +3323,14 @@
         const air=!player.onGround,walking=player.onGround&&Math.abs(player.vx)>10,rising=air&&player.vy<0,clock=performance.now()*.001,dir=player.vx<0?-1:1,bob=walking?-Math.max(0,Math.sin(player.walkT))*5:0;
         ctx.save();ctx.translate(ax,ay-24+bob);ctx.scale(dir*scale,scale);const lift=air?1:0;
         ctx.strokeStyle='#17343a';ctx.fillStyle='#f2efe6';ctx.lineCap='round';ctx.lineJoin='round';ctx.lineWidth=5;
-        // 恢复上一版的侧发与短披风气质，但每个部位只保留一条主轮廓。
-        const capeWave=Math.sin(clock*(walking?12:7))*(walking?8:3)+Math.sin(clock*8)*lift*5;ctx.beginPath();ctx.moveTo(-13,-8);ctx.bezierCurveTo(-48-capeWave,-5-lift*8,-69-capeWave,17-lift*13,-67-capeWave,44-lift*17);ctx.quadraticCurveTo(-60-capeWave,63-lift*12,-42-capeWave,72-lift*9);ctx.quadraticCurveTo(-18,56,7,33);ctx.quadraticCurveTo(-3,11,-13,-8);ctx.closePath();ctx.fill();ctx.stroke();
-        ctx.beginPath();ctx.ellipse(0,-34,27,30,0,0,Math.PI*2);ctx.fill();ctx.stroke();
-        const hairSway=Math.sin(clock*(walking?10:6))*(walking?2:1)+Math.sin(clock*8)*lift*1.5;ctx.save();ctx.translate(0,-lift);ctx.rotate(hairSway*.012);ctx.fillStyle='#17343a';ctx.beginPath();ctx.moveTo(-23,-43);ctx.quadraticCurveTo(-17,-64,6,-63);ctx.quadraticCurveTo(24,-58,24,-40);ctx.quadraticCurveTo(13,-44,6,-51);ctx.quadraticCurveTo(-5,-43,-23,-43);ctx.closePath();ctx.fill();ctx.restore();
-        // 宽檐江湖斗笠：纸白帽面、深色单轮廓，动作时仅轻微摆动。
-        ctx.save();ctx.translate(0,-lift*2);ctx.rotate(hairSway*.008);ctx.fillStyle='#f2efe6';ctx.strokeStyle='#17343a';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(-31,-55);ctx.quadraticCurveTo(-13,-81,0,-87);ctx.quadraticCurveTo(13,-81,31,-55);ctx.closePath();ctx.fill();ctx.stroke();ctx.beginPath();ctx.ellipse(0,-54,40,7,0,0,Math.PI*2);ctx.fill();ctx.stroke();ctx.lineWidth=2.5;ctx.beginPath();ctx.moveTo(24,-51);ctx.quadraticCurveTo(29,-24,16,-7);ctx.stroke();ctx.restore();
-        ctx.fillStyle='#17343a';ctx.beginPath();ctx.arc(9,-34,4,0,Math.PI*2);ctx.fill();ctx.lineWidth=3;ctx.beginPath();ctx.arc(10,-23,7,.15,1.15);ctx.stroke();
-        // 短上衣、腰带和裤装保持清楚，不画多余衣褶。
-        ctx.fillStyle='#f2efe6';ctx.lineWidth=5;ctx.beginPath();ctx.roundRect(-23,-4,46,42,7);ctx.fill();ctx.stroke();ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(-22,25);ctx.lineTo(22,25);ctx.stroke();
+        // 原创忍者轮廓：黑色披风、头罩、露眼面窗与简洁绑带。
+        const capeWave=Math.sin(clock*(walking?12:7))*(walking?8:3)+Math.sin(clock*8)*lift*5;ctx.fillStyle='#17343a';ctx.beginPath();ctx.moveTo(-13,-8);ctx.bezierCurveTo(-48-capeWave,-5-lift*8,-69-capeWave,17-lift*13,-67-capeWave,44-lift*17);ctx.quadraticCurveTo(-60-capeWave,63-lift*12,-42-capeWave,72-lift*9);ctx.quadraticCurveTo(-18,56,7,33);ctx.quadraticCurveTo(-3,11,-13,-8);ctx.closePath();ctx.fill();ctx.stroke();
+        ctx.beginPath();ctx.moveTo(-18,-49);ctx.lineTo(-47,-61);ctx.lineTo(-38,-47);ctx.lineTo(-50,-35);ctx.lineTo(-18,-41);ctx.closePath();ctx.fill();
+        ctx.beginPath();ctx.ellipse(0,-34,28,31,0,0,Math.PI*2);ctx.fill();ctx.stroke();
+        ctx.fillStyle='#f2efe6';ctx.beginPath();ctx.roundRect(-12,-43,34,18,8);ctx.fill();
+        ctx.fillStyle='#17343a';ctx.beginPath();ctx.arc(10,-34,4,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#f2efe6';ctx.lineWidth=2.5;ctx.beginPath();ctx.moveTo(-18,-49);ctx.lineTo(20,-49);ctx.stroke();ctx.strokeStyle='#17343a';
+        // 交叉短衣、腰带和裤装保持清楚，不增加多余衣褶。
+        ctx.fillStyle='#f2efe6';ctx.lineWidth=5;ctx.beginPath();ctx.roundRect(-23,-4,46,42,7);ctx.fill();ctx.stroke();ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(-18,-1);ctx.lineTo(18,23);ctx.moveTo(-22,25);ctx.lineTo(22,25);ctx.stroke();
         const arm=Math.sin(player.walkT||0)*6;_fantasyLine([[-22,4],[-38-(walking?arm:0),rising?-16:21]],'#17343a',5);_fantasyLine([[22,4],[38+(walking?arm:0),rising?-16:20]],'#17343a',5);
         const p=Math.sin(player.walkT||0),p2=-p,k1=[-10+p*4,58-Math.max(0,p)*4],f1=[-11+p*11,82-Math.max(0,p)*7],k2=[10+p2*4,58-Math.max(0,p2)*4],f2=[12+p2*11,82-Math.max(0,p2)*7];_fantasyLine([[-11,38],k1,f1],'#17343a',5);_fantasyLine([[11,38],k2,f2],'#17343a',5);_fantasyLine([[f1[0]-2,f1[1]],[f1[0]+6,f1[1]]],'#17343a',4);_fantasyLine([[f2[0]-2,f2[1]],[f2[0]+6,f2[1]]],'#17343a',4);ctx.restore();
     }
@@ -3676,7 +3675,7 @@
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 ctx.font = 'bold 14px system-ui, "PingFang SC", sans-serif';
-                ctx.fillText('江湖版 M2.6', vbx + vbw / 2, vby + vbh / 2);
+                ctx.fillText('忍者版 M2.7', vbx + vbw / 2, vby + vbh / 2);
                 ctx.restore();
             } catch(_vErr) { /* 不影响玩 */ }
             // ===== v17.0 debug=1：顶部大字彩色「通关状态机」标签（用户不看console也知道当前阶段）=====
