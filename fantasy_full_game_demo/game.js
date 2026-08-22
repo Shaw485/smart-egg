@@ -3350,21 +3350,32 @@
         const air=!player.onGround,walking=player.onGround&&Math.abs(player.vx)>10,rising=air&&player.vy<0,clock=performance.now()*.001,dir=player.vx<0?-1:1,bob=walking?-Math.max(0,Math.sin(player.walkT))*5:0;
         ctx.save();ctx.translate(ax,ay-24+bob);ctx.scale(dir*scale,scale);const lift=air?1:0;
         ctx.strokeStyle='#17343a';ctx.fillStyle='#f2efe6';ctx.lineCap='round';ctx.lineJoin='round';ctx.lineWidth=5;
-        // 放大版双尖披风：静止时仍竖直下垂，只有移动或腾空时才向身后展开。
-        const moveRatio=Math.min(1,Math.abs(player.vx)/430),capeWave=walking?Math.sin(clock*11)*5.5:(lift?Math.sin(clock*7)*3:0),capeReach=moveRatio*23+lift*11,capeLift=lift*11;
-        ctx.fillStyle='#f2efe6';ctx.beginPath();ctx.moveTo(-12,-7);ctx.bezierCurveTo(-21-capeReach*.14,1-capeLift*.25,-30-capeReach*.64,24-capeWave-capeLift*.65,-34-capeReach,61-capeReach*.22-capeLift);ctx.lineTo(-20-capeReach*.44,52-capeReach*.15-capeLift*.72);ctx.lineTo(-9-capeReach*.18,60-capeReach*.1-capeLift*.55);ctx.bezierCurveTo(-7,42-capeLift*.25,-7,12,-12,-7);ctx.closePath();ctx.fill();ctx.stroke();
-        ctx.save();ctx.strokeStyle='rgba(23,52,58,.5)';ctx.lineWidth=2.5;ctx.beginPath();ctx.moveTo(-17,2);ctx.bezierCurveTo(-22-capeReach*.2,21-capeWave*.2-capeLift*.35,-24-capeReach*.34,38-capeWave*.3-capeLift*.55,-20-capeReach*.2,51-capeLift*.5);ctx.stroke();ctx.restore();
-        ctx.fillStyle='#17343a';
-        // 圆润的忍者头罩与短绑带尾；面窗居中，双眼对称，避免旧版单眼斜视感。
-        ctx.beginPath();ctx.moveTo(-18,-49);ctx.lineTo(-39,-56);ctx.lineTo(-33,-47);ctx.lineTo(-42,-39);ctx.lineTo(-18,-42);ctx.closePath();ctx.fill();
-        ctx.beginPath();ctx.ellipse(0,-34,29,30,0,0,Math.PI*2);ctx.fill();ctx.stroke();
-        ctx.fillStyle='#f2efe6';ctx.beginPath();ctx.roundRect(-19,-44,38,20,10);ctx.fill();
-        ctx.fillStyle='#17343a';ctx.beginPath();ctx.ellipse(-7,-34,3.7,4.5,0,0,Math.PI*2);ctx.fill();ctx.beginPath();ctx.ellipse(7,-34,3.7,4.5,0,0,Math.PI*2);ctx.fill();
-        ctx.fillStyle='#f2efe6';ctx.beginPath();ctx.arc(-6,-35.5,1,0,Math.PI*2);ctx.fill();ctx.beginPath();ctx.arc(8,-35.5,1,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#17343a';
-        // 交叉短衣、腰带和裤装保持清楚，不增加多余衣褶。
-        ctx.fillStyle='#f2efe6';ctx.lineWidth=5;ctx.beginPath();ctx.roundRect(-23,-4,46,42,7);ctx.fill();ctx.stroke();ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(-18,-1);ctx.lineTo(18,23);ctx.moveTo(-22,25);ctx.lineTo(22,25);ctx.stroke();
-        const arm=Math.sin(player.walkT||0)*6;_fantasyLine([[-22,4],[-38-(walking?arm:0),rising?-16:21]],'#17343a',5);_fantasyLine([[22,4],[38+(walking?arm:0),rising?-16:20]],'#17343a',5);
-        const p=Math.sin(player.walkT||0),p2=-p,k1=[-10+p*4,58-Math.max(0,p)*4],f1=[-11+p*11,82-Math.max(0,p)*7],k2=[10+p2*4,58-Math.max(0,p2)*4],f2=[12+p2*11,82-Math.max(0,p2)*7];_fantasyLine([[-11,38],k1,f1],'#17343a',5);_fantasyLine([[11,38],k2,f2],'#17343a',5);_fantasyLine([[f1[0]-2,f1[1]],[f1[0]+6,f1[1]]],'#17343a',4);_fantasyLine([[f2[0]-2,f2[1]],[f2[0]+6,f2[1]]],'#17343a',4);ctx.restore();
+        // 方案 4：斗笠江湖旅人。两片短披风是折角下摆，不画成半圆；动作时仅轻微摆动。
+        const clothWave=walking?Math.sin(clock*11)*4:(lift?Math.sin(clock*7)*3:0),clothLift=lift*6;
+        ctx.fillStyle='#f2efe6';ctx.lineWidth=5;
+        ctx.beginPath();ctx.moveTo(-13,-8);ctx.quadraticCurveTo(-29-clothWave*.25,-4-clothLift*.2,-38-clothWave,21-clothLift);ctx.lineTo(-29-clothWave*.55,43-clothLift*.7);ctx.lineTo(-15,31-clothLift*.25);ctx.lineTo(-8,7);ctx.closePath();ctx.fill();ctx.stroke();
+        ctx.beginPath();ctx.moveTo(13,-8);ctx.quadraticCurveTo(28+clothWave*.15,-3-clothLift*.2,37+clothWave*.4,19-clothLift);ctx.lineTo(30+clothWave*.2,41-clothLift*.65);ctx.lineTo(15,31-clothLift*.2);ctx.lineTo(8,7);ctx.closePath();ctx.fill();ctx.stroke();
+
+        // 圆脸、短发与对称表情，保持小尺寸下也清楚友善。
+        ctx.fillStyle='#f2efe6';ctx.beginPath();ctx.ellipse(-25,-32,5.5,7.5,0,0,Math.PI*2);ctx.fill();ctx.stroke();ctx.beginPath();ctx.ellipse(25,-32,5.5,7.5,0,0,Math.PI*2);ctx.fill();ctx.stroke();
+        ctx.beginPath();ctx.ellipse(0,-34,26,28,0,0,Math.PI*2);ctx.fill();ctx.stroke();
+        ctx.fillStyle='#17343a';ctx.beginPath();ctx.moveTo(-22,-47);ctx.quadraticCurveTo(-11,-57,1,-53);ctx.quadraticCurveTo(12,-58,22,-46);ctx.lineTo(14,-43);ctx.quadraticCurveTo(7,-49,2,-43);ctx.quadraticCurveTo(-4,-50,-10,-43);ctx.quadraticCurveTo(-16,-48,-22,-41);ctx.closePath();ctx.fill();
+        ctx.beginPath();ctx.arc(-8,-33,3.7,0,Math.PI*2);ctx.fill();ctx.beginPath();ctx.arc(8,-33,3.7,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#17343a';ctx.lineWidth=2.6;ctx.beginPath();ctx.moveTo(-8,-22);ctx.quadraticCurveTo(0,-17,8,-22);ctx.stroke();
+
+        // 宽斗笠会随步伐和跳跃轻微摆动，帽檐始终压在头顶，不脱离人物。
+        const hatSway=(walking?Math.sin(clock*10)*1.7:Math.sin(clock*4)*.35)+lift*Math.sin(clock*7)*1.2;
+        ctx.save();ctx.translate(0,-54);ctx.rotate(hatSway*.012);ctx.translate(0,54);ctx.fillStyle='#f2efe6';ctx.strokeStyle='#17343a';ctx.lineWidth=4;
+        ctx.beginPath();ctx.moveTo(-40,-54);ctx.quadraticCurveTo(-12,-79,0,-84);ctx.quadraticCurveTo(13,-79,40,-54);ctx.quadraticCurveTo(0,-48,-40,-54);ctx.closePath();ctx.fill();ctx.stroke();
+        ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(0,-82);ctx.lineTo(-22,-56);ctx.moveTo(0,-82);ctx.lineTo(0,-53);ctx.moveTo(0,-82);ctx.lineTo(22,-56);ctx.stroke();ctx.beginPath();ctx.ellipse(0,-84,7,3,0,0,Math.PI*2);ctx.fill();ctx.stroke();ctx.restore();
+
+        // 交领短衣、肩披、腰带与束脚裤，对应候选图 4 的简洁轮廓。
+        ctx.fillStyle='#f2efe6';ctx.strokeStyle='#17343a';ctx.lineWidth=5;ctx.beginPath();ctx.roundRect(-22,-5,44,43,7);ctx.fill();ctx.stroke();
+        ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(-17,-2);ctx.lineTo(12,20);ctx.moveTo(17,-2);ctx.lineTo(-6,18);ctx.moveTo(-21,25);ctx.lineTo(21,25);ctx.stroke();
+        ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(0,-5);ctx.lineTo(-18,-9);ctx.quadraticCurveTo(-27,-5,-29,4);ctx.lineTo(-13,10);ctx.closePath();ctx.fill();ctx.stroke();ctx.beginPath();ctx.moveTo(0,-5);ctx.lineTo(18,-9);ctx.quadraticCurveTo(27,-5,29,4);ctx.lineTo(13,10);ctx.closePath();ctx.fill();ctx.stroke();ctx.beginPath();ctx.arc(0,-3,4.5,0,Math.PI*2);ctx.fill();ctx.stroke();
+
+        const arm=Math.sin(player.walkT||0)*6;_fantasyLine([[-22,7],[-37-(walking?arm:0),rising?-14:24]],'#17343a',5);_fantasyLine([[22,7],[37+(walking?arm:0),rising?-14:23]],'#17343a',5);
+        ctx.fillStyle='#f2efe6';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(-20,37);ctx.lineTo(-2,37);ctx.lineTo(-5,56);ctx.lineTo(-20,56);ctx.closePath();ctx.fill();ctx.stroke();ctx.beginPath();ctx.moveTo(2,37);ctx.lineTo(20,37);ctx.lineTo(20,56);ctx.lineTo(5,56);ctx.closePath();ctx.fill();ctx.stroke();
+        const p=Math.sin(player.walkT||0),p2=-p,k1=[-12+p*4,67-Math.max(0,p)*4],f1=[-12+p*11,82-Math.max(0,p)*7],k2=[12+p2*4,67-Math.max(0,p2)*4],f2=[13+p2*11,82-Math.max(0,p2)*7];_fantasyLine([[-12,56],k1,f1],'#17343a',5);_fantasyLine([[12,56],k2,f2],'#17343a',5);_fantasyLine([[f1[0]-3,f1[1]],[f1[0]+7,f1[1]]],'#17343a',5);_fantasyLine([[f2[0]-3,f2[1]],[f2[0]+7,f2[1]]],'#17343a',5);ctx.restore();
     }
 
     function loop(now) {
@@ -3707,7 +3718,7 @@
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 ctx.font = 'bold 14px system-ui, "PingFang SC", sans-serif';
-                ctx.fillText('忍者版 M3.3', vbx + vbw / 2, vby + vbh / 2);
+                ctx.fillText('斗笠侠 M3.4', vbx + vbw / 2, vby + vbh / 2);
                 ctx.restore();
             } catch(_vErr) { /* 不影响玩 */ }
             // ===== v17.0 debug=1：顶部大字彩色「通关状态机」标签（用户不看console也知道当前阶段）=====
