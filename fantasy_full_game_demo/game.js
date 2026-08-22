@@ -625,9 +625,14 @@
         // 淡月、飞鸟与大片留白。
         ctx.strokeStyle='rgba(25,25,24,.34)';ctx.lineWidth=3;ctx.beginPath();ctx.arc(W*.78,H*.2,72,0,Math.PI*2);ctx.stroke();
         ctx.strokeStyle='rgba(25,25,24,.62)';ctx.lineWidth=4;ctx.lineCap='round';for(const [x,y,s] of [[W*.18,H*.22,1],[W*.23,H*.17,.75],[W*.67,H*.3,.8]]){ctx.beginPath();ctx.quadraticCurveTo(x+s*12,y-s*8,x+s*24,y);ctx.quadraticCurveTo(x+s*36,y-s*8,x+s*48,y);ctx.stroke();}
-        // 三组纯线描远山，只用浓淡不同的轮廓线，不铺墨块。
-        const base=H*.79;for(const [ratio,scale,alpha] of [[.2,1,.42],[.53,1.22,.6],[.86,.9,.45]]){const cx=W*ratio,r=W*.19*scale,top=base-r*.58;ctx.strokeStyle='rgba(18,18,18,'+alpha+')';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(cx-r,base);ctx.bezierCurveTo(cx-r*.72,base-r*.18,cx-r*.48,top+r*.12,cx-r*.2,top+r*.04);ctx.quadraticCurveTo(cx,top-r*.08,cx+r*.16,top+r*.09);ctx.bezierCurveTo(cx+r*.42,top+r*.17,cx+r*.66,base-r*.2,cx+r,base);ctx.stroke();ctx.strokeStyle='rgba(25,25,25,'+(alpha*.42)+')';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(cx-r*.55,base-r*.05);ctx.quadraticCurveTo(cx-r*.2,top+r*.2,cx+r*.2,base-r*.12);ctx.stroke();}
-        ctx.strokeStyle='rgba(25,25,25,.18)';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(W*.04,H*.75);ctx.bezierCurveTo(W*.3,H*.72,W*.65,H*.78,W*.96,H*.73);ctx.stroke();
+        // 清爽线描远山：三段分离轮廓，不互相穿插，也不经过标题和按钮。
+        ctx.strokeStyle='rgba(24,24,22,.34)';ctx.lineWidth=3;ctx.lineCap='round';ctx.lineJoin='round';
+        const mountainLines=[
+            [[0,.86],[.055,.82],[.12,.76],[.18,.8],[.27,.86]],
+            [[.36,.86],[.43,.81],[.5,.75],[.57,.8],[.65,.86]],
+            [[.73,.86],[.8,.82],[.86,.77],[.92,.81],[1,.86]]
+        ];
+        for(const points of mountainLines){ctx.beginPath();ctx.moveTo(points[0][0]*W,points[0][1]*H);for(let i=1;i<points.length-1;i++){const p=points[i],n=points[i+1],mx=(p[0]+n[0])*.5*W,my=(p[1]+n[1])*.5*H;ctx.quadraticCurveTo(p[0]*W,p[1]*H,mx,my);}const last=points[points.length-1];ctx.lineTo(last[0]*W,last[1]*H);ctx.stroke();}
     }
 
     function drawLevelTopBar() {
@@ -3670,7 +3675,7 @@
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 ctx.font = 'bold 14px system-ui, "PingFang SC", sans-serif';
-                ctx.fillText('线描版 M2', vbx + vbw / 2, vby + vbh / 2);
+                ctx.fillText('线描版 M2.1', vbx + vbw / 2, vby + vbh / 2);
                 ctx.restore();
             } catch(_vErr) { /* 不影响玩 */ }
             // ===== v17.0 debug=1：顶部大字彩色「通关状态机」标签（用户不看console也知道当前阶段）=====
