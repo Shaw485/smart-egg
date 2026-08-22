@@ -3350,10 +3350,10 @@
         const air=!player.onGround,walking=player.onGround&&Math.abs(player.vx)>10,rising=air&&player.vy<0,clock=performance.now()*.001,dir=player.vx<0?-1:1,bob=walking?-Math.max(0,Math.sin(player.walkT))*5:0;
         ctx.save();ctx.translate(ax,ay-24+bob);ctx.scale(dir*scale,scale);const lift=air?1:0;
         ctx.strokeStyle='#17343a';ctx.fillStyle='#f2efe6';ctx.lineCap='round';ctx.lineJoin='round';ctx.lineWidth=5;
-        // 披风贴住后肩自然下垂；走路时向身后展开，跳跃时仅抬起下摆，不再像一整块硬片。
-        const moveRatio=Math.min(1,Math.abs(player.vx)/430),capeWave=Math.sin(clock*(walking?10:5))*(walking?4:1.5),capeBack=5+moveRatio*14+lift*5,capeLift=lift*10;
-        ctx.fillStyle='#f2efe6';ctx.beginPath();ctx.moveTo(-14,-7);ctx.bezierCurveTo(-21,-2,-27-capeBack,9-capeLift*.25,-30-capeBack+capeWave,25-capeLift*.7);ctx.bezierCurveTo(-34-capeBack+capeWave,40-capeLift,-27-capeBack*.65+capeWave,54-capeLift,-16-capeBack*.25,58-capeLift*.7);ctx.quadraticCurveTo(-7,54-capeLift*.35,-8,39);ctx.quadraticCurveTo(-8,16,-14,-7);ctx.closePath();ctx.fill();ctx.stroke();
-        ctx.save();ctx.strokeStyle='rgba(23,52,58,.55)';ctx.lineWidth=2.5;ctx.beginPath();ctx.moveTo(-18,-1);ctx.bezierCurveTo(-22-capeBack*.35,15-capeLift*.3,-23-capeBack*.45+capeWave*.4,35-capeLift*.65,-17-capeBack*.2,49-capeLift*.55);ctx.stroke();ctx.restore();
+        // 轻巧的短三角披风：肩部窄、后摆宽、尾端回收成柔和弧线。
+        const moveRatio=Math.min(1,Math.abs(player.vx)/430),capeWave=Math.sin(clock*(walking?11:6))*(walking?5:1.5),capeReach=moveRatio*18+lift*9,capeLift=lift*9;
+        ctx.fillStyle='#f2efe6';ctx.beginPath();ctx.moveTo(-11,-5);ctx.bezierCurveTo(-23-capeReach*.35,2-capeWave*.35-capeLift*.35,-39-capeReach,19-capeWave-capeLift,-30-capeReach*.72,40-capeLift);ctx.quadraticCurveTo(-20-capeReach*.35,47+capeWave*.22-capeLift*.5,-8,39-capeLift*.15);ctx.quadraticCurveTo(4,36,13,31);ctx.quadraticCurveTo(-1,11,-11,-5);ctx.closePath();ctx.fill();ctx.stroke();
+        ctx.save();ctx.strokeStyle='rgba(23,52,58,.5)';ctx.lineWidth=2.5;ctx.beginPath();ctx.moveTo(-16,1);ctx.bezierCurveTo(-24-capeReach*.35,14-capeWave*.25-capeLift*.4,-26-capeReach*.45,28-capeWave*.35-capeLift*.7,-18-capeReach*.18,39-capeLift*.45);ctx.stroke();ctx.restore();
         ctx.fillStyle='#17343a';
         ctx.beginPath();ctx.moveTo(-18,-49);ctx.lineTo(-47,-61);ctx.lineTo(-38,-47);ctx.lineTo(-50,-35);ctx.lineTo(-18,-41);ctx.closePath();ctx.fill();
         ctx.beginPath();ctx.ellipse(0,-34,28,31,0,0,Math.PI*2);ctx.fill();ctx.stroke();
@@ -3705,7 +3705,7 @@
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 ctx.font = 'bold 14px system-ui, "PingFang SC", sans-serif';
-                ctx.fillText('忍者版 M2.9', vbx + vbw / 2, vby + vbh / 2);
+                ctx.fillText('忍者版 M3.0', vbx + vbw / 2, vby + vbh / 2);
                 ctx.restore();
             } catch(_vErr) { /* 不影响玩 */ }
             // ===== v17.0 debug=1：顶部大字彩色「通关状态机」标签（用户不看console也知道当前阶段）=====
