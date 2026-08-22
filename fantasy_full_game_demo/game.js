@@ -617,17 +617,97 @@
         ctx.closePath();
     }
 
+    let _inkWashBackground = null;
+    const _inkLandscapeImage = new Image();
+    let _inkLandscapeReady = false;
+    _inkLandscapeImage.addEventListener('load', () => { _inkLandscapeReady = true; _inkWashBackground = null; });
+    _inkLandscapeImage.src = 'assets/ink-landscape-m3.png';
+    function _paintInkMountain(g, cx, base, width, height, seed, tone) {
+        g.save();
+        const left = cx - width / 2, right = cx + width / 2, peakX = cx + wobbleStatic(seed, width * .08);
+        const wash = g.createLinearGradient(0, base - height, 0, base);
+        wash.addColorStop(0, `rgba(18,18,17,${tone * .38})`);
+        wash.addColorStop(.52, `rgba(18,18,17,${tone * .72})`);
+        wash.addColorStop(1, `rgba(18,18,17,${tone * .18})`);
+        g.fillStyle = wash;
+        g.beginPath();
+        g.moveTo(left, base + 8);
+        g.bezierCurveTo(left + width * .08, base - height * .05, left + width * .15, base - height * .19, left + width * .24, base - height * .24);
+        g.bezierCurveTo(left + width * .31, base - height * .31, left + width * .34, base - height * .52, left + width * .41, base - height * .47);
+        g.bezierCurveTo(left + width * .47, base - height * .56, peakX - width * .035, base - height * .93, peakX, base - height);
+        g.bezierCurveTo(peakX + width * .055, base - height * .78, peakX + width * .1, base - height * .68, peakX + width * .16, base - height * .72);
+        g.bezierCurveTo(peakX + width * .22, base - height * .58, right - width * .26, base - height * .34, right - width * .19, base - height * .31);
+        g.bezierCurveTo(right - width * .12, base - height * .2, right - width * .05, base - height * .06, right, base + 8);
+        g.closePath(); g.fill();
+
+        // 叠加半透明墨团，模拟水分推开的不规则泼墨边缘。
+        for (let i = 0; i < 11; i++) {
+            const t = i / 10, x = left + width * (.08 + t * .84) + wobbleStatic(seed + i * 17, width * .025);
+            const ridge = Math.sin(t * Math.PI), y = base - ridge * height * (.48 + (i % 3) * .08);
+            g.fillStyle = `rgba(12,12,11,${tone * (.05 + (i % 4) * .022)})`;
+            g.beginPath();
+            g.ellipse(x, y + wobbleStatic(seed + 90 + i, 18), width * (.085 + (i % 2) * .026), height * (.25 + (i % 3) * .035), wobbleStatic(seed + 150 + i, .16), 0, Math.PI * 2);
+            g.fill();
+        }
+
+        // 枯笔皴法：轮廓与断续山脊。
+        g.strokeStyle = `rgba(17,17,16,${Math.min(.56, tone + .15)})`;
+        g.lineCap = 'round'; g.lineJoin = 'round'; g.lineWidth = 4;
+        g.setLineDash([110, 18, 34, 12]);
+        g.beginPath(); g.moveTo(left + width * .035, base);
+        g.bezierCurveTo(left + width * .17, base - height * .12, left + width * .32, base - height * .4, left + width * .41, base - height * .47);
+        g.bezierCurveTo(left + width * .49, base - height * .62, peakX - width * .025, base - height * .94, peakX, base - height);
+        g.bezierCurveTo(peakX + width * .11, base - height * .65, right - width * .2, base - height * .22, right - width * .025, base);
+        g.stroke(); g.setLineDash([]);
+        g.strokeStyle = `rgba(24,24,22,${tone * .42})`; g.lineWidth = 2.5;
+        for (let i = 0; i < 7; i++) {
+            const t = .18 + i * .1, x = left + width * t, top = base - Math.sin(t * Math.PI) * height * .52;
+            g.beginPath(); g.moveTo(x, top); g.quadraticCurveTo(x + width * .045, top + height * .15, x + width * .085, base - height * .08); g.stroke();
+        }
+        g.restore();
+    }
+    function _buildInkWashBackground() {
+        const paper = document.createElement('canvas'); paper.width = W; paper.height = H;
+        const g = paper.getContext('2d');
+        g.fillStyle = '#f2efe6'; g.fillRect(0, 0, W, H);
+        if (_inkLandscapeReady) {
+            g.drawImage(_inkLandscapeImage, 0, 0, W, H);
+            // 轻微宣纸蒙层压住最深墨色，保证人物、门与操作按钮始终清楚。
+            g.fillStyle = 'rgba(242,239,230,.14)'; g.fillRect(0, 0, W, H);
+            return paper;
+        }
+        // 宣纸纤维与自然墨点（固定位置，不会逐帧闪烁）。
+        g.strokeStyle = 'rgba(45,42,36,.035)'; g.lineWidth = 1;
+        for (let i = 0; i < 38; i++) { const y = (i * 79 + 23) % H; g.beginPath(); g.moveTo(0, y); g.bezierCurveTo(W * .3, y + 3, W * .68, y - 4, W, y + 1); g.stroke(); }
+        for (let i = 0; i < 82; i++) { const x = (i * 149 + 37) % W, y = (i * 83 + 19) % H; g.fillStyle = `rgba(20,20,18,${.015 + (i % 4) * .007})`; g.beginPath(); g.arc(x, y, 1 + (i % 3), 0, Math.PI * 2); g.fill(); }
+
+        // 远山淡、近山浓，中央大片留白，形成中国山水的深远层次。
+        _paintInkMountain(g, W * .16, H * .78, W * .48, H * .24, 310, .11);
+        _paintInkMountain(g, W * .82, H * .80, W * .54, H * .27, 460, .15);
+        _paintInkMountain(g, W * .49, H * .88, W * .78, H * .37, 730, .3);
+
+        // 云雾以宣纸色覆盖山脚，留下呼吸感，不影响人物和机关辨识。
+        g.fillStyle = 'rgba(242,239,230,.82)';
+        g.beginPath(); g.moveTo(0, H * .64); g.bezierCurveTo(W * .22, H * .58, W * .31, H * .72, W * .48, H * .65); g.bezierCurveTo(W * .68, H * .56, W * .82, H * .7, W, H * .62); g.lineTo(W, H * .76); g.bezierCurveTo(W * .7, H * .72, W * .34, H * .79, 0, H * .73); g.closePath(); g.fill();
+        g.strokeStyle = 'rgba(26,25,23,.16)'; g.lineWidth = 3;
+        g.beginPath(); g.moveTo(W * .03, H * .68); g.bezierCurveTo(W * .3, H * .63, W * .63, H * .73, W * .96, H * .66); g.stroke();
+
+        // 淡月、飞鸟与飞白墨痕。
+        const moon = g.createRadialGradient(W * .78, H * .19, 4, W * .78, H * .19, 76);
+        moon.addColorStop(0, 'rgba(35,34,31,.10)'); moon.addColorStop(.72, 'rgba(35,34,31,.045)'); moon.addColorStop(1, 'rgba(35,34,31,0)');
+        g.fillStyle = moon; g.beginPath(); g.arc(W * .78, H * .19, 76, 0, Math.PI * 2); g.fill();
+        g.strokeStyle = 'rgba(25,25,24,.28)'; g.lineWidth = 3; g.beginPath(); g.arc(W * .78, H * .19, 69, 0, Math.PI * 2); g.stroke();
+        g.strokeStyle = 'rgba(25,25,24,.58)'; g.lineWidth = 4; g.lineCap = 'round';
+        for (const [x, y, s] of [[W * .18, H * .22, 1], [W * .23, H * .17, .75], [W * .67, H * .3, .8]]) { g.beginPath(); g.quadraticCurveTo(x + s * 12, y - s * 8, x + s * 24, y); g.quadraticCurveTo(x + s * 36, y - s * 8, x + s * 48, y); g.stroke(); }
+        // 山脚少量飞白断笔，不横贯全画面。
+        g.strokeStyle = 'rgba(18,18,17,.075)'; g.lineCap = 'round';
+        for (let i = 0; i < 7; i++) { const x = W * (.08 + i * .125), y = H * (.72 + (i % 3) * .038); g.lineWidth = 8 + (i % 2) * 5; g.setLineDash([90 + i * 7, 28, 24, 19]); g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(x + W * .07, y - 12 + (i % 2) * 18, x + W * .14, y + 4); g.stroke(); }
+        g.setLineDash([]);
+        return paper;
+    }
     function drawGrid() {
-        // 宣纸底与细微纸纹。
-        ctx.fillStyle='#f2efe6';ctx.fillRect(0,0,W,H);
-        ctx.strokeStyle='rgba(40,40,36,.035)';ctx.lineWidth=1;for(let i=0;i<34;i++){const y=(i*79+23)%H;ctx.beginPath();ctx.moveTo(0,y);ctx.bezierCurveTo(W*.3,y+3,W*.68,y-4,W,y+1);ctx.stroke();}
-        for(let i=0;i<75;i++){const x=(i*149+37)%W,y=(i*83+19)%H;ctx.fillStyle='rgba(20,20,18,'+(0.018+(i%4)*.008)+')';ctx.beginPath();ctx.arc(x,y,1+(i%3),0,Math.PI*2);ctx.fill();}
-        // 淡月、飞鸟与大片留白。
-        ctx.strokeStyle='rgba(25,25,24,.34)';ctx.lineWidth=3;ctx.beginPath();ctx.arc(W*.78,H*.2,72,0,Math.PI*2);ctx.stroke();
-        ctx.strokeStyle='rgba(25,25,24,.62)';ctx.lineWidth=4;ctx.lineCap='round';for(const [x,y,s] of [[W*.18,H*.22,1],[W*.23,H*.17,.75],[W*.67,H*.3,.8]]){ctx.beginPath();ctx.quadraticCurveTo(x+s*12,y-s*8,x+s*24,y);ctx.quadraticCurveTo(x+s*36,y-s*8,x+s*48,y);ctx.stroke();}
-        // 三组纯线描远山，只用浓淡不同的轮廓线，不铺墨块。
-        const base=H*.79;for(const [ratio,scale,alpha] of [[.2,1,.42],[.53,1.22,.6],[.86,.9,.45]]){const cx=W*ratio,r=W*.19*scale,top=base-r*.58;ctx.strokeStyle='rgba(18,18,18,'+alpha+')';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(cx-r,base);ctx.bezierCurveTo(cx-r*.72,base-r*.18,cx-r*.48,top+r*.12,cx-r*.2,top+r*.04);ctx.quadraticCurveTo(cx,top-r*.08,cx+r*.16,top+r*.09);ctx.bezierCurveTo(cx+r*.42,top+r*.17,cx+r*.66,base-r*.2,cx+r,base);ctx.stroke();ctx.strokeStyle='rgba(25,25,25,'+(alpha*.42)+')';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(cx-r*.55,base-r*.05);ctx.quadraticCurveTo(cx-r*.2,top+r*.2,cx+r*.2,base-r*.12);ctx.stroke();}
-        ctx.strokeStyle='rgba(25,25,25,.18)';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(W*.04,H*.75);ctx.bezierCurveTo(W*.3,H*.72,W*.65,H*.78,W*.96,H*.73);ctx.stroke();
+        if (!_inkWashBackground || _inkWashBackground.width !== W || _inkWashBackground.height !== H) _inkWashBackground = _buildInkWashBackground();
+        ctx.drawImage(_inkWashBackground, 0, 0);
     }
 
     function drawLevelTopBar() {
@@ -3670,7 +3750,7 @@
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 ctx.font = 'bold 14px system-ui, "PingFang SC", sans-serif';
-                ctx.fillText('线描版 M2', vbx + vbw / 2, vby + vbh / 2);
+                ctx.fillText('泼墨版 M3', vbx + vbw / 2, vby + vbh / 2);
                 ctx.restore();
             } catch(_vErr) { /* 不影响玩 */ }
             // ===== v17.0 debug=1：顶部大字彩色「通关状态机」标签（用户不看console也知道当前阶段）=====
