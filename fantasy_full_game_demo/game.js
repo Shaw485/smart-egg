@@ -618,12 +618,13 @@
     }
 
     function drawGrid() {
-        // 极简背景：大面积留白、淡月，以及左右各一小段远山。
+        // 极简背景：大面积留白、淡月，以及三组不交叉的低位山脉。
         ctx.fillStyle='#f2efe6';ctx.fillRect(0,0,W,H);
         ctx.strokeStyle='rgba(25,25,24,.16)';ctx.lineWidth=2;ctx.beginPath();ctx.arc(W*.8,H*.19,66,0,Math.PI*2);ctx.stroke();
-        ctx.strokeStyle='rgba(25,25,24,.22)';ctx.lineWidth=2.5;ctx.lineCap='round';
-        ctx.beginPath();ctx.moveTo(0,H*.88);ctx.quadraticCurveTo(W*.065,H*.81,W*.13,H*.86);ctx.quadraticCurveTo(W*.18,H*.84,W*.23,H*.88);ctx.stroke();
-        ctx.beginPath();ctx.moveTo(W*.78,H*.88);ctx.quadraticCurveTo(W*.845,H*.82,W*.9,H*.86);ctx.quadraticCurveTo(W*.95,H*.84,W,H*.88);ctx.stroke();
+        ctx.strokeStyle='rgba(25,25,24,.24)';ctx.lineWidth=2.5;ctx.lineCap='round';ctx.lineJoin='round';
+        ctx.beginPath();ctx.moveTo(0,H*.88);ctx.bezierCurveTo(W*.07,H*.83,W*.09,H*.75,W*.15,H*.78);ctx.bezierCurveTo(W*.21,H*.8,W*.24,H*.86,W*.3,H*.88);ctx.stroke();
+        ctx.beginPath();ctx.moveTo(W*.34,H*.88);ctx.bezierCurveTo(W*.4,H*.82,W*.43,H*.72,W*.49,H*.75);ctx.bezierCurveTo(W*.55,H*.78,W*.6,H*.85,W*.66,H*.88);ctx.stroke();
+        ctx.beginPath();ctx.moveTo(W*.7,H*.88);ctx.bezierCurveTo(W*.77,H*.83,W*.8,H*.75,W*.86,H*.78);ctx.bezierCurveTo(W*.92,H*.81,W*.95,H*.86,W,H*.88);ctx.stroke();
     }
 
     function drawLevelTopBar() {
@@ -3321,11 +3322,12 @@
         const air=!player.onGround,walking=player.onGround&&Math.abs(player.vx)>10,rising=air&&player.vy<0,clock=performance.now()*.001,dir=player.vx<0?-1:1,bob=walking?-Math.max(0,Math.sin(player.walkT))*5:0;
         ctx.save();ctx.translate(ax,ay-24+bob);ctx.scale(dir*scale,scale);const lift=air?1:0;
         ctx.strokeStyle='#17343a';ctx.fillStyle='#f2efe6';ctx.lineCap='round';ctx.lineJoin='round';ctx.lineWidth=5;
-        // 圆润头部与简单发髻，不再绘制碎发和披风。
-        ctx.beginPath();ctx.ellipse(0,-34,26,29,0,0,Math.PI*2);ctx.fill();ctx.stroke();
-        const hairSway=Math.sin(clock*(walking?10:6))*(walking?2:1)+Math.sin(clock*8)*lift*1.5;ctx.save();ctx.translate(0,-lift);ctx.rotate(hairSway*.012);ctx.beginPath();ctx.arc(0,-66,8,Math.PI*.15,Math.PI*.85,true);ctx.stroke();ctx.beginPath();ctx.moveTo(-20,-48);ctx.quadraticCurveTo(0,-61,21,-47);ctx.stroke();ctx.restore();
+        // 恢复上一版的侧发与短披风气质，但每个部位只保留一条主轮廓。
+        const capeWave=Math.sin(clock*(walking?12:7))*(walking?5:2)+Math.sin(clock*8)*lift*3;ctx.beginPath();ctx.moveTo(-15,-6);ctx.quadraticCurveTo(-40-capeWave,13-lift*7,-31-capeWave,48-lift*11);ctx.quadraticCurveTo(-12,40,5,29);ctx.stroke();
+        ctx.beginPath();ctx.ellipse(0,-34,27,30,0,0,Math.PI*2);ctx.fill();ctx.stroke();
+        const hairSway=Math.sin(clock*(walking?10:6))*(walking?2:1)+Math.sin(clock*8)*lift*1.5;ctx.save();ctx.translate(0,-lift);ctx.rotate(hairSway*.012);ctx.fillStyle='#17343a';ctx.beginPath();ctx.moveTo(-23,-43);ctx.quadraticCurveTo(-17,-64,6,-63);ctx.quadraticCurveTo(24,-58,24,-40);ctx.quadraticCurveTo(13,-44,6,-51);ctx.quadraticCurveTo(-5,-43,-23,-43);ctx.closePath();ctx.fill();ctx.restore();
         ctx.fillStyle='#17343a';ctx.beginPath();ctx.arc(9,-34,4,0,Math.PI*2);ctx.fill();ctx.lineWidth=3;ctx.beginPath();ctx.arc(10,-23,7,.15,1.15);ctx.stroke();
-        // 短衣、腰带和裤装采用少量独立轮廓。
+        // 短上衣、腰带和裤装保持清楚，不画多余衣褶。
         ctx.fillStyle='#f2efe6';ctx.lineWidth=5;ctx.beginPath();ctx.roundRect(-23,-4,46,42,7);ctx.fill();ctx.stroke();ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(-22,25);ctx.lineTo(22,25);ctx.stroke();
         const arm=Math.sin(player.walkT||0)*6;_fantasyLine([[-22,4],[-38-(walking?arm:0),rising?-16:21]],'#17343a',5);_fantasyLine([[22,4],[38+(walking?arm:0),rising?-16:20]],'#17343a',5);
         const p=Math.sin(player.walkT||0),p2=-p,k1=[-10+p*4,58-Math.max(0,p)*4],f1=[-11+p*11,82-Math.max(0,p)*7],k2=[10+p2*4,58-Math.max(0,p2)*4],f2=[12+p2*11,82-Math.max(0,p2)*7];_fantasyLine([[-11,38],k1,f1],'#17343a',5);_fantasyLine([[11,38],k2,f2],'#17343a',5);_fantasyLine([[f1[0]-2,f1[1]],[f1[0]+6,f1[1]]],'#17343a',4);_fantasyLine([[f2[0]-2,f2[1]],[f2[0]+6,f2[1]]],'#17343a',4);ctx.restore();
@@ -3671,7 +3673,7 @@
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 ctx.font = 'bold 14px system-ui, "PingFang SC", sans-serif';
-                ctx.fillText('国风版 M2.3', vbx + vbw / 2, vby + vbh / 2);
+                ctx.fillText('山岚版 M2.4', vbx + vbw / 2, vby + vbh / 2);
                 ctx.restore();
             } catch(_vErr) { /* 不影响玩 */ }
             // ===== v17.0 debug=1：顶部大字彩色「通关状态机」标签（用户不看console也知道当前阶段）=====
