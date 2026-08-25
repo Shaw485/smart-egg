@@ -35,7 +35,8 @@ public final class MainActivity extends Activity {
         enterImmersiveMode();
 
         gameView = new WebView(this);
-        gameView.setBackgroundColor(0xFFF7F7F7);
+        // 与 F4 页面外框颜色一致，避免 WebView 启动时闪白。
+        gameView.setBackgroundColor(0xFF392F46);
         gameView.setWebViewClient(new WebViewClient());
         gameView.setWebChromeClient(new WebChromeClient());
 

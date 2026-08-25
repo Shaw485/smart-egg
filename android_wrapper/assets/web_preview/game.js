@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 155;   // 跟 index.html 的 ?v=155 保持一致
+    const GAME_CODE_VERSION = 156;   // 跟 index.html 的 ?v=156 保持一致
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
         const last = parseInt(localStorage.getItem(LAST_KNOWN_KEY) || '0', 10);
@@ -28,6 +28,11 @@
     const IS_AUTOTEST_MODE = location.search.includes('autotest') || location.hash.includes('autotest');
 
     const W = 1920, H = 1080;
+    const FANTASY_TITLES = [
+        '风起之门 · 迈出旅程', '云阶试炼 · 借木而登', '锁语遗迹 · 让钥匙找到归途',
+        '断崖回声 · 一次飞跃不够', '守门人的礼仪 · 以礼叩响古门',
+        '花之暗号 · 记住短暂盛开的数字', '逃走的门 · 让奔跑停在掌心'
+    ];
     const GRAVITY = 2000.0;
     const MAX_FALL = 1200.0;
     const MOVE_SPEED = 300.0;
@@ -367,23 +372,23 @@
     }
     let _bgmTimer = 0;
     let _bgmStep = 0;
-    const _bgmMelody = [523, 659, 784, 659, 587, 698, 880, 698];
+    // 独立奇幻版原创五声音阶主题，不引用任何商业游戏旋律。
+    const _bgmMelody = [294, 370, 440, 554, 440, 370, 330, 294, 370, 440, 659, 554];
     function _startBgm() {
         const ac = _ensureAudio();
         if (!ac || _bgmTimer) return;
         const tick = () => {
             if (document.hidden || !_audioCtx || _audioCtx.state !== 'running') return;
             const note = _bgmMelody[_bgmStep % _bgmMelody.length];
-            _tone(note, 0.27, 'triangle', 0.026, 0, note * 0.995);
-            // 每四拍加入很轻的低音，让循环更有持续感。
-            if (_bgmStep % 4 === 0) {
-                const bass = _bgmStep % 8 === 0 ? 131 : 147;
-                _tone(bass, 0.58, 'sine', 0.021, 0, bass * 0.98);
+            _tone(note, 0.34, _bgmStep % 3 ? 'triangle' : 'sine', 0.031, 0, note * 0.997);
+            if (_bgmStep % 3 === 0) {
+                const bass = [147, 220, 165, 220][Math.floor(_bgmStep / 3) % 4];
+                _tone(bass, 0.72, 'sine', 0.019, 0, bass * 0.99);
             }
             _bgmStep++;
         };
         tick();
-        _bgmTimer = window.setInterval(tick, 320);
+        _bgmTimer = window.setInterval(tick, 380);
     }
     document.addEventListener('pointerdown', _startBgm, { passive: true });
     document.addEventListener('keydown', e => {
@@ -531,7 +536,7 @@
         return (Math.sin(seed * 12.9898) * 43758.5453 % 1) * amp - amp / 2;
     }
 
-    function sketchBold(text, x, y, size = 24, align = 'center', color = '#000') {
+    function sketchBold(text, x, y, size = 24, align = 'center', color = '#17343a') {
         ctx.save();
         ctx.translate(x, y);
         ctx.fillStyle = color;
@@ -541,7 +546,7 @@
         ctx.fillText(text, 0, 0);
         ctx.restore();
     }
-    function sketchText(text, x, y, size = 24, align = 'center', bold = false, color = '#000') {
+    function sketchText(text, x, y, size = 24, align = 'center', bold = false, color = '#17343a') {
         ctx.save();
         ctx.translate(x, y);
         ctx.fillStyle = color;
@@ -613,22 +618,14 @@
     }
 
     function drawGrid() {
-        // 直接绘制比离屏 Canvas 拷贝更兼容安卓模拟器的 Skia OpenGL 管线。
-        ctx.fillStyle = '#F7F7F7';
-        ctx.fillRect(0, 0, W, H);
-        const step = 48;
-        ctx.strokeStyle = 'rgba(0,0,0,0.065)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        for (let x = 0; x <= W; x += step) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
-        for (let y = 0; y <= H; y += step) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
-        ctx.stroke();
-        ctx.strokeStyle = 'rgba(0,0,0,0.10)';
-        ctx.lineWidth = 1.4;
-        ctx.beginPath();
-        for (let x = 0; x <= W; x += step * 4) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
-        for (let y = 0; y <= H; y += step * 4) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
-        ctx.stroke();
+        // 辽阔高空：清透蓝天、暖色天际与大块高云
+        const sky=ctx.createLinearGradient(0,0,0,H);sky.addColorStop(0,'#63a9c8');sky.addColorStop(.48,'#b9d9c8');sky.addColorStop(.76,'#ead39b');sky.addColorStop(1,'#9bb18a');ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
+        const glow=ctx.createRadialGradient(W*.78,H*.2,12,W*.78,H*.2,230);glow.addColorStop(0,'rgba(255,244,181,.9)');glow.addColorStop(.55,'rgba(255,222,141,.28)');glow.addColorStop(1,'rgba(255,220,150,0)');ctx.fillStyle=glow;ctx.fillRect(0,0,W,H);
+        ctx.fillStyle='rgba(255,249,222,.68)';for(const cloud of [[.16,.17,150,38],[.47,.11,190,46],[.72,.3,130,32]]){ctx.beginPath();ctx.ellipse(W*cloud[0],H*cloud[1],cloud[2],cloud[3],-.05,0,Math.PI*2);ctx.ellipse(W*cloud[0]+cloud[2]*.45,H*cloud[1]+4,cloud[2]*.58,cloud[3]*.72,.03,0,Math.PI*2);ctx.fill();}
+        // 极远台地与群峰，多层低对比制造纵深
+        const horizon=H*.7;for(let layer=0;layer<3;layer++){ctx.fillStyle=['#87a59a','#708f86','#58766e'][layer];ctx.globalAlpha=[.55,.68,.82][layer];ctx.beginPath();ctx.moveTo(0,H);ctx.lineTo(0,horizon+layer*45);for(let x=0;x<=W;x+=120){const mesa=(Math.sin(x*.006+layer*1.7)+1)*34;ctx.lineTo(x,horizon+layer*45-mesa-(x%(360)<170?38:0));}ctx.lineTo(W,H);ctx.closePath();ctx.fill();}ctx.globalAlpha=1;
+        // 谷底薄雾与蜿蜒河光，强调玩家所在位置很高
+        ctx.fillStyle='rgba(238,238,205,.42)';ctx.beginPath();ctx.ellipse(W*.53,H*.82,W*.48,H*.12,0,0,Math.PI*2);ctx.fill();ctx.strokeStyle='rgba(211,236,223,.72)';ctx.lineWidth=18;ctx.beginPath();ctx.moveTo(W*.15,H*.88);ctx.bezierCurveTo(W*.38,H*.78,W*.55,H*.96,W*.83,H*.8);ctx.stroke();
     }
 
     function drawLevelTopBar() {
@@ -639,7 +636,7 @@
         const br = 18;
         // 1a. 两根吊杆（从画面顶部y=0垂下来）
         ctx.save();
-        ctx.strokeStyle = '#000';
+        ctx.strokeStyle = '#17343a';
         ctx.lineWidth = 5;
         ctx.lineCap = 'round';
         ctx.beginPath();
@@ -651,15 +648,15 @@
         ctx.lineTo(bx + bw - 48 + wobbleStatic(14, 1), by + 2);
         ctx.stroke();
         // 竖杆和标签连接点：两个小实心点
-        ctx.fillStyle = '#000';
+        ctx.fillStyle = '#17343a';
         ctx.beginPath(); ctx.arc(bx + 48, by + 3, 5, 0, Math.PI * 2); ctx.fill();
         ctx.beginPath(); ctx.arc(bx + bw - 48, by + 3, 5, 0, Math.PI * 2); ctx.fill();
         ctx.restore();
         // 1b. 吊牌标签牌（手绘不规则圆角矩形）
         ctx.save();
-        ctx.fillStyle = '#fff';
+        ctx.fillStyle = '#fff0bd';
         _wonkyRectPath(bx, by, bw, bh, br, 5000, 2.0); ctx.fill();
-        ctx.strokeStyle = '#000'; ctx.lineWidth = 4.5;
+        ctx.strokeStyle = '#17343a'; ctx.lineWidth = 4.5;
         ctx.lineJoin = 'round'; ctx.lineCap = 'round';
         _wonkyRectPath(bx, by, bw, bh, br, 5000, 2.0); ctx.stroke();
         ctx.restore();
@@ -674,17 +671,17 @@
             const icx = cx + bs / 2, icy = by2 + bs / 2;
             // 不规则圆角方按钮（每个按钮独立种子）
             ctx.save();
-            ctx.fillStyle = '#fff';
+            ctx.fillStyle = '#fff0bd';
             _wonkyRectPath(cx, by2, bs, bs, 22, 6000 + i * 137, 2.8); ctx.fill();
-            ctx.strokeStyle = '#000'; ctx.lineWidth = 6;
+            ctx.strokeStyle = '#17343a'; ctx.lineWidth = 6;
             _wonkyRectPath(cx, by2, bs, bs, 22, 6000 + i * 137, 2.8); ctx.stroke();
             ctx.restore();
 
             if (i === 0) {
                 // 第1个：大问号「?」（居中）
                 ctx.save();
-                ctx.strokeStyle = '#000';
-                ctx.fillStyle = '#000';
+                ctx.strokeStyle = '#17343a';
+                ctx.fillStyle = '#17343a';
                 ctx.lineWidth = 7;
                 ctx.lineCap = 'round';
                 ctx.lineJoin = 'round';
@@ -706,8 +703,8 @@
             } else if (i === 1) {
                 // 第2个：循环箭头「↻」（圆形循环箭头，居中）
                 ctx.save();
-                ctx.strokeStyle = '#000';
-                ctx.fillStyle = '#000';
+                ctx.strokeStyle = '#17343a';
+                ctx.fillStyle = '#17343a';
                 ctx.lineWidth = 7;
                 ctx.lineCap = 'round';
                 ctx.lineJoin = 'round';
@@ -740,7 +737,7 @@
             } else {
                 // 第3个：暂停「||」两条粗竖线（居中并排）
                 ctx.save();
-                ctx.strokeStyle = '#000';
+                ctx.strokeStyle = '#17343a';
                 ctx.lineWidth = 9;
                 ctx.lineCap = 'round';
                 const barH = 42;
@@ -764,13 +761,13 @@
 
         // 第四关标题单独下移一行并严格居中，避免与顶部按钮挤在一起。
         const titleIsLower = currentLevelIndex === 3;
-        sketchBold((levelData && levelData.name) || '进门就过关了!',
+        sketchBold(_playingCustom ? ((levelData && levelData.name) || '无名秘境') : (FANTASY_TITLES[currentLevelIndex] || (levelData && levelData.name) || '风在门后等待'),
                    titleIsLower ? W / 2 : W / 2 + 120,
                    titleIsLower ? 190 : 74, 58);
     }
 
     // 画实心三角形（手绘感，带轻微抖动，默认白色，底部按键传黑色）
-    function _fillTri(cx, cy, size, dir, seed = 0, color = '#fff') {
+    function _fillTri(cx, cy, size, dir, seed = 0, color = '#fff0bd') {
         ctx.save();
         ctx.fillStyle = color;
         ctx.beginPath();
@@ -804,14 +801,14 @@
         function drawBigBtn(x, y, seed) {
             // 松散手绘外圈 + 黑色主体，贴近参考图的“涂黑按钮”质感。
             ctx.save();
-            ctx.strokeStyle = '#000';
+            ctx.strokeStyle = '#17343a';
             ctx.lineWidth = 4;
             ctx.setLineDash([28, 9, 5, 12]);
             _wonkyRectPath(x - 9, y - 9, sz + 18, sz + 18, r + 7, seed + 1, 4); ctx.stroke();
             ctx.setLineDash([]);
-            ctx.fillStyle = '#000';
+            ctx.fillStyle = '#17343a';
             _wonkyRectPath(x, y, sz, sz, r, seed, 3); ctx.fill();
-            ctx.strokeStyle = '#000'; ctx.lineWidth = 6;
+            ctx.strokeStyle = '#17343a'; ctx.lineWidth = 6;
             _wonkyRectPath(x, y, sz, sz, r, seed, 3); ctx.stroke();
             ctx.restore();
         }
@@ -822,7 +819,7 @@
         function drawChevron(cx, cy, dir, seed) {
             const arm = dir === 'up' ? 36 : 33;
             ctx.save();
-            ctx.strokeStyle = '#fff';
+            ctx.strokeStyle = '#fff0bd';
             ctx.lineWidth = 18;
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
@@ -861,7 +858,7 @@
         ctx.save();
         ctx.fillStyle = 'rgba(255,255,255,0.96)';
         _wonkyRectPath(boxX, boxY, boxW, boxH, 26, 73001, 2.5); ctx.fill();
-        ctx.strokeStyle = '#000'; ctx.lineWidth = 6;
+        ctx.strokeStyle = '#17343a'; ctx.lineWidth = 6;
         _wonkyRectPath(boxX, boxY, boxW, boxH, 26, 73001, 2.5); ctx.stroke();
         ctx.restore();
         if (isPaused) {
@@ -871,13 +868,13 @@
             const rightX = W / 2 + gap / 2;
             const btnY = boxY + 125;
             ctx.save();
-            ctx.fillStyle = '#fff';
-            ctx.strokeStyle = '#000';
+            ctx.fillStyle = '#fff0bd';
+            ctx.strokeStyle = '#17343a';
             ctx.lineWidth = 5;
             _wonkyRectPath(leftX, btnY, btnW, btnH, 22, 73101, 2.3); ctx.fill(); ctx.stroke();
             _wonkyRectPath(rightX, btnY, btnW, btnH, 22, 73201, 2.3); ctx.fill(); ctx.stroke();
             ctx.restore();
-            sketchBold(_playingCustom ? '回到创造模式' : '回到选关', leftX + btnW / 2, btnY + btnH / 2 + 7, _playingCustom ? 23 : 27);
+            sketchBold(_playingCustom ? '回到创造秘境' : '回到选关', leftX + btnW / 2, btnY + btnH / 2 + 7, _playingCustom ? 23 : 27);
             sketchBold('返回游戏', rightX + btnW / 2, btnY + btnH / 2 + 7, 27);
             uiBTN.pauseLevelSelect = { x: leftX, y: btnY, w: btnW, h: btnH };
             uiBTN.pauseResume = { x: rightX, y: btnY, w: btnW, h: btnH };
@@ -899,7 +896,7 @@
             const eased = 1 - Math.pow(1 - t, 3);
             ctx.save();
             ctx.globalAlpha = 1 - t;
-            ctx.strokeStyle = '#000';
+            ctx.strokeStyle = '#17343a';
             ctx.lineWidth = 7 - t * 3;
             ctx.beginPath();
             ctx.arc(effect.x, effect.y, 25 + eased * 58, -0.85, 0.85);
@@ -914,7 +911,7 @@
 
     function _drawFlower(cx, cy, scale = 1, alpha = 1) {
         ctx.save(); ctx.translate(cx, cy); ctx.scale(scale, scale); ctx.globalAlpha = alpha;
-        ctx.fillStyle = '#fff'; ctx.strokeStyle = '#000'; ctx.lineWidth = 4; ctx.lineJoin = 'round';
+        ctx.fillStyle = '#fff0bd'; ctx.strokeStyle = '#17343a'; ctx.lineWidth = 4; ctx.lineJoin = 'round';
         for (let i = 0; i < 5; i++) {
             const a = -Math.PI / 2 + i * Math.PI * 2 / 5;
             ctx.beginPath(); ctx.arc(Math.cos(a) * 13, Math.sin(a) * 13, 10, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
@@ -925,9 +922,9 @@
         const now = performance.now();
         for (let i = 0; i < _questionBlocks.length; i++) {
             const b = _questionBlocks[i], x = b.x - b.w / 2, y = b.y - b.h / 2;
-            ctx.save(); ctx.fillStyle = b.remaining > 0 ? '#fff' : '#ddd';
+            ctx.save(); ctx.fillStyle = b.remaining > 0 ? '#fff0bd' : '#ddd';
             _wonkyRectPath(x, y, b.w, b.h, 14, 84000 + i * 91, 2); ctx.fill();
-            ctx.strokeStyle = '#000'; ctx.lineWidth = 6;
+            ctx.strokeStyle = '#17343a'; ctx.lineWidth = 6;
             _wonkyRectPath(x, y, b.w, b.h, 14, 84000 + i * 91, 2); ctx.stroke(); ctx.restore();
             sketchBold(b.remaining > 0 ? '?' : '×', b.x, b.y + 6, 58);
         }
@@ -941,16 +938,16 @@
         if (!_passwordVisible) return;
         ctx.save(); ctx.fillStyle = 'rgba(0,0,0,.28)'; ctx.fillRect(0,0,W,H); ctx.restore();
         const pw = 620, ph = 850, px = (W-pw)/2, py = 105;
-        ctx.save(); ctx.fillStyle = '#fff'; _wonkyRectPath(px,py,pw,ph,34,85001,3); ctx.fill(); ctx.strokeStyle='#000';ctx.lineWidth=7;_wonkyRectPath(px,py,pw,ph,34,85001,3);ctx.stroke();ctx.restore();
+        ctx.save(); ctx.fillStyle = '#fff0bd'; _wonkyRectPath(px,py,pw,ph,34,85001,3); ctx.fill(); ctx.strokeStyle='#17343a';ctx.lineWidth=7;_wonkyRectPath(px,py,pw,ph,34,85001,3);ctx.stroke();ctx.restore();
         sketchBold('密码是？', W/2, py+65, 48);
         uiBTN.passwordKeys = [];
         const closeBtn={x:px+pw-72,y:py+22,w:48,h:48,key:'close'};
-        ctx.save();ctx.strokeStyle='#000';ctx.lineWidth=7;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(closeBtn.x+8,closeBtn.y+8);ctx.lineTo(closeBtn.x+40,closeBtn.y+40);ctx.moveTo(closeBtn.x+40,closeBtn.y+8);ctx.lineTo(closeBtn.x+8,closeBtn.y+40);ctx.stroke();ctx.restore();
+        ctx.save();ctx.strokeStyle='#17343a';ctx.lineWidth=7;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(closeBtn.x+8,closeBtn.y+8);ctx.lineTo(closeBtn.x+40,closeBtn.y+40);ctx.moveTo(closeBtn.x+40,closeBtn.y+8);ctx.lineTo(closeBtn.x+8,closeBtn.y+40);ctx.stroke();ctx.restore();
         uiBTN.passwordKeys.push(closeBtn);
         const slotW=105,gap=22,start=W/2-(slotW*4+gap*3)/2;
-        for(let i=0;i<4;i++){const sx=start+i*(slotW+gap);ctx.save();ctx.fillStyle='#111';_wonkyRectPath(sx,py+105,slotW,90,15,85100+i,1.5);ctx.fill();ctx.restore();sketchBold(_passwordInput[i]||'',sx+slotW/2,py+152,50,'center','#fff');}
+        for(let i=0;i<4;i++){const sx=start+i*(slotW+gap);ctx.save();ctx.fillStyle='#111';_wonkyRectPath(sx,py+105,slotW,90,15,85100+i,1.5);ctx.fill();ctx.restore();sketchBold(_passwordInput[i]||'',sx+slotW/2,py+152,50,'center','#fff0bd');}
         const labels=['1','2','3','4','5','6','7','8','9','0','←','清'];
-        for(let i=0;i<labels.length;i++){const col=i%3,row=Math.floor(i/3),bw=135,bh=105,bx=px+75+col*170,by=py+235+row*135;ctx.save();ctx.fillStyle='#fff';_wonkyRectPath(bx,by,bw,bh,22,85200+i,2);ctx.fill();ctx.strokeStyle='#000';ctx.lineWidth=5;_wonkyRectPath(bx,by,bw,bh,22,85200+i,2);ctx.stroke();ctx.restore();sketchBold(labels[i],bx+bw/2,by+bh/2+5,45);uiBTN.passwordKeys.push({x:bx,y:by,w:bw,h:bh,key:labels[i]});}
+        for(let i=0;i<labels.length;i++){const col=i%3,row=Math.floor(i/3),bw=135,bh=105,bx=px+75+col*170,by=py+235+row*135;ctx.save();ctx.fillStyle='#fff0bd';_wonkyRectPath(bx,by,bw,bh,22,85200+i,2);ctx.fill();ctx.strokeStyle='#17343a';ctx.lineWidth=5;_wonkyRectPath(bx,by,bw,bh,22,85200+i,2);ctx.stroke();ctx.restore();sketchBold(labels[i],bx+bw/2,by+bh/2+5,45);uiBTN.passwordKeys.push({x:bx,y:by,w:bw,h:bh,key:labels[i]});}
         if(performance.now()<_passwordErrorUntil) sketchBold('密码不对，再数数花朵',W/2,py+800,28,'center','#d33');
     }
     function _expectedFlowerPassword() {
@@ -1504,7 +1501,7 @@
     // 手绘抖动线（两两点之间插值加抖动）
     function _sketchLine(x1, y1, x2, y2, lw = 3, seed = 0, amp = 1.8) {
         ctx.save();
-        ctx.strokeStyle = '#000';
+        ctx.strokeStyle = '#17343a';
         ctx.lineWidth = lw;
         ctx.lineCap = 'round';
         const segs = Math.max(4, Math.floor(Math.hypot(x2 - x1, y2 - y1) / 14));
@@ -1522,8 +1519,8 @@
     // 画小草：闭合叶片只描边，内部保持白色，呈空心轮廓。
     function _drawGrassPair(cx, cy, seed = 0) {
         ctx.save();
-        ctx.fillStyle = '#fff';
-        ctx.strokeStyle = '#000';
+        ctx.fillStyle = '#fff0bd';
+        ctx.strokeStyle = '#17343a';
         ctx.lineWidth = 2.6;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
@@ -1570,19 +1567,19 @@
                 _sketchLine(x, whiteBot, x + w, whiteBot, 5.5, seedBase + 100, 2.0);
                 // 2) 中间白色填充
                 ctx.save();
-                ctx.fillStyle = '#fff';
+                ctx.fillStyle = '#fff0bd';
                 ctx.fillRect(x, whiteTop, w, whiteH);
                 ctx.restore();
                 // 3) 参考稿地面下方是大块白色控制区，不再铺灰色土层。
                 ctx.save();
-                ctx.fillStyle = '#fff';
+                ctx.fillStyle = '#fff0bd';
                 ctx.fillRect(x, blackBandTop, w, blackBandBot - blackBandTop);
                 // 分段地面形成悬崖时，左右侧壁必须有清晰的黑色竖轮廓。
                 const cliffBottom = Math.min(H + 8, blackBandBot);
                 if (x > 1) _sketchLine(x, topLineY, x, cliffBottom, 7, seedBase + 260, 1.8);
                 if (x + w < W - 1) _sketchLine(x + w, topLineY, x + w, cliffBottom, 7, seedBase + 280, 1.8);
                 // 底部边缘加手绘抖动线（仍用黑色描边，层次分明）
-                ctx.strokeStyle = '#000';
+                ctx.strokeStyle = '#17343a';
                 ctx.lineWidth = 4;
                 ctx.lineCap = 'round';
                 ctx.beginPath();
@@ -1620,7 +1617,7 @@
                 const amp = 1.6;
                 // 1) 白色填充（手绘扁胶囊轮廓）
                 ctx.save();
-                ctx.fillStyle = '#fff';
+                ctx.fillStyle = '#fff0bd';
                 ctx.beginPath();
                 const s = 20;
                 // 上半 + 右端半圆 + 下半 + 左端半圆（带抖动）
@@ -1653,7 +1650,7 @@
                     ctx.lineTo(px, py);
                 }
                 ctx.closePath(); ctx.fill();
-                ctx.strokeStyle = '#000'; ctx.lineWidth = 4.5;
+                ctx.strokeStyle = '#17343a'; ctx.lineWidth = 4.5;
                 ctx.lineJoin = 'round'; ctx.lineCap = 'round';
                 ctx.stroke();
                 ctx.restore();
@@ -1693,36 +1690,36 @@
             const hy = y - headerH + 2;  // 门楣底部和门身顶部对齐
             // 1a. 主横条（wonky白底黑描边）
             ctx.save();
-            ctx.fillStyle = '#fff';
+            ctx.fillStyle = '#fff0bd';
             _wonkyRectPath(hx, hy, headerW, headerH, 5, seed + 1, 1.8); ctx.fill();
-            ctx.strokeStyle = '#000'; ctx.lineWidth = 6.5;
+            ctx.strokeStyle = '#17343a'; ctx.lineWidth = 6.5;
             _wonkyRectPath(hx, hy, headerW, headerH, 5, seed + 1, 1.8); ctx.stroke();
             ctx.restore();
             // 1b. 左侧 T 端盖（横条左端下方多出垂直向下的小方块=端盖底，像T字左端）
             ctx.save();
-            ctx.fillStyle = '#fff';
+            ctx.fillStyle = '#fff0bd';
             const capW = 12, capH = 10;
             ctx.fillRect(hx - 2, hy + headerH - 4, capW, capH);
-            ctx.strokeStyle = '#000'; ctx.lineWidth = 4.0;
+            ctx.strokeStyle = '#17343a'; ctx.lineWidth = 4.0;
             ctx.strokeRect(hx - 2 + 2, hy + headerH - 4, capW - 4, capH);
             ctx.restore();
             // 1c. 右侧 T 端盖（对称）
             ctx.save();
-            ctx.fillStyle = '#fff';
+            ctx.fillStyle = '#fff0bd';
             ctx.fillRect(hx + headerW - capW + 2, hy + headerH - 4, capW, capH);
-            ctx.strokeStyle = '#000'; ctx.lineWidth = 4.0;
+            ctx.strokeStyle = '#17343a'; ctx.lineWidth = 4.0;
             ctx.strokeRect(hx + headerW - capW + 4, hy + headerH - 4, capW - 4, capH);
             ctx.restore();
 
             // === 2. 门后的黑色洞口（开门后露出的内部）===
             if (opening > 0) {
                 ctx.save();
-                ctx.fillStyle = '#000';
+                ctx.fillStyle = '#17343a';
                 ctx.fillRect(x + 2, y + 2, w - 4, h - 4);
                 // 微弱的深浅渐变（上暗下深，增加"深处"感）
                 const grad = ctx.createLinearGradient(x, y, x, y + h);
                 grad.addColorStop(0, '#0a0a0a');
-                grad.addColorStop(1, '#000');
+                grad.addColorStop(1, '#17343a');
                 ctx.fillStyle = grad;
                 ctx.fillRect(x + 2, y + 2, w - 4, h - 4);
                 ctx.restore();
@@ -1736,7 +1733,7 @@
             if (bx < x + w + 4) {  // 只要门身还有一点点在门洞内，就画
                 ctx.save();
                 // 参考稿门身：顶部略窄、底部略宽的手绘梯形。
-                ctx.fillStyle = '#fff';
+                ctx.fillStyle = '#fff0bd';
                 ctx.beginPath();
                 ctx.moveTo(bx + 12 + wobbleStatic(seed + 11, 2), y + wobbleStatic(seed + 12, 2));
                 ctx.lineTo(bx + w - 12 + wobbleStatic(seed + 13, 2), y + wobbleStatic(seed + 14, 2));
@@ -1744,7 +1741,7 @@
                 ctx.lineTo(bx + wobbleStatic(seed + 17, 2), y + h + wobbleStatic(seed + 18, 2));
                 ctx.closePath();
                 ctx.fill();
-                ctx.strokeStyle = '#000'; ctx.lineWidth = 6;
+                ctx.strokeStyle = '#17343a'; ctx.lineWidth = 6;
                 ctx.lineJoin = 'round';
                 ctx.stroke();
                 ctx.restore();
@@ -1766,14 +1763,14 @@
                 const ky = y + h * 0.48;
                 // 外空心描边方块（不是fill白，是描边空心！）
                 ctx.save();
-                ctx.fillStyle = '#fff';
+                ctx.fillStyle = '#fff0bd';
                 _roundPath(kx, ky, kbw, kbh, 5); ctx.fill();
-                ctx.strokeStyle = '#000'; ctx.lineWidth = 3;
+                ctx.strokeStyle = '#17343a'; ctx.lineWidth = 3;
                 _roundPath(kx, ky, kbw, kbh, 5); ctx.stroke();
                 ctx.restore();
                 // 内部 L 形（左下直角 └ 而不是右下 ┘）
                 ctx.save();
-                ctx.strokeStyle = '#000';
+                ctx.strokeStyle = '#17343a';
                 ctx.lineWidth = 3;
                 ctx.lineCap = 'round';
                 ctx.lineJoin = 'round';
@@ -1787,7 +1784,7 @@
             // 只有逃跑中的门才长出小脚；门身跑动时上提，脚底保持在地面轮廓上方。
             if(d.hold_to_stop&&d._isRunning&&d._runLift>18&&!_isMovingHeld(d)&&gameState==='playing'){
                 ctx.save();
-                ctx.strokeStyle='#000';ctx.lineWidth=6;ctx.lineCap='round';ctx.lineJoin='round';
+                ctx.strokeStyle='#17343a';ctx.lineWidth=6;ctx.lineCap='round';ctx.lineJoin='round';
                 const step=Math.sin(frameCount*0.28)*9;
                 const footY=y+h+18;
                 ctx.beginPath();
@@ -1798,7 +1795,7 @@
             // 第三关锁门：钥匙到达前显示手绘锁链和挂锁，到达后自动消失。
             if (d.locked && !unlockedDoors.has(d.id)) {
                 ctx.save();
-                ctx.strokeStyle = '#000';
+                ctx.strokeStyle = '#17343a';
                 ctx.lineWidth = 7;
                 ctx.lineCap = 'round';
                 ctx.lineJoin = 'round';
@@ -1814,12 +1811,12 @@
                     ctx.stroke();
                 }
                 const lockX = d.x, lockY = y + h * 0.58;
-                ctx.fillStyle = '#fff';
+                ctx.fillStyle = '#fff0bd';
                 ctx.beginPath();
                 ctx.arc(lockX, lockY - 16, 19, Math.PI, 0);
                 ctx.stroke();
                 _roundPath(lockX - 25, lockY - 15, 50, 45, 8); ctx.fill(); ctx.stroke();
-                ctx.fillStyle = '#000';
+                ctx.fillStyle = '#17343a';
                 ctx.beginPath(); ctx.arc(lockX, lockY + 2, 6, 0, Math.PI * 2); ctx.fill();
                 ctx.fillRect(lockX - 3, lockY + 3, 6, 13);
                 ctx.restore();
@@ -1838,8 +1835,8 @@
             const x = c.x - c.w / 2, y = c.y - c.h / 2;
             const seed = 42000 + ci * 97;
             ctx.save();
-            ctx.fillStyle = '#fff';
-            ctx.strokeStyle = '#000';
+            ctx.fillStyle = '#fff0bd';
+            ctx.strokeStyle = '#17343a';
             ctx.lineWidth = 6;
             ctx.lineJoin = 'round';
             _wonkyRectPath(x, y, c.w, c.h, 5, seed, 2.2); ctx.fill(); ctx.stroke();
@@ -1865,7 +1862,7 @@
             ctx.translate(k.x, k.y + bob);
             ctx.rotate(-0.55 + (k.state === 'flying' ? k.flyT * Math.PI * 4 : 0));
             ctx.fillStyle = '#ffe43b';
-            ctx.strokeStyle = '#000';
+            ctx.strokeStyle = '#17343a';
             ctx.lineWidth = 6;
             ctx.lineJoin = 'round';
             ctx.beginPath();
@@ -1878,7 +1875,7 @@
             ctx.lineTo(8, 0);
             ctx.closePath();
             ctx.fill(); ctx.stroke();
-            ctx.fillStyle = '#fff';
+            ctx.fillStyle = '#fff0bd';
             ctx.beginPath(); ctx.ellipse(0, -22, 12, 9, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
             ctx.restore();
         }
@@ -1919,7 +1916,7 @@
         // === 1. 主体：Q弹更圆的手绘蛋形（横向加宽，纵向缩短）===
         ctx.save();
         if (scale < 0.001 || ry < 1) { ctx.restore(); return; }
-        ctx.fillStyle = '#fff';
+        ctx.fillStyle = '#fff0bd';
         ctx.beginPath();
         const pts = 48;
         for (let i = 0; i <= pts; i++) {
@@ -1932,7 +1929,7 @@
             if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
         }
         ctx.closePath(); ctx.fill();
-        ctx.lineWidth = 4.6 * Math.max(0.2, scale); ctx.strokeStyle = '#000';
+        ctx.lineWidth = 4.6 * Math.max(0.2, scale); ctx.strokeStyle = '#17343a';
         ctx.lineJoin = 'round'; ctx.stroke();
         ctx.restore();
 
@@ -1940,7 +1937,7 @@
 
         // === 2. 头顶呆毛（比原来短约30%，不那么翘）===
         ctx.save();
-        ctx.strokeStyle = '#000';
+        ctx.strokeStyle = '#17343a';
         ctx.lineWidth = 3.5 * Math.max(0.3, scale);
         ctx.lineCap = 'round';
         const browPulse = Math.sin(poseClock * (walking ? 9 : 2.8));
@@ -1960,8 +1957,8 @@
 
         // === 3. 眼睛：待机会眨眼；走路/跳跃保持不同神态 ===
         ctx.save();
-        ctx.fillStyle = '#000';
-        ctx.strokeStyle = '#000';
+        ctx.fillStyle = '#17343a';
+        ctx.strokeStyle = '#17343a';
         ctx.lineWidth = 3.6 * scale;
         ctx.lineCap = 'round';
         const eyY = y - 13 * scale;
@@ -1996,8 +1993,8 @@
         ctx.save();
         const mouthW = 34 * scale, mouthH = 20 * scale;
         const mouthX = x - mouthW / 2, mouthY = y + 7 * scale;
-        ctx.fillStyle = '#fff';
-        ctx.strokeStyle = '#000';
+        ctx.fillStyle = '#fff0bd';
+        ctx.strokeStyle = '#17343a';
         ctx.lineWidth = 3.6 * scale;
         ctx.lineCap = 'round';
         if (walking) {
@@ -2044,7 +2041,7 @@
 
         // 下腹的小弧线是参考角色的固定识别细节。
         ctx.save();
-        ctx.strokeStyle = '#000';
+        ctx.strokeStyle = '#17343a';
         ctx.lineWidth = 2.8 * scale;
         ctx.lineCap = 'round';
         ctx.beginPath();
@@ -2056,10 +2053,10 @@
         // === 5. 手：走路 对侧旋转小幅度；跳跃时 手抬起+上下波浪摆动
         // （跳跃在空中优先级更高，覆盖走路模式）===
         ctx.save();
-        ctx.strokeStyle = '#000';
+        ctx.strokeStyle = '#17343a';
         ctx.lineWidth = 3.5;
         ctx.lineCap = 'round';
-        ctx.fillStyle = '#000';
+        ctx.fillStyle = '#17343a';
         const hx1 = x - rx * 0.90;
         const hy1 = y + ry * 0.25;
         const hx2 = x + rx * 0.90;
@@ -2115,7 +2112,7 @@
 
         // === 6. 脚：走路 左右平移（x方向分开/闭合，企鹅式左右摇摆）；跳跃时缩起
         ctx.save();
-        ctx.strokeStyle = '#000';
+        ctx.strokeStyle = '#17343a';
         ctx.lineWidth = 3.5;
         ctx.lineCap = 'round';
         const fOffX0 = -16;   // 基础x
@@ -2196,9 +2193,9 @@
         // 成功弹窗（无投影白底简单圆角）
         const sx = W / 2 - 280, sy = H / 2 - 150, sw = 560, sh = 300;
         _wonkyRectPath(sx, sy, sw, sh, 28, 44444, 2.5);
-        ctx.fillStyle = '#fff'; ctx.fill();
-        ctx.strokeStyle = '#000'; ctx.lineWidth = 4.5; ctx.stroke();
-        sketchBold('大聪明！', W / 2, H / 2 - 50, 64);
+        ctx.fillStyle = '#fff0bd'; ctx.fill();
+        ctx.strokeStyle = '#17343a'; ctx.lineWidth = 4.5; ctx.stroke();
+        sketchBold('暮光旅人！', W / 2, H / 2 - 50, 64);
         sketchBold('脑洞 +1', W / 2, H / 2 + 20, 32);
         ctx.restore();
         if (successTimer <= 0) {
@@ -2230,8 +2227,8 @@
         // 失败弹窗：白底 wonky 矩形（比成功略高，因为有"重来"按钮）
         const sx = W / 2 - 290, sy = H / 2 - 180, sw = 580, sh = 360;
         _wonkyRectPath(sx, sy, sw, sh, 30, 44445, 2.6);
-        ctx.fillStyle = '#fff'; ctx.fill();
-        ctx.strokeStyle = '#000'; ctx.lineWidth = 4.5; ctx.stroke();
+        ctx.fillStyle = '#fff0bd'; ctx.fill();
+        ctx.strokeStyle = '#17343a'; ctx.lineWidth = 4.5; ctx.stroke();
         sketchBold('掉下去了…', W / 2, H / 2 - 80, 56);
         sketchBold('😵 脑洞 -1', W / 2, H / 2 - 10, 30);
         // 「重来」按钮（wonky白底黑边，居中）
@@ -2239,9 +2236,9 @@
         const btx = DEAD_BTN.btx = W / 2 - btw / 2;
         const bty = DEAD_BTN.bty = H / 2 + 40;
         ctx.save();
-        ctx.fillStyle = '#fff';
+        ctx.fillStyle = '#fff0bd';
         _wonkyRectPath(btx, bty, btw, bth, 28, 60001, 2.5); ctx.fill();
-        ctx.strokeStyle = '#000'; ctx.lineWidth = 4.5;
+        ctx.strokeStyle = '#17343a'; ctx.lineWidth = 4.5;
         _wonkyRectPath(btx, bty, btw, bth, 28, 60001, 2.5); ctx.stroke();
         ctx.restore();
         sketchBold('重 来', btx + btw / 2, bty + bth / 2 + 8, 40);
@@ -2251,27 +2248,28 @@
     function drawMenu() {
         drawGrid();
         const logW = 250, logH = 76, logX = W - logW - 46, logY = 38;
-        ctx.save(); ctx.fillStyle = '#fff';
+        ctx.save(); ctx.fillStyle = '#fff0bd';
         _wonkyRectPath(logX, logY, logW, logH, 20, 55139, 2); ctx.fill();
-        ctx.strokeStyle = '#000'; ctx.lineWidth = 4;
+        ctx.strokeStyle = '#17343a'; ctx.lineWidth = 4;
         _wonkyRectPath(logX, logY, logW, logH, 20, 55139, 2); ctx.stroke(); ctx.restore();
         sketchBold('导出日志', logX + logW / 2, logY + logH / 2 + 5, 30);
         uiBTN.exportLog = { x: logX, y: logY, w: logW, h: logH };
         // 主菜单保持简单风格
+        // 正式游戏名暂时保持主线现有名称；F4 只替换视觉与音乐。
         sketchBold('大聪明', W / 2, H * 0.24, 100);
         sketchBold('脑洞蛋', W / 2, H * 0.40, 120);
         const bw = W * 0.28, bh = 135, gap=70, bx = W/2-bw-gap/2, by = H * 0.58;
         // 开始按钮（不规则圆角方形白底黑描边）
         ctx.save();
-        ctx.fillStyle = '#fff';
+        ctx.fillStyle = '#fff0bd';
         _wonkyRectPath(bx, by, bw, bh, 52, 55555, 2.5); ctx.fill();
-        ctx.strokeStyle = '#000'; ctx.lineWidth = 5;
+        ctx.strokeStyle = '#17343a'; ctx.lineWidth = 5;
         _wonkyRectPath(bx, by, bw, bh, 52, 55555, 2.5); ctx.stroke();
         ctx.restore();
-        sketchBold('主线关卡', bx + bw / 2, by + bh / 2 + 10, 50);
+        sketchBold('踏上旅途', bx + bw / 2, by + bh / 2 + 10, 50);
         const cbx=W/2+gap/2;
-        ctx.save();ctx.fillStyle='#fff';_wonkyRectPath(cbx,by,bw,bh,52,55595,2.5);ctx.fill();ctx.strokeStyle='#000';ctx.lineWidth=5;_wonkyRectPath(cbx,by,bw,bh,52,55595,2.5);ctx.stroke();ctx.restore();
-        sketchBold('创造模式',cbx+bw/2,by+bh/2+10,50);
+        ctx.save();ctx.fillStyle='#fff0bd';_wonkyRectPath(cbx,by,bw,bh,52,55595,2.5);ctx.fill();ctx.strokeStyle='#17343a';ctx.lineWidth=5;_wonkyRectPath(cbx,by,bw,bh,52,55595,2.5);ctx.stroke();ctx.restore();
+        sketchBold('创造秘境',cbx+bw/2,by+bh/2+10,50);
         sketchText('© 2024 MVP Demo', W / 2, H - 52, 24, 'center', false, 'rgba(0,0,0,0.4)');
         uiBTN.start = { x: bx, y: by, w: bw, h: bh };
         uiBTN.creator = { x: cbx, y: by, w: bw, h: bh };
@@ -2352,7 +2350,7 @@
         const gd=_creatorDraft.doors.find(d=>d.is_goal); if(gd)gd.locked=_creatorMechanics.includes('key');
         logStep('creator','mechanic-toggle',{changed:kind,mechanics:_creatorMechanics});
     }
-    function _button(x,y,w,h,label,seed,size=30){ctx.save();ctx.fillStyle='#fff';_wonkyRectPath(x,y,w,h,22,seed,2);ctx.fill();ctx.strokeStyle='#000';ctx.lineWidth=4;_wonkyRectPath(x,y,w,h,22,seed,2);ctx.stroke();ctx.restore();sketchBold(label,x+w/2,y+h/2+5,size);return{x,y,w,h};}
+    function _button(x,y,w,h,label,seed,size=30){ctx.save();ctx.shadowColor='rgba(36,30,45,.28)';ctx.shadowBlur=0;ctx.shadowOffsetY=7;ctx.fillStyle='#fff0bd';_wonkyRectPath(x,y,w,h,22,seed,2);ctx.fill();ctx.shadowColor='transparent';ctx.strokeStyle='#17343a';ctx.lineWidth=4;_wonkyRectPath(x,y,w,h,22,seed,2);ctx.stroke();ctx.restore();sketchBold(label,x+w/2,y+h/2+5,size);return{x,y,w,h};}
     function _shareHash(s){let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619);}return(h>>>0).toString(36).toUpperCase();}
     function _base64UrlEncode(s){const bytes=new TextEncoder().encode(s);let bin='';for(let i=0;i<bytes.length;i+=8192)bin+=String.fromCharCode(...bytes.subarray(i,i+8192));return btoa(bin).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
     function _base64UrlDecode(s){s=s.replace(/-/g,'+').replace(/_/g,'/');while(s.length%4)s+='=';const bin=atob(s),bytes=Uint8Array.from(bin,c=>c.charCodeAt(0));return new TextDecoder().decode(bytes);}
@@ -2433,13 +2431,13 @@
         logStep('creator','map-edge-change',{edge,delta,map_extent:next});
     }
     function drawCreatorList() {
-        sketchBold('创造模式',W/2,100,66); sketchText('把脑洞做成可以分享的关卡',W/2,165,28);
+        sketchBold('创造秘境',W/2,100,66); sketchText('把脑洞做成可以分享的关卡',W/2,165,28);
         if(performance.now()<_creatorSavedUntil)sketchBold('已保存，点击“玩”开始体验',W/2,205,26,'center','#111');
         uiBTN.creatorBtns=[];uiBTN.creatorConfirmBtns=[];
         const cols=3,cw=480,ch=180,gap=45,startX=(W-(cols*cw+(cols-1)*gap))/2;
         _creatorLevels.forEach((lv,i)=>{
             const x=startX+(i%cols)*(cw+gap),y=235+Math.floor(i/cols)*(ch+35);
-            ctx.save();ctx.fillStyle='#fff';_wonkyRectPath(x,y,cw,ch,22,86000+i,2);ctx.fill();ctx.strokeStyle='#000';ctx.lineWidth=4;_wonkyRectPath(x,y,cw,ch,22,86000+i,2);ctx.stroke();ctx.restore();
+            ctx.save();ctx.fillStyle='#fff0bd';_wonkyRectPath(x,y,cw,ch,22,86000+i,2);ctx.fill();ctx.strokeStyle='#17343a';ctx.lineWidth=4;_wonkyRectPath(x,y,cw,ch,22,86000+i,2);ctx.stroke();ctx.restore();
             sketchBold(lv.name||('自定义关卡 '+(i+1)),x+cw/2,y+48,32);
             const ms=_mechanicsOf(lv),names={double_jump:'多跳',knock_twice:'敲门',flower_password:'顶花密码',key:'钥匙',hold_to_stop:'会动'};
             sketchText(ms.length?ms.map(x=>names[x]).join('＋'):'普通玩法',x+cw/2,y+88,20);
@@ -2449,14 +2447,14 @@
             r=_button(x+cw-62,y+12,46,46,'×',86090+i,25);r.action='delete';r.index=i;uiBTN.creatorBtns.push(r);
         });
         const by=H-145,bw=420,bh=82;
-        let r=_button(W/2-bw/2,by,bw,bh,'＋ 生成自定义关卡',86100,30);r.action='new';uiBTN.creatorBtns.push(r);
+        let r=_button(W/2-bw/2,by,bw,bh,'＋ 生成新的秘境',86100,30);r.action='new';uiBTN.creatorBtns.push(r);
         r=_button(W/2-bw/2,by-100,bw,bh,'输入关卡码',86101,30);r.action='import';uiBTN.creatorBtns.push(r);
-        r=_button(55,45,220,80,'返回首页',86102,27);r.action='back';uiBTN.creatorBtns.push(r);
+        r=_button(55,45,220,80,'返回营地',86102,27);r.action='back';uiBTN.creatorBtns.push(r);
         if(_creatorDeleteConfirmIndex>=0&&_creatorLevels[_creatorDeleteConfirmIndex]){
             const lv=_creatorLevels[_creatorDeleteConfirmIndex];
             ctx.save();ctx.fillStyle='rgba(0,0,0,.36)';ctx.fillRect(0,0,W,H);ctx.restore();
             const mw=720,mh=330,mx=(W-mw)/2,my=(H-mh)/2;
-            ctx.save();ctx.fillStyle='#fff';_wonkyRectPath(mx,my,mw,mh,30,86500,3);ctx.fill();ctx.strokeStyle='#000';ctx.lineWidth=7;_wonkyRectPath(mx,my,mw,mh,30,86500,3);ctx.stroke();ctx.restore();
+            ctx.save();ctx.fillStyle='#fff0bd';_wonkyRectPath(mx,my,mw,mh,30,86500,3);ctx.fill();ctx.strokeStyle='#17343a';ctx.lineWidth=7;_wonkyRectPath(mx,my,mw,mh,30,86500,3);ctx.stroke();ctx.restore();
             sketchBold('确认删除这个关卡吗？',W/2,my+82,38);
             sketchText(lv.name||'未命名关卡',W/2,my+138,26);
             r=_button(mx+85,my+205,230,78,'取消',86501,28);r.action='cancel';uiBTN.creatorConfirmBtns.push(r);
@@ -2464,7 +2462,7 @@
         }
         if(_creatorShareCode){
             ctx.save();ctx.fillStyle='rgba(0,0,0,.45)';ctx.fillRect(0,0,W,H);ctx.restore();
-            const mx=410,my=300,mw=1100,mh=420;ctx.save();ctx.fillStyle='#fff';_wonkyRectPath(mx,my,mw,mh,30,86600,3);ctx.fill();ctx.strokeStyle='#000';ctx.lineWidth=7;_wonkyRectPath(mx,my,mw,mh,30,86600,3);ctx.stroke();ctx.restore();
+            const mx=410,my=300,mw=1100,mh=420;ctx.save();ctx.fillStyle='#fff0bd';_wonkyRectPath(mx,my,mw,mh,30,86600,3);ctx.fill();ctx.strokeStyle='#17343a';ctx.lineWidth=7;_wonkyRectPath(mx,my,mw,mh,30,86600,3);ctx.stroke();ctx.restore();
             sketchBold('分享关卡',W/2,my+70,42);sketchText('关卡码只能复制粘贴',W/2,my+120,24);
             sketchText(_creatorShareCode.slice(0,72)+'…',W/2,my+185,19);
             r=_button(mx+190,my+270,280,85,'复制关卡码',86601,28);r.action='copy-share';uiBTN.creatorConfirmBtns.push(r);
@@ -2472,7 +2470,7 @@
         }
         if(_creatorImportPreview){
             ctx.save();ctx.fillStyle='rgba(0,0,0,.45)';ctx.fillRect(0,0,W,H);ctx.restore();const mx=430,my=260,mw=1060,mh=500;
-            ctx.save();ctx.fillStyle='#fff';_wonkyRectPath(mx,my,mw,mh,30,86700,3);ctx.fill();ctx.strokeStyle='#000';ctx.lineWidth=7;_wonkyRectPath(mx,my,mw,mh,30,86700,3);ctx.stroke();ctx.restore();
+            ctx.save();ctx.fillStyle='#fff0bd';_wonkyRectPath(mx,my,mw,mh,30,86700,3);ctx.fill();ctx.strokeStyle='#17343a';ctx.lineWidth=7;_wonkyRectPath(mx,my,mw,mh,30,86700,3);ctx.stroke();ctx.restore();
             sketchBold('找到关卡',W/2,my+72,42);sketchBold(_creatorImportPreview.name,W/2,my+135,30);sketchText('玩法：'+(_mechanicsOf(_creatorImportPreview).join('＋')||'普通'),W/2,my+190,23);
             r=_button(mx+90,my+300,250,82,'立即玩',86701,27);r.action='play-import';uiBTN.creatorConfirmBtns.push(r);
             r=_button(mx+405,my+300,250,82,'保存到我的关卡',86702,23);r.action='save-import';uiBTN.creatorConfirmBtns.push(r);
@@ -2490,14 +2488,14 @@
         const oy=box.y+(box.h-(b.maxY-b.minY)*scale)/2-b.minY*scale;
         ctx.save();ctx.beginPath();ctx.rect(box.x,box.y,box.w,box.h);ctx.clip();ctx.translate(ox,oy);ctx.scale(scale,scale);
         ctx.fillStyle='#fafafa';ctx.fillRect(b.minX,b.minY,b.maxX-b.minX,b.maxY-b.minY);
-        ctx.strokeStyle='#000';ctx.lineWidth=Math.max(3/scale,2);ctx.strokeRect(b.minX,b.minY,b.maxX-b.minX,b.maxY-b.minY);
+        ctx.strokeStyle='#17343a';ctx.lineWidth=Math.max(3/scale,2);ctx.strokeRect(b.minX,b.minY,b.maxX-b.minX,b.maxY-b.minY);
         ctx.strokeStyle='rgba(0,0,0,.25)';ctx.lineWidth=Math.max(2/scale,1);
         for(let x=Math.ceil(b.minX/W)*W;x<b.maxX;x+=W){ctx.beginPath();ctx.moveTo(x,b.minY);ctx.lineTo(x,b.maxY);ctx.stroke();}
         for(let y=Math.ceil(b.minY/H)*H;y<b.maxY;y+=H){ctx.beginPath();ctx.moveTo(b.minX,y);ctx.lineTo(b.maxX,y);ctx.stroke();}
-        for(const p of _creatorDraft.platforms||[]){ctx.fillStyle=p.kind==='ground'?'#111':'#fff';ctx.strokeStyle='#000';ctx.lineWidth=Math.max(4/scale,2);ctx.fillRect(p.x-p.w/2,p.y-p.h/2,p.w,p.h);ctx.strokeRect(p.x-p.w/2,p.y-p.h/2,p.w,p.h);}
-        for(const d of _creatorDraft.doors||[]){ctx.fillStyle='#fff';ctx.strokeStyle='#000';ctx.lineWidth=Math.max(5/scale,2);ctx.fillRect(d.x-d.w/2,d.y-d.h/2,d.w,d.h);ctx.strokeRect(d.x-d.w/2,d.y-d.h/2,d.w,d.h);}
-        for(const c of _creatorDraft.crates||[]){ctx.strokeStyle='#000';ctx.lineWidth=Math.max(4/scale,2);ctx.strokeRect(c.x-c.w/2,c.y-c.h/2,c.w,c.h);}
-        ctx.fillStyle='#000';ctx.beginPath();ctx.arc(_creatorDraft.spawn.x,_creatorDraft.spawn.y,Math.max(16/scale,12),0,Math.PI*2);ctx.fill();
+        for(const p of _creatorDraft.platforms||[]){ctx.fillStyle=p.kind==='ground'?'#111':'#fff0bd';ctx.strokeStyle='#17343a';ctx.lineWidth=Math.max(4/scale,2);ctx.fillRect(p.x-p.w/2,p.y-p.h/2,p.w,p.h);ctx.strokeRect(p.x-p.w/2,p.y-p.h/2,p.w,p.h);}
+        for(const d of _creatorDraft.doors||[]){ctx.fillStyle='#fff0bd';ctx.strokeStyle='#17343a';ctx.lineWidth=Math.max(5/scale,2);ctx.fillRect(d.x-d.w/2,d.y-d.h/2,d.w,d.h);ctx.strokeRect(d.x-d.w/2,d.y-d.h/2,d.w,d.h);}
+        for(const c of _creatorDraft.crates||[]){ctx.strokeStyle='#17343a';ctx.lineWidth=Math.max(4/scale,2);ctx.strokeRect(c.x-c.w/2,c.y-c.h/2,c.w,c.h);}
+        ctx.fillStyle='#17343a';ctx.beginPath();ctx.arc(_creatorDraft.spawn.x,_creatorDraft.spawn.y,Math.max(16/scale,12),0,Math.PI*2);ctx.fill();
         ctx.restore();
         sketchText(`左 ${b.e.left} 屏　右 ${b.e.right} 屏　上 ${b.e.up} 屏`,W/2,868,27);
         const actions=[['edge','＋左','left',1],['edge','－左','left',-1],['edge','＋右','right',1],['edge','－右','right',-1],['edge','＋上','up',1],['edge','－上','up',-1],['map-done','完成','',0]];
@@ -2505,13 +2503,13 @@
         if(performance.now()<_creatorRangeNoticeUntil)sketchBold(_creatorRangeNotice,W/2,1025,25,'center','#b00020');
     }
     function drawCreatorEditor() {
-        sketchBold('关卡编辑器',W/2,48,44); sketchText(_creatorDraft.name,W/2,92,23);
+        sketchBold('秘境编辑台',W/2,48,44); sketchText(_creatorDraft.name,W/2,92,23);
         const tools=[['select','选择'],['platform','平台'],['spawn','出生门'],['goal','终点门'],['crate','木箱'],['key','钥匙']];uiBTN.editorTools=[];
-        tools.forEach((it,i)=>{const r=_button(38+i*158,120,142,68,it[1],86200+i,21);r.action='tool';r.tool=it[0];if(_creatorTool===it[0]){ctx.strokeStyle='#000';ctx.lineWidth=7;ctx.strokeRect(r.x+5,r.y+5,r.w-10,r.h-10);}uiBTN.editorTools.push(r);});
+        tools.forEach((it,i)=>{const r=_button(38+i*158,120,142,68,it[1],86200+i,21);r.action='tool';r.tool=it[0];if(_creatorTool===it[0]){ctx.strokeStyle='#17343a';ctx.lineWidth=7;ctx.strokeRect(r.x+5,r.y+5,r.w-10,r.h-10);}uiBTN.editorTools.push(r);});
         [['save','保存'],['play','试玩'],['undo','撤销'],['back','返回']].forEach((it,i)=>{const r=_button(W-585+i*145,120,132,68,it[1],86300+i,21);r.action=it[0];uiBTN.editorTools.push(r);});
         sketchText('特殊玩法：',55,230,24,'left');
         const mechanics=[['normal','普通'],['double_jump','多跳'],['knock_twice','敲门'],['flower_password','顶花'],['key','钥匙'],['hold_to_stop','会动']];
-        mechanics.forEach((it,i)=>{const r=_button(180+i*190,198,165,65,it[1],86400+i,22);r.action='mechanic';r.mechanic=it[0];const selected=it[0]==='normal'?!_creatorMechanics.length:_creatorMechanics.includes(it[0]);if(selected){ctx.strokeStyle='#000';ctx.lineWidth=7;ctx.strokeRect(r.x+5,r.y+5,r.w-10,r.h-10);}uiBTN.editorTools.push(r);});
+        mechanics.forEach((it,i)=>{const r=_button(180+i*190,198,165,65,it[1],86400+i,22);r.action='mechanic';r.mechanic=it[0];const selected=it[0]==='normal'?!_creatorMechanics.length:_creatorMechanics.includes(it[0]);if(selected){ctx.strokeStyle='#17343a';ctx.lineWidth=7;ctx.strokeRect(r.x+5,r.y+5,r.w-10,r.h-10);}uiBTN.editorTools.push(r);});
         if(_creatorMapOverview){_drawCreatorMapOverview();return;}
         sketchText('地图范围：',55,312,23,'left');
         const ext=_mapExtent(_creatorDraft);
@@ -2520,11 +2518,11 @@
         sketchText('视野：'+Math.round(_creatorCameraX)+','+Math.round(_creatorCameraY),W-70,312,19,'right');
         ctx.save();ctx.strokeStyle='rgba(0,0,0,.35)';ctx.setLineDash([12,10]);ctx.strokeRect(45,350,W-90,530);ctx.restore();
         ctx.save();ctx.beginPath();ctx.rect(45,350,W-90,530);ctx.clip();ctx.translate(-_creatorCameraX,-_creatorCameraY);
-        for(const p of _creatorDraft.platforms){const x=p.x-p.w/2,y=p.y-p.h/2;ctx.fillStyle='#fff';ctx.fillRect(x,y,p.w,p.h);ctx.strokeStyle='#000';ctx.lineWidth=5;ctx.strokeRect(x,y,p.w,p.h);}
-        for(const d of _creatorDraft.doors){ctx.strokeStyle='#000';ctx.lineWidth=6;ctx.strokeRect(d.x-d.w/2,d.y-d.h/2,d.w,d.h);sketchText(d.is_goal?'终':'生',d.x,d.y,28);}
-        for(const c of _creatorDraft.crates||[]){ctx.strokeStyle='#000';ctx.lineWidth=5;ctx.strokeRect(c.x-c.w/2,c.y-c.h/2,c.w,c.h);sketchText('箱',c.x,c.y,24);}
+        for(const p of _creatorDraft.platforms){const x=p.x-p.w/2,y=p.y-p.h/2;ctx.fillStyle='#fff0bd';ctx.fillRect(x,y,p.w,p.h);ctx.strokeStyle='#17343a';ctx.lineWidth=5;ctx.strokeRect(x,y,p.w,p.h);}
+        for(const d of _creatorDraft.doors){ctx.strokeStyle='#17343a';ctx.lineWidth=6;ctx.strokeRect(d.x-d.w/2,d.y-d.h/2,d.w,d.h);sketchText(d.is_goal?'终':'生',d.x,d.y,28);}
+        for(const c of _creatorDraft.crates||[]){ctx.strokeStyle='#17343a';ctx.lineWidth=5;ctx.strokeRect(c.x-c.w/2,c.y-c.h/2,c.w,c.h);sketchText('箱',c.x,c.y,24);}
         for(const k of _creatorDraft.keys||[]){sketchBold('🔑',k.x,k.y,35);}
-        for(const q of _creatorDraft.question_blocks||[]){ctx.strokeStyle='#000';ctx.lineWidth=5;ctx.strokeRect(q.x-q.w/2,q.y-q.h/2,q.w,q.h);sketchBold('?',q.x,q.y+5,42);}
+        for(const q of _creatorDraft.question_blocks||[]){ctx.strokeStyle='#17343a';ctx.lineWidth=5;ctx.strokeRect(q.x-q.w/2,q.y-q.h/2,q.w,q.h);sketchBold('?',q.x,q.y+5,42);}
         const bound=[...(_creatorDraft.platforms||[]),...(_creatorDraft.doors||[]),...(_creatorDraft.crates||[]),...(_creatorDraft.keys||[]),...(_creatorDraft.question_blocks||[])].filter(x=>x.hold_to_stop);
         for(const o of bound)sketchBold('≋',o.x,o.y-(o.h||90)/2-24,30);
         if(_creatorSelected&&_creatorTool==='select'){
@@ -2534,7 +2532,7 @@
         ctx.restore();
         const pans=[['pan-left','← 左移'],['pan-origin','回原点'],['pan-right','右移 →'],['pan-up','↑ 上移'],['pan-down','下移 ↓']];
         pans.forEach((it,i)=>{const r=_button(445+i*210,900,185,58,it[1],86520+i,20);r.action=it[0];uiBTN.editorTools.push(r);});
-        if(_creatorBindingMode){ctx.save();ctx.fillStyle='rgba(0,0,0,.42)';ctx.fillRect(0,0,W,H);ctx.restore();sketchBold('选择要添加“会动，按住不动”的元素',W/2,335,38,'center','#fff');sketchText('带 ≋ 的元素已绑定；再次选择可取消',W/2,382,24,'center',false,'#fff');}
+        if(_creatorBindingMode){ctx.save();ctx.fillStyle='rgba(0,0,0,.42)';ctx.fillRect(0,0,W,H);ctx.restore();sketchBold('选择要添加“会动，按住不动”的元素',W/2,335,38,'center','#fff0bd');sketchText('带 ≋ 的元素已绑定；再次选择可取消',W/2,382,24,'center',false,'#fff0bd');}
         sketchText(_creatorTool==='select'?'选择/移动：先点已有元素，再点目标位置。':'移动视野后可在上方、左侧、右侧继续摆放元素。',W/2,995,23);
     }
     function _playCreatorDraft() {
@@ -2575,10 +2573,10 @@
             }
             ctx.save();
             if (disabled) ctx.globalAlpha = 0.45;
-            ctx.fillStyle = '#fff';
+            ctx.fillStyle = '#fff0bd';
             const seed = 30000 + i * 777;
             _wonkyRectPath(bx, by, btnW, btnH, 28, seed, 2.5); ctx.fill();
-            ctx.strokeStyle = '#000'; ctx.lineWidth = 4;
+            ctx.strokeStyle = '#17343a'; ctx.lineWidth = 4;
             _wonkyRectPath(bx, by, btnW, btnH, 28, seed, 2.5); ctx.stroke();
             ctx.restore();
             sketchBold(disabled ? '敬请期待' : labels[i], bx + btnW / 2, by + btnH / 2 + 8, 32);
@@ -2604,7 +2602,7 @@
             const radius = baseR + r * 22;
             const speed = (r % 2 === 0 ? 1 : -1) * (0.04 + r * 0.015);
             const rot = _completeRotAngle * speed;
-            ctx.strokeStyle = r === 0 ? '#000' : (r === 1 ? '#666' : '#333');
+            ctx.strokeStyle = r === 0 ? '#17343a' : (r === 1 ? '#666' : '#333');
             ctx.setLineDash([28, 18]);
             ctx.beginPath();
             // 画一个圆环（虚线）
@@ -2634,7 +2632,7 @@
     function drawLevelSelect() {
         drawGrid();
         // 标题
-        sketchBold('选择关卡', W / 2, H * 0.12, 72);
+        sketchBold('旅途篇章', W / 2, H * 0.12, 72);
         sketchText('已通关: ' + _progress.completed.length + ' / ' + TOTAL_LEVELS, W / 2, H * 0.18, 28, 'center', false, 'rgba(0,0,0,0.5)');
 
         // 布局：2 排 × 5 列
@@ -2666,12 +2664,12 @@
             const seed = 90000 + idx * 13;
             ctx.save();
             if (canPlay) {
-                ctx.fillStyle = completed ? '#d5f5d5' : '#fff';
+                ctx.fillStyle = completed ? '#d5f5d5' : '#fff0bd';
             } else {
                 ctx.fillStyle = '#e8e8e8';
             }
             _wonkyRectPath(bx, by, cellW, cellH, 24, seed, 2); ctx.fill();
-            ctx.strokeStyle = '#000'; ctx.lineWidth = 3.5;
+            ctx.strokeStyle = '#17343a'; ctx.lineWidth = 3.5;
             _wonkyRectPath(bx, by, cellW, cellH, 24, seed, 2); ctx.stroke();
             ctx.restore();
 
@@ -2691,36 +2689,36 @@
             }
         }
 
-        // 返回主菜单按钮
+        // 返回营地按钮
         const backW = 260, backH = 90;
         const backX = (W - backW) / 2;
         const backY = H * 0.88;
         ctx.save();
-        ctx.fillStyle = '#fff';
+        ctx.fillStyle = '#fff0bd';
         _wonkyRectPath(backX, backY, backW, backH, 28, 99999, 2); ctx.fill();
-        ctx.strokeStyle = '#000'; ctx.lineWidth = 4;
+        ctx.strokeStyle = '#17343a'; ctx.lineWidth = 4;
         _wonkyRectPath(backX, backY, backW, backH, 28, 99999, 2); ctx.stroke();
         ctx.restore();
-        sketchBold('返回主菜单', backX + backW / 2, backY + backH / 2 + 6, 32);
+        sketchBold('返回营地', backX + backW / 2, backY + backH / 2 + 6, 32);
         uiBTN.levelSelect_back = { x: backX, y: backY, w: backW, h: backH };
     }
 
     // 画锁图标
     function drawLockIcon(cx, cy) {
         ctx.save();
-        ctx.strokeStyle = '#000'; ctx.lineWidth = 4;
+        ctx.strokeStyle = '#17343a'; ctx.lineWidth = 4;
         ctx.lineCap = 'round'; ctx.lineJoin = 'round';
         // 锁身：矩形
         const bw = 36, bh = 28;
         ctx.fillStyle = '#aaa';
         _wonkyRectPath(cx - bw / 2, cy - 4, bw, bh, 5, 777, 1.5); ctx.fill();
-        ctx.strokeStyle = '#000';
+        ctx.strokeStyle = '#17343a';
         _wonkyRectPath(cx - bw / 2, cy - 4, bw, bh, 5, 777, 1.5); ctx.stroke();
         // 锁环：半圆
         ctx.beginPath();
         ctx.arc(cx, cy - 4, 14, Math.PI + 0.1, 2 * Math.PI - 0.1);
         ctx.lineWidth = 5;
-        ctx.strokeStyle = '#000';
+        ctx.strokeStyle = '#17343a';
         ctx.stroke();
         ctx.restore();
     }
@@ -3294,6 +3292,51 @@
 
     let last = performance.now();
     let _prevState = 'menu';
+    function _fantasyLine(points,color='#17343a',width=5){ctx.beginPath();points.forEach((p,i)=>i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));ctx.strokeStyle=color;ctx.lineWidth=width;ctx.lineCap='round';ctx.lineJoin='round';ctx.stroke();}
+    function drawFantasyPlatforms(){
+        for(let i=0;i<(levelData&&levelData.platforms||[]).length;i++){
+            const p=levelData.platforms[i],kind=p.kind||'ground';let x=p.x-p.w/2,w=p.w,y=p.y-p.h/2,h=p.h;if(levelData.infinite_horizontal&&kind==='ground'){x=_cameraX-200;w=W+400;}
+            if(kind==='ground'){
+                // 玩家活动层是高处悬崖：薄草顶、明亮岩沿、向下延伸的峭壁
+                const cliff=ctx.createLinearGradient(0,y,0,y+h);cliff.addColorStop(0,'#777b63');cliff.addColorStop(.25,'#655f54');cliff.addColorStop(1,'#3e4442');ctx.fillStyle=cliff;ctx.fillRect(x,y,w,h);ctx.fillStyle='#83975e';ctx.fillRect(x,y,w,24);ctx.fillStyle='#d7bb6e';ctx.fillRect(x,y,w,8);_fantasyLine([[x,y],[x+w,y]],'#17343a',6);
+                if(x>1)_fantasyLine([[x,y],[x,y+h]],'#17343a',6);if(x+w<W-1)_fantasyLine([[x+w,y],[x+w,y+h]],'#17343a',6);
+                const first=levelData.infinite_horizontal?Math.floor((_cameraX-150)/150)*150:x+60,last=levelData.infinite_horizontal?_cameraX+W+150:x+w-40;for(let gx=first;gx<last;gx+=150){_fantasyLine([[gx,y],[gx-5,y-15]],'#34483e',3);_fantasyLine([[gx,y],[gx+7,y-12]],'#34483e',3);}
+                ctx.strokeStyle='rgba(38,48,48,.72)';ctx.lineWidth=4;for(let rx=x+95,ri=0;rx<x+w-40;rx+=170,ri++){const len=50+(ri%3)*34;ctx.beginPath();ctx.moveTo(rx,y+38);ctx.lineTo(rx-12,y+38+len*.45);ctx.lineTo(rx+7,y+38+len);ctx.stroke();}
+                ctx.fillStyle='rgba(228,205,142,.18)';for(let sx=x+60; sx<x+w; sx+=210){ctx.beginPath();ctx.ellipse(sx,y+75,42,9,-.08,0,Math.PI*2);ctx.fill();}
+            }else{
+                ctx.save();ctx.fillStyle='#d9bd71';ctx.strokeStyle='#17343a';ctx.lineWidth=5;_roundPath(x,y,w,h,Math.min(15,h*.25));ctx.fill();ctx.stroke();ctx.fillStyle='#f3dc96';ctx.fillRect(x+12,y+9,w-24,Math.max(7,h*.22));ctx.strokeStyle='#9b7e42';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(x+w*.2,y+h*.67);ctx.lineTo(x+w*.42,y+h*.64);ctx.moveTo(x+w*.65,y+h*.7);ctx.lineTo(x+w*.8,y+h*.66);ctx.stroke();ctx.restore();
+            }
+        }
+    }
+    function drawFantasyDoors(){
+        if(showSuccess&&doorOpenT<1)doorOpenT=Math.min(1,doorOpenT+1/40);else if(!showSuccess)doorOpenT=Math.max(0,doorOpenT-.1);
+        for(const d of levelData&&levelData.doors||[]){const w=d.w,h=d.h,x=d.x-w/2,y=d.y-h/2,opening=d.is_goal&&showSuccess?doorOpenT:0;
+            ctx.save();ctx.translate(d.x,y);
+            ctx.fillStyle='#637568';ctx.strokeStyle='#17343a';ctx.lineWidth=7;ctx.beginPath();ctx.moveTo(-w*.62,h);ctx.lineTo(-w*.58,40);ctx.quadraticCurveTo(-w*.42,-20,0,-34);ctx.quadraticCurveTo(w*.42,-20,w*.58,40);ctx.lineTo(w*.62,h);ctx.closePath();ctx.fill();ctx.stroke();
+            ctx.fillStyle='#80907a';ctx.strokeStyle='#17343a';ctx.lineWidth=5;_roundPath(-w*.65,30,w*.18,h-24,8);ctx.fill();ctx.stroke();_roundPath(w*.47,30,w*.18,h-24,8);ctx.fill();ctx.stroke();
+            ctx.strokeStyle='#e7c767';ctx.lineWidth=8;ctx.beginPath();ctx.moveTo(-w*.4,h-2);ctx.lineTo(-w*.4,47);ctx.quadraticCurveTo(0,-6,w*.4,47);ctx.lineTo(w*.4,h-2);ctx.stroke();
+            ctx.fillStyle='#203a3a';ctx.beginPath();ctx.moveTo(-w*.34,h-3);ctx.lineTo(-w*.34,51);ctx.quadraticCurveTo(0,7,w*.34,51);ctx.lineTo(w*.34,h-3);ctx.closePath();ctx.fill();
+            ctx.save();ctx.translate(w*.34,0);ctx.scale(Math.max(.04,1-opening),1);ctx.fillStyle='#4d675b';ctx.strokeStyle='#17343a';ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(-w*.68,h-5);ctx.lineTo(-w*.68,54);ctx.quadraticCurveTo(-w*.34,12,0,54);ctx.lineTo(0,h-5);ctx.closePath();ctx.fill();ctx.stroke();ctx.strokeStyle='#f2d577';ctx.lineWidth=4;ctx.beginPath();ctx.arc(-w*.34,h*.48,Math.min(20,w*.15),0,Math.PI*2);ctx.stroke();ctx.beginPath();ctx.moveTo(-w*.34,h*.28);ctx.lineTo(-w*.34,h*.67);ctx.moveTo(-w*.5,h*.48);ctx.lineTo(-w*.18,h*.48);ctx.stroke();ctx.restore();
+            ctx.strokeStyle='rgba(23,52,58,.55)';ctx.lineWidth=3;for(const sy of [h*.25,h*.48,h*.7]){ctx.beginPath();ctx.moveTo(-w*.61,sy);ctx.lineTo(-w*.48,sy+2);ctx.moveTo(w*.48,sy+2);ctx.lineTo(w*.61,sy);ctx.stroke();}
+            ctx.fillStyle='#738474';ctx.strokeStyle='#17343a';ctx.lineWidth=5;_roundPath(-w*.7,h-13,w*1.4,18,8);ctx.fill();ctx.stroke();ctx.restore();
+            if(d.hold_to_stop&&d._isRunning&&!_isMovingHeld(d)&&gameState==='playing'){const step=Math.sin(frameCount*.28)*9,fy=y+h+17;_fantasyLine([[d.x-w*.22,y+h],[d.x-w*.22+step,fy],[d.x-w*.22-8+step,fy]],'#17343a',6);_fantasyLine([[d.x+w*.22,y+h],[d.x+w*.22-step,fy],[d.x+w*.22+8-step,fy]],'#17343a',6);}
+            if(d.locked&&!unlockedDoors.has(d.id)){ctx.save();ctx.strokeStyle='#e6c65f';ctx.lineWidth=7;ctx.beginPath();ctx.moveTo(x-5,y+h*.3);ctx.quadraticCurveTo(d.x,y+h*.48,x+w+5,y+h*.3);ctx.stroke();ctx.fillStyle='#e5bb48';ctx.strokeStyle='#17343a';ctx.lineWidth=5;_roundPath(d.x-24,y+h*.49,48,45,8);ctx.fill();ctx.stroke();ctx.restore();}
+        }
+    }
+    function drawFantasyCrates(){for(let i=0;i<crates.length;i++){const c=crates[i],x=c.x-c.w/2,y=c.y-c.h/2;ctx.save();ctx.fillStyle='#9b653d';ctx.strokeStyle='#17343a';ctx.lineWidth=6;_roundPath(x,y,c.w,c.h,9);ctx.fill();ctx.stroke();ctx.fillStyle='#c78a4d';ctx.fillRect(x+13,y+13,c.w-26,c.h-26);ctx.strokeRect(x+13,y+13,c.w-26,c.h-26);_fantasyLine([[x+18,y+18],[x+c.w-18,y+c.h-18]],'#70452f',7);_fantasyLine([[x+c.w-18,y+18],[x+18,y+c.h-18]],'#70452f',7);ctx.fillStyle='#e0ba61';ctx.fillRect(x-3,y+8,c.w+6,13);ctx.fillRect(x-3,y+c.h-21,c.w+6,13);ctx.restore();}}
+    function drawFantasyPlayer(){
+        let ax=player.x,ay=player.y,scale=1;if(showSuccess){const e=SUCCESS_TOTAL-successTimer;if(e>=40&&e<100){const t=(e-40)/60,q=t*t;ax=_animStartX+(_animTargetX-_animStartX)*q;ay=_animStartY+(_animTargetY-_animStartY)*q;scale=1-q;}else if(e>=100)return;}
+        const air=!player.onGround,walking=player.onGround&&Math.abs(player.vx)>10,rising=air&&player.vy<0,clock=performance.now()*.001,dir=player.vx<0?-1:1,bob=walking?-Math.max(0,Math.sin(player.walkT))*5:0;
+        ctx.save();ctx.translate(ax,ay-24+bob);ctx.scale(dir*scale,scale);const run=walking?1:0,lift=air?1:0,wave=Math.sin(clock*14)*6*run+Math.sin(clock*8)*3*lift;
+        ctx.fillStyle='#b54043';ctx.beginPath();ctx.moveTo(-7,-31);ctx.bezierCurveTo(-31-run*20-lift*12,-15-wave,-50-run*28,24-wave*.5-lift*10,-36-run*20,50-lift*14);ctx.quadraticCurveTo(-6,39-wave*.2,15,31);ctx.closePath();ctx.fill();ctx.strokeStyle='#17343a';ctx.lineWidth=5;ctx.stroke();
+        ctx.fillStyle='#f2d18c';ctx.beginPath();ctx.ellipse(0,-34,27,30,0,0,Math.PI*2);ctx.fill();ctx.stroke();
+        const hs=Math.sin(clock*(walking?12:7))*(walking?3:1)+Math.sin(clock*8)*lift*2;ctx.save();ctx.translate(0,-lift*2);ctx.rotate(hs*.012);ctx.fillStyle='#67412d';ctx.beginPath();ctx.moveTo(-27,-40);ctx.quadraticCurveTo(-20,-68,4,-67);ctx.quadraticCurveTo(28,-63,27,-40);ctx.lineTo(18,-44);ctx.lineTo(10,-31);ctx.lineTo(1,-43);ctx.lineTo(-8,-28);ctx.lineTo(-18,-39);ctx.closePath();ctx.fill();ctx.beginPath();ctx.ellipse(-25,-39,8,19,-.25+hs*.02,0,Math.PI*2);ctx.fill();ctx.restore();
+        ctx.fillStyle='#17343a';ctx.beginPath();ctx.arc(9,-33,4,0,Math.PI*2);ctx.fill();
+        ctx.fillStyle='#2d7770';ctx.beginPath();ctx.moveTo(-24,-6);ctx.lineTo(25,-6);ctx.lineTo(27,28);ctx.quadraticCurveTo(0,34,-26,28);ctx.closePath();ctx.fill();ctx.stroke();ctx.fillStyle='#d8ad55';ctx.fillRect(-26,23,53,9);ctx.strokeRect(-26,23,53,9);ctx.fillStyle='#334b52';ctx.fillRect(-22,32,20,14);ctx.fillRect(3,32,20,14);
+        const arm=Math.sin(player.walkT||0)*7;_fantasyLine([[-23,2],[-42-(walking?arm:0),rising?-22:22]],'#17343a',6);_fantasyLine([[23,2],[42+(walking?arm:0),rising?-22:20]],'#17343a',6);
+        const p=Math.sin(player.walkT||0),p2=-p,k1=[-13+p*5,64-bob*.45-Math.max(0,p)*4],f1=[-14+p*12,84-bob-Math.max(0,p)*8],k2=[14+p2*5,64-bob*.45-Math.max(0,p2)*4],f2=[16+p2*12,84-bob-Math.max(0,p2)*8];_fantasyLine([[-14,45],k1,f1],'#17343a',6);_fantasyLine([[15,45],k2,f2],'#17343a',6);_fantasyLine([[f1[0]-2,f1[1]],[f1[0]+7,f1[1]]],'#17343a',5);_fantasyLine([[f2[0]-2,f2[1]],[f2[0]+7,f2[1]]],'#17343a',5);ctx.restore();
+    }
+
     function loop(now) {
         let dt = (now - last) / 1000;
         if (dt > 0.05) dt = 0.05;
@@ -3512,14 +3555,14 @@
             else if (gameState === 'complete' || gameState === 'completeIntro') drawComplete();
             else {
                 ctx.save();ctx.translate(-_cameraX,-_cameraY);
-                drawPlatforms();
+                drawFantasyPlatforms();
                 drawDecor();
-                drawCrates();
+                drawFantasyCrates();
                 drawKeys();
-                drawDoors();
+                drawFantasyDoors();
                 drawQuestionBlocks();
                 drawKnockEffects();
-                drawPlayer();
+                drawFantasyPlayer();
                 ctx.restore();
                 drawLevelTopBar();
                 drawBottomControls();
@@ -3592,10 +3635,10 @@
                 ctx.fillStyle = 'rgba(215,48,39,0.95)';
                 ctx.fill();
                 ctx.lineWidth = 4;
-                ctx.strokeStyle = '#000';
+                ctx.strokeStyle = '#17343a';
                 ctx.stroke();
                 // 文字：两行 白字 居中
-                ctx.fillStyle = '#fff';
+                ctx.fillStyle = '#fff0bd';
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 ctx.font = 'bold 22px system-ui, "PingFang SC", "Microsoft YaHei", sans-serif';
@@ -3623,18 +3666,18 @@
                 ctx.quadraticCurveTo(vbx, vby, vbx + vr, vby);
                 ctx.closePath();
                 ctx.globalAlpha = 0.75;
-                ctx.fillStyle = '#000';
+                ctx.fillStyle = '#17343a';
                 ctx.fill();
                 ctx.globalAlpha = 1;
                 ctx.lineWidth = 2;
                 ctx.strokeStyle = '#bbb';
                 ctx.stroke();
                 // 白字：代码 vXXX
-                ctx.fillStyle = '#fff';
+                ctx.fillStyle = '#fff0bd';
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 ctx.font = 'bold 14px system-ui, "PingFang SC", sans-serif';
-                ctx.fillText('代码 v' + GAME_CODE_VERSION, vbx + vbw / 2, vby + vbh / 2);
+                ctx.fillText('代码 v' + GAME_CODE_VERSION + ' · F4', vbx + vbw / 2, vby + vbh / 2);
                 ctx.restore();
             } catch(_vErr) { /* 不影响玩 */ }
             // ===== v17.0 debug=1：顶部大字彩色「通关状态机」标签（用户不看console也知道当前阶段）=====
@@ -3658,7 +3701,7 @@
                         color = '#bbbbbb';
                     }
                     ctx.globalAlpha = 0.92;
-                    ctx.fillStyle = '#000';
+                    ctx.fillStyle = '#17343a';
                     ctx.fillRect(W/2 - 360, 92, 720, 56);
                     ctx.lineWidth = 4;
                     ctx.strokeStyle = color;
