@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 158;   // 跟 index.html 的 ?v=158 保持一致
+    const GAME_CODE_VERSION = 159;   // 跟 index.html 的 ?v=159 保持一致
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
         const last = parseInt(localStorage.getItem(LAST_KNOWN_KEY) || '0', 10);
@@ -29,9 +29,8 @@
 
     const W = 1920, H = 1080;
     const FANTASY_TITLES = [
-        '风起之门 · 迈出旅程', '云阶试炼 · 借木而登', '锁语遗迹 · 让钥匙找到归途',
-        '断崖回声 · 一次飞跃不够', '守门人的礼仪 · 以礼叩响古门',
-        '花之暗号 · 记住短暂盛开的数字', '逃走的门 · 让奔跑停在掌心'
+        '风起之门', '云阶试炼', '锁语遗迹', '断崖双跃',
+        '守门人的礼仪', '花之暗号', '逃走的门'
     ];
     const GRAVITY = 2000.0;
     const MAX_FALL = 1200.0;
@@ -1059,10 +1058,10 @@
         uiBTN.restart = { x: bx0 + bs + bgap, y: by2, w: bs, h: bs };
         uiBTN.pause = { x: bx0 + (bs + bgap) * 2, y: by2, w: bs, h: bs };
 
-        // 第四关标题单独下移一行并严格居中，避免与顶部按钮挤在一起。
+        // 所有关卡标题水平居中；第四关仍单独下移一行，避免与顶部按钮挤在一起。
         const titleIsLower = currentLevelIndex === 3;
         sketchBold(_playingCustom ? ((levelData && levelData.name) || '无名秘境') : (FANTASY_TITLES[currentLevelIndex] || (levelData && levelData.name) || '风在门后等待'),
-                   titleIsLower ? W / 2 : W / 2 + 120,
+                   W / 2,
                    titleIsLower ? 190 : 74, 58);
     }
 
