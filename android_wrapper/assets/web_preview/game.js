@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 157;   // 跟 index.html 的 ?v=157 保持一致
+    const GAME_CODE_VERSION = 158;   // 跟 index.html 的 ?v=158 保持一致
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
         const last = parseInt(localStorage.getItem(LAST_KNOWN_KEY) || '0', 10);
@@ -182,7 +182,13 @@
       getDoorOpenT: () => doorOpenT,
       __setPlayerX: (v) => { player.x = v; },
       __setPlayerVy: (v) => { player.vy = v; },
-      __setInputRight: (v) => { input.right = v; },
+      __setInputRight: (v) => { _setControlSource('debug:right', 'right', !!v); },
+      getInputSnapshot: () => _getInputSnapshot(),
+      runInputRegressionTests: () => _runInputRegressionTests(),
+      resetInput: (reason = 'debug-manual-reset') => _resetAllInput(reason, {
+        clearHeldKeyboard: true,
+        clearBlockedKeyboard: true
+      }),
       loadLevelAndStart: () => {
         logStep('debug', 'manual-loadLevelAndStart', {gameState, hasLevelData: !!levelData});
         loadLevelAndStart();
@@ -279,7 +285,7 @@
                 levelName: levelData && levelData.name,
                 showSuccess, showDead, paused: gameState === 'paused',
                 player: { x: player.x, y: player.y, vx: player.vx, vy: player.vy, onGround: player.onGround, alive: player.alive, jumpsLeft: player.jumpsLeft },
-                input: { ...input }, validKnockCount: _validKnockCount,
+                input: _getInputSnapshot(), validKnockCount: _validKnockCount,
                 availableLevels: _availableLevels.slice(),
                 progress: { unlocked: _progress.unlocked, completed: (_progress.completed || []).slice() }
             },
@@ -320,9 +326,6 @@
     window.addEventListener('unhandledrejection', e => logStep('fatal', 'unhandled-rejection', { reason: String(e.reason), stack: e.reason && e.reason.stack }));
     window.addEventListener('online', () => logStep('network', 'browser-online', { online: true }));
     window.addEventListener('offline', () => logStep('network', 'browser-offline', { online: false }));
-    document.addEventListener('visibilitychange', () => logStep('lifecycle', 'visibility-change', { visibility: document.visibilityState }));
-    window.addEventListener('pagehide', e => logStep('lifecycle', 'page-hide', { persisted: e.persisted }));
-
     const input = { left: false, right: false, jumpPressed: false, jumpHeld: false };
     let helpVisible = false;
     const keys = { ArrowLeft:'left', KeyA:'left', ArrowRight:'right', KeyD:'right',
@@ -331,6 +334,262 @@
     // 记录真实按下的键，并在新关中屏蔽它们，直到收到对应 keyup。
     const _heldKeyboardCodes = new Set();
     const _blockedKeyboardCodesUntilRelease = new Set();
+    // v158：所有控制来源独立登记，再聚合成 input。
+    // 避免 A + 左方向键、键盘 + 触屏、双指等场景中，任意一个来源松开就误清其他来源。
+    const _controlSources = new Map();
+    const _activeTouchControls = new Map();
+    let _mouseControl = null;
+
+    function _getInputSnapshot() {
+        return {
+            input: {
+                left: !!input.left,
+                right: !!input.right,
+                jumpPressed: !!input.jumpPressed,
+                jumpHeld: !!input.jumpHeld
+            },
+            sources: Array.from(_controlSources.entries()).map(([id, control]) => ({ id, control })),
+            heldKeyboardCodes: Array.from(_heldKeyboardCodes),
+            blockedKeyboardCodes: Array.from(_blockedKeyboardCodesUntilRelease),
+            mouseControl: _mouseControl,
+            activeTouchControls: Array.from(_activeTouchControls.entries()).map(([id, control]) => ({ id, control }))
+        };
+    }
+
+    function _syncInputFromSources(armJumpEdge) {
+        const wasJumpHeld = !!input.jumpHeld;
+        let left = false, right = false, jump = false;
+        for (const control of _controlSources.values()) {
+            if (control === 'left') left = true;
+            else if (control === 'right') right = true;
+            else if (control === 'jump') jump = true;
+        }
+        input.left = left;
+        input.right = right;
+        if (armJumpEdge && jump && !wasJumpHeld) input.jumpPressed = true;
+        input.jumpHeld = jump;
+    }
+
+    function _setControlSource(sourceId, control, isDown) {
+        const before = _getInputSnapshot();
+        const previousControl = _controlSources.get(sourceId) || null;
+        if (isDown) _controlSources.set(sourceId, control);
+        else _controlSources.delete(sourceId);
+        _syncInputFromSources(isDown && control === 'jump');
+        return {
+            changed: isDown ? previousControl !== control : previousControl !== null,
+            previousControl,
+            before,
+            after: _getInputSnapshot()
+        };
+    }
+
+    function _resetAllInput(reason, options = {}) {
+        const before = _getInputSnapshot();
+        if (options.blockHeldKeyboard) {
+            _blockedKeyboardCodesUntilRelease.clear();
+            for (const code of _heldKeyboardCodes) _blockedKeyboardCodesUntilRelease.add(code);
+        }
+        if (options.clearHeldKeyboard) _heldKeyboardCodes.clear();
+        if (options.clearBlockedKeyboard) _blockedKeyboardCodesUntilRelease.clear();
+        _controlSources.clear();
+        _mouseControl = null;
+        _activeTouchControls.clear();
+        _heldMovingTargets.clear();
+        _mouseMovingTarget = null;
+        input.left = false;
+        input.right = false;
+        input.jumpPressed = false;
+        input.jumpHeld = false;
+        player.moveDir = 0;
+        player.wantJump = false;
+        player.vx = 0;
+        const after = _getInputSnapshot();
+        logStep('input', 'all-input-reset', {
+            reason,
+            before,
+            after,
+            blockHeldKeyboard: !!options.blockHeldKeyboard,
+            clearHeldKeyboard: !!options.clearHeldKeyboard,
+            clearBlockedKeyboard: !!options.clearBlockedKeyboard
+        });
+        return { before, after };
+    }
+
+    function _isTextEntryTarget(target) {
+        if (!target) return false;
+        const tag = String(target.tagName || '').toUpperCase();
+        return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || !!target.isContentEditable;
+    }
+
+    function _resetForLostFocus(reason) {
+        return _resetAllInput(reason, {
+            clearHeldKeyboard: true,
+            clearBlockedKeyboard: true
+        });
+    }
+
+    window.addEventListener('blur', () => {
+        logStep('lifecycle', 'window-blur', { input: _getInputSnapshot() });
+        _resetForLostFocus('window-blur');
+    });
+    document.addEventListener('visibilitychange', () => {
+        logStep('lifecycle', 'visibility-change', { visibility: document.visibilityState, input: _getInputSnapshot() });
+        if (document.visibilityState === 'hidden') _resetForLostFocus('document-hidden');
+    });
+    window.addEventListener('pagehide', e => {
+        logStep('lifecycle', 'page-hide', { persisted: e.persisted, input: _getInputSnapshot() });
+        _resetForLostFocus('page-hide');
+    });
+
+    async function _runInputRegressionTests() {
+        const results = [];
+        const snapshot = () => JSON.parse(JSON.stringify(_getInputSnapshot()));
+        const sourceIds = state => state.sources.map(item => item.id);
+        const assert = (condition, message, state) => {
+            if (!condition) throw new Error(message + ' | state=' + JSON.stringify(state));
+        };
+        const key = (type, code, repeat = false) => {
+            const keyNames = { KeyA:'a', KeyD:'d', ArrowLeft:'ArrowLeft', ArrowRight:'ArrowRight', KeyW:'w', ArrowUp:'ArrowUp', Space:' ' };
+            document.dispatchEvent(new KeyboardEvent(type, {
+                code,
+                key: keyNames[code] || code,
+                repeat,
+                bubbles: true,
+                cancelable: true
+            }));
+        };
+        const clean = reason => _resetForLostFocus('input-regression-' + reason);
+        const run = async (name, fn) => {
+            clean('before-' + name);
+            try {
+                await fn();
+                results.push({ name, status:'PASS' });
+            } catch (error) {
+                results.push({ name, status:'FAIL', error:error.message });
+            } finally {
+                clean('after-' + name);
+            }
+        };
+
+        await run('blur-clears-lost-release', async () => {
+            key('keydown', 'KeyA');
+            let state = snapshot();
+            assert(state.input.left && sourceIds(state).includes('kbd:KeyA'), 'KeyA should activate left', state);
+            window.dispatchEvent(new Event('blur'));
+            state = snapshot();
+            assert(!state.input.left && !state.input.right && !state.input.jumpHeld, 'blur should clear gameplay input', state);
+            assert(state.sources.length === 0 && state.heldKeyboardCodes.length === 0 && state.blockedKeyboardCodes.length === 0, 'blur should discard stale sources and keyboard state', state);
+            key('keydown', 'KeyA');
+            state = snapshot();
+            assert(state.input.left, 'fresh KeyA should work immediately after blur reset', state);
+        });
+
+        await run('blur-clears-lost-mouse-release', async () => {
+            _mouseControl = 'left';
+            _setControlSource('mouse:primary', 'left', true);
+            let state = snapshot();
+            assert(state.input.left && state.mouseControl === 'left' && sourceIds(state).includes('mouse:primary'), 'mouse should activate left before blur', state);
+            window.dispatchEvent(new Event('blur'));
+            state = snapshot();
+            assert(!state.input.left && state.mouseControl === null && state.sources.length === 0, 'blur should clear a mouse press whose mouseup was lost', state);
+            handleUp('input-regression-late-mouseup');
+            state = snapshot();
+            assert(!state.input.left && state.mouseControl === null && state.sources.length === 0, 'late mouseup should remain harmless after blur reset', state);
+        });
+
+        await run('blur-clears-active-touch', async () => {
+            _activeTouchControls.set(71, 'right');
+            _setControlSource('touch:71', 'right', true);
+            let state = snapshot();
+            assert(state.input.right && state.activeTouchControls.length === 1 && sourceIds(state).includes('touch:71'), 'touch should activate right before blur', state);
+            window.dispatchEvent(new Event('blur'));
+            state = snapshot();
+            assert(!state.input.right && state.activeTouchControls.length === 0 && state.sources.length === 0, 'blur should clear active touch input', state);
+        });
+
+        await run('same-direction-key-sources', async () => {
+            key('keydown', 'KeyA');
+            key('keydown', 'ArrowLeft');
+            key('keyup', 'KeyA');
+            let state = snapshot();
+            assert(state.input.left && sourceIds(state).includes('kbd:ArrowLeft') && !sourceIds(state).includes('kbd:KeyA'), 'ArrowLeft should survive KeyA release', state);
+            key('keyup', 'ArrowLeft');
+            state = snapshot();
+            assert(!state.input.left, 'left should clear after the final source releases', state);
+        });
+
+        await run('keyboard-survives-mouse-release', async () => {
+            key('keydown', 'KeyD');
+            _mouseControl = 'right';
+            _setControlSource('mouse:primary', 'right', true);
+            handleUp('input-regression-mouseup');
+            let state = snapshot();
+            assert(state.input.right && sourceIds(state).includes('kbd:KeyD') && !sourceIds(state).includes('mouse:primary'), 'mouse release should not clear held KeyD', state);
+            key('keyup', 'KeyD');
+            state = snapshot();
+            assert(!state.input.right, 'right should clear after the final source releases', state);
+        });
+
+        await run('multi-touch-source-aggregation', async () => {
+            _setControlSource('touch:1', 'left', true);
+            _setControlSource('touch:2', 'left', true);
+            _setControlSource('touch:1', 'left', false);
+            let state = snapshot();
+            assert(state.input.left && sourceIds(state).includes('touch:2'), 'second touch should keep left active', state);
+            _setControlSource('touch:2', 'left', false);
+            state = snapshot();
+            assert(!state.input.left, 'left should clear after both touches release', state);
+        });
+
+        await run('movement-and-jump-stay-independent', async () => {
+            _setControlSource('touch:left', 'left', true);
+            _setControlSource('touch:jump', 'jump', true);
+            _setControlSource('touch:jump', 'jump', false);
+            const state = snapshot();
+            assert(state.input.left && !state.input.jumpHeld && state.input.jumpPressed, 'releasing jump should preserve movement and the pending jump edge', state);
+        });
+
+        await run('text-entry-does-not-control-player', async () => {
+            const textInput = document.getElementById('level-code-input');
+            assert(!!textInput, 'level code input should exist', snapshot());
+            textInput.dispatchEvent(new KeyboardEvent('keydown', { code:'KeyA', key:'a', bubbles:true, cancelable:true }));
+            textInput.dispatchEvent(new KeyboardEvent('keydown', { code:'Space', key:' ', bubbles:true, cancelable:true }));
+            const state = snapshot();
+            assert(!state.input.left && !state.input.jumpHeld && state.sources.length === 0, 'typing a level code must not create gameplay sources', state);
+        });
+
+        await run('level-transition-blocks-carried-key', async () => {
+            key('keydown', 'KeyD');
+            loadLevelAndStart();
+            let state = snapshot();
+            assert(!state.input.right && state.blockedKeyboardCodes.includes('KeyD'), 'level load should block carried KeyD', state);
+            key('keydown', 'KeyD', true);
+            state = snapshot();
+            assert(!state.input.right, 'repeat KeyD should remain blocked', state);
+            key('keyup', 'KeyD');
+            key('keydown', 'KeyD');
+            state = snapshot();
+            assert(state.input.right, 'fresh KeyD should work after release', state);
+        });
+
+        await run('opposite-directions-stay-independent', async () => {
+            key('keydown', 'KeyA');
+            key('keydown', 'KeyD');
+            let state = snapshot();
+            assert(state.input.left && state.input.right, 'both directions should remain represented', state);
+            key('keyup', 'KeyA');
+            state = snapshot();
+            assert(!state.input.left && state.input.right, 'releasing left should leave right active', state);
+        });
+
+        const failures = results.filter(item => item.status === 'FAIL');
+        window.__inputRegressionResults = results;
+        logStep('debug', 'input-regression-result', { passed:results.length - failures.length, failed:failures.length, results });
+        console.log('[INPUT-REGRESSION]', JSON.stringify(results));
+        if (failures.length) throw new Error(failures.length + ' input regression(s) failed');
+        return results;
+    }
 
     // 轻量程序化音效：不依赖外部音频文件，首次键盘/触摸操作后自动启用。
     let _audioCtx = null;
@@ -404,6 +663,10 @@
             gameState, showSuccess, showDead,
             handled_shortcut: false
         });
+        if (_isTextEntryTarget(e.target)) {
+            logStep('input', 'text-entry-keydown-skipped', { code: e.code, tag: e.target && e.target.tagName });
+            return;
+        }
         const mappedControl = keys[e.code];
         if (mappedControl) {
             _heldKeyboardCodes.add(e.code);
@@ -434,14 +697,20 @@
         if (keys[e.code]) {
             if (keys[e.code] === 'jump') {
                 const beforeHeld = input.jumpHeld;
-                if (!beforeHeld) input.jumpPressed = true;
-                input.jumpHeld = true;
-                logStep('input','jump-press', {jumpPressed: input.jumpPressed, beforeHeld, jumpHeld_now: input.jumpHeld});
+                const result = _setControlSource('kbd:' + e.code, 'jump', true);
+                logStep('input','jump-press', {
+                    jumpPressed: input.jumpPressed,
+                    beforeHeld,
+                    jumpHeld_now: input.jumpHeld,
+                    code: e.code,
+                    changed: result.changed,
+                    sources: result.after.sources
+                });
             } else {
                 const name = keys[e.code];
                 const before = input[name];
-                input[name] = true;
-                logStep('input','dir-press', {name, before, now: true, code: e.code});
+                const result = _setControlSource('kbd:' + e.code, name, true);
+                logStep('input','dir-press', {name, before, now: input[name], code: e.code, changed: result.changed, sources: result.after.sources});
             }
         }
     });
@@ -449,13 +718,26 @@
         if (keys[e.code]) {
             _heldKeyboardCodes.delete(e.code);
             const releasedCarriedKey = _blockedKeyboardCodesUntilRelease.delete(e.code);
+            const control = keys[e.code];
+            const result = _setControlSource('kbd:' + e.code, control, false);
             if (keys[e.code] === 'jump') {
-                input.jumpHeld = false;
-                logStep('input','jump-release', {jumpHeld: false, releasedCarriedKey});
+                logStep('input','jump-release', {
+                    jumpHeld: input.jumpHeld,
+                    releasedCarriedKey,
+                    code: e.code,
+                    changed: result.changed,
+                    sources: result.after.sources
+                });
             } else {
                 const name = keys[e.code];
-                input[name] = false;
-                logStep('input','dir-release', {name, code: e.code, releasedCarriedKey});
+                logStep('input','dir-release', {
+                    name,
+                    code: e.code,
+                    now: input[name],
+                    releasedCarriedKey,
+                    changed: result.changed,
+                    sources: result.after.sources
+                });
             }
         }
     });
@@ -1225,7 +1507,8 @@
             const passwordGateOpen = !_hasMechanic('flower_password') || _passwordSolved;
             const movingGateOpen = !_hasMechanic('hold_to_stop') || !d.hold_to_stop || _isMovingHeld(d);
             if (d.is_goal && _hasMechanic('flower_password') && !_passwordSolved && performance.now() >= _passwordDismissUntil && overlap >= PLAYER_HALF_AREA) {
-                _passwordVisible = true; player.vx = 0; input.left = false; input.right = false;
+                _passwordVisible = true;
+                _resetAllInput('password-panel-open', { blockHeldKeyboard: true });
                 logStep('puzzle','password-panel-open',{input:_passwordInput, revealed:_questionBlocks.map(b=>b.revealed)});
                 return;
             }
@@ -2754,11 +3037,8 @@
         };
     }
     function inRect(p, r) { return r && p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h; }
-    function pressInput(name, isDown) {
-        if (name === 'jump') {
-            if (isDown) { if (!input.jumpHeld) input.jumpPressed = true; input.jumpHeld = true; }
-            else input.jumpHeld = false;
-        } else input[name] = isDown;
+    function pressInput(name, isDown, sourceId) {
+        return _setControlSource(sourceId, name, isDown);
     }
     function handleDown(p) {
         if (_passwordVisible) {
@@ -2935,7 +3215,7 @@
         if (gameState === 'playing' || gameState === 'paused') {
             if (gameState === 'paused' && inRect(p, uiBTN.pauseLevelSelect)) {
                 helpVisible = false;
-                handleUp();
+                _resetAllInput('pause-return-list', { blockHeldKeyboard: true });
                 gameState = _playingCustom ? 'creatorList' : 'levelSelect';
                 if (_playingCustom) _playingCustom=false;
                 logStep('state', 'paused→list', { source: 'pause-menu', to:gameState });
@@ -2943,7 +3223,7 @@
             }
             if (gameState === 'paused' && inRect(p, uiBTN.pauseResume)) {
                 helpVisible = false;
-                handleUp();
+                _resetAllInput('pause-resume', { blockHeldKeyboard: true });
                 gameState = 'playing';
                 logStep('state', 'paused→playing', { source: 'pause-menu-resume' });
                 return;
@@ -2963,7 +3243,7 @@
                 helpVisible = false;
                 const wasPaused = gameState === 'paused';
                 gameState = wasPaused ? 'playing' : 'paused';
-                handleUp();
+                _resetAllInput(wasPaused ? 'top-pause-resume' : 'top-pause-open', { blockHeldKeyboard: true });
                 logStep('state', wasPaused ? 'paused→playing' : 'playing→paused', { source: 'top-pause-button' });
                 return;
             }
@@ -3017,19 +3297,52 @@
                     }
                 }
             }
-            if (inRect(p, uiBTN.left)) pressInput('left', true);
-            else if (inRect(p, uiBTN.right)) pressInput('right', true);
-            else if (inRect(p, uiBTN.jump)) pressInput('jump', true);
+            const control = _controlAt(p);
+            if (control) {
+                _mouseControl = control;
+                const result = pressInput(control, true, 'mouse:primary');
+                logStep('input', 'mouse-control-down', {
+                    control,
+                    x: Math.round(p.x),
+                    y: Math.round(p.y),
+                    changed: result.changed,
+                    input: result.after
+                });
+            }
         }
     }
-    function handleUp() {
-        pressInput('left', false); pressInput('right', false); pressInput('jump', false);
-        _mouseMovingTarget=null;
+    function handleUp(reason = 'mouse-up') {
+        const control = _mouseControl;
+        _mouseControl = null;
+        if (control) {
+            const result = pressInput(control, false, 'mouse:primary');
+            logStep('input', 'mouse-control-up', {
+                control,
+                reason,
+                changed: result.changed,
+                input: result.after
+            });
+        }
+        if (_mouseMovingTarget) {
+            logStep('input', 'moving-element-release', {
+                id: _mouseMovingTarget.id,
+                pointer: 'mouse',
+                reason
+            });
+        }
+        _mouseMovingTarget = null;
     }
-    canvas.addEventListener('mousedown', e => {const p=getMousePos(e),t=gameState==='playing'?_movingTargetAt(p):null;if(t){_mouseMovingTarget=t.obj;logStep('input','moving-element-hold',{kind:t.kind,id:t.obj.id,pointer:'mouse'});}else handleDown(p);});
-    canvas.addEventListener('mouseup',   () => handleUp());
-    canvas.addEventListener('mouseleave',() => handleUp());
-    const _activeTouchControls = new Map();
+    canvas.addEventListener('mousedown', e => {
+        handleUp('mouse-new-down');
+        const p = getMousePos(e), t = gameState === 'playing' ? _movingTargetAt(p) : null;
+        if (t) {
+            _mouseMovingTarget = t.obj;
+            logStep('input','moving-element-hold',{kind:t.kind,id:t.obj.id,pointer:'mouse'});
+        } else handleDown(p);
+    });
+    canvas.addEventListener('mouseup', () => handleUp('canvas-mouseup'));
+    canvas.addEventListener('mouseleave', () => handleUp('canvas-mouseleave'));
+    window.addEventListener('mouseup', () => handleUp('window-mouseup'));
     function _touchPos(touch) {
         const rect = canvas.getBoundingClientRect();
         return { x: (touch.clientX - rect.left) * (W / rect.width), y: (touch.clientY - rect.top) * (H / rect.height) };
@@ -3050,8 +3363,8 @@
             const control = gameState === 'playing' ? _controlAt(p) : null;
             if (control) {
                 _activeTouchControls.set(touch.identifier, control);
-                pressInput(control, true);
-                logStep('input', 'touch-control-down', { id: touch.identifier, control, x: Math.round(p.x), y: Math.round(p.y), active: Array.from(_activeTouchControls.values()), input: { ...input } });
+                const result = pressInput(control, true, 'touch:' + touch.identifier);
+                logStep('input', 'touch-control-down', { id: touch.identifier, control, x: Math.round(p.x), y: Math.round(p.y), active: Array.from(_activeTouchControls.values()), input: result.after });
             } else {
                 logStep('input', 'touch-action-down', { id: touch.identifier, x: Math.round(p.x), y: Math.round(p.y), state: gameState, touchCount: e.touches.length });
                 handleDown(p);
@@ -3066,8 +3379,8 @@
             if (!control) continue;
             _activeTouchControls.delete(touch.identifier);
             const stillHeld = Array.from(_activeTouchControls.values()).includes(control);
-            if (!stillHeld) pressInput(control, false);
-            logStep('input', 'touch-control-up', { id: touch.identifier, control, reason, stillHeld, active: Array.from(_activeTouchControls.values()), input: { ...input } });
+            const result = pressInput(control, false, 'touch:' + touch.identifier);
+            logStep('input', 'touch-control-up', { id: touch.identifier, control, reason, stillHeld, active: Array.from(_activeTouchControls.values()), input: result.after });
         }
     }
     canvas.addEventListener('touchend', e => _releaseChangedTouches(e, 'end'), { passive: false });
@@ -3196,21 +3509,13 @@
         _goalHitJumped = false;
         _goalHitLevelIndex = -1;
         const idx = currentLevelIndex;
-        const carriedInput = { ...input };
-        const carriedKeyboardCodes = Array.from(_heldKeyboardCodes);
-        _blockedKeyboardCodesUntilRelease.clear();
-        for (const code of carriedKeyboardCodes) _blockedKeyboardCodesUntilRelease.add(code);
-        input.left = false;
-        input.right = false;
-        input.jumpPressed = false;
-        input.jumpHeld = false;
-        _activeTouchControls.clear();
-        player.moveDir = 0;
-        player.wantJump = false;
+        const resetResult = _resetAllInput('level-load', { blockHeldKeyboard: true });
+        const carriedInput = resetResult.before;
+        const carriedKeyboardCodes = carriedInput.heldKeyboardCodes;
         logStep('input', 'level-input-reset', {
             levelIndex: idx,
             carriedInput,
-            blockedKeyboardCodes: carriedKeyboardCodes
+            blockedKeyboardCodes: Array.from(_blockedKeyboardCodesUntilRelease)
         });
         // v4.9.6c 兜底0：当前关没开发+用户也知道要锁 → 不进入 playing，直接回 levelSelect
         const isAvail = _availableLevels.includes(idx);
@@ -3307,6 +3612,7 @@
     function backToMenu() {
         const from = gameState;
         showSuccess = false; successTimer = SUCCESS_TOTAL; doorOpenT = 0; showDead = false;
+        _resetAllInput('back-to-menu', { blockHeldKeyboard: true });
         gameState = 'menu';
         logStep('state', 'state-transition', {
             from, to: 'menu', reason: 'backToMenu()', showSuccess_before: false, showDead_before: false
@@ -3380,7 +3686,7 @@
             logStep('snapshot', 'one-second-state', {
                 gameState, levelIndex: currentLevelIndex, showSuccess, showDead,
                 player: { x: Math.round(player.x), y: Math.round(player.y), vx: Math.round(player.vx), vy: Math.round(player.vy), onGround: player.onGround, jumpsLeft: player.jumpsLeft },
-                input: { ...input }, validKnockCount: _validKnockCount,
+                input: _getInputSnapshot(), validKnockCount: _validKnockCount,
                 audioState: _audioCtx ? _audioCtx.state : 'not-created'
             });
         }
@@ -3800,6 +4106,13 @@
         await probeAvailableLevels();
         // 预加载第 0 关数据（菜单页背景用不到，只是启动热身）
         await loadLevelData();
+        if (new URLSearchParams(location.search).get('inputtest') === '1') {
+            setTimeout(() => {
+                _runInputRegressionTests().catch(error => {
+                    logStep('fatal', 'input-regression-failed', { message:error.message, stack:String(error.stack || '') });
+                });
+            }, 120);
+        }
         // 开发模式：URL带 ?autotest 时自动跑通关流程并输出日志
         if (location.search.includes('autotest')) {
             logStep('debug', 'autotest-start', {});
