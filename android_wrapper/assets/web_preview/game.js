@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 156;   // 跟 index.html 的 ?v=156 保持一致
+    const GAME_CODE_VERSION = 157;   // 跟 index.html 的 ?v=157 保持一致
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
         const last = parseInt(localStorage.getItem(LAST_KNOWN_KEY) || '0', 10);
@@ -327,6 +327,10 @@
     let helpVisible = false;
     const keys = { ArrowLeft:'left', KeyA:'left', ArrowRight:'right', KeyD:'right',
                    Space:'jump', ArrowUp:'jump', KeyW:'jump' };
+    // 切关时若实体键仍按住，浏览器会继续派发 repeat keydown。
+    // 记录真实按下的键，并在新关中屏蔽它们，直到收到对应 keyup。
+    const _heldKeyboardCodes = new Set();
+    const _blockedKeyboardCodesUntilRelease = new Set();
 
     // 轻量程序化音效：不依赖外部音频文件，首次键盘/触摸操作后自动启用。
     let _audioCtx = null;
@@ -400,6 +404,18 @@
             gameState, showSuccess, showDead,
             handled_shortcut: false
         });
+        const mappedControl = keys[e.code];
+        if (mappedControl) {
+            _heldKeyboardCodes.add(e.code);
+            if (_blockedKeyboardCodesUntilRelease.has(e.code)) {
+                logStep('input', 'carried-keydown-blocked', {
+                    code: e.code, control: mappedControl, repeat: !!e.repeat,
+                    levelIndex: currentLevelIndex
+                });
+                e.preventDefault();
+                return;
+            }
+        }
         // 通关页快捷键：ESC=返回菜单，ENTER/SPACE=再玩一次，N=下一关
         if (gameState === 'complete' || gameState === 'completeIntro') {
             if (_completeTimer > 0) return;   // 转圈动画期间不响应键盘
@@ -431,13 +447,15 @@
     });
     document.addEventListener('keyup', e => {
         if (keys[e.code]) {
+            _heldKeyboardCodes.delete(e.code);
+            const releasedCarriedKey = _blockedKeyboardCodesUntilRelease.delete(e.code);
             if (keys[e.code] === 'jump') {
                 input.jumpHeld = false;
-                logStep('input','jump-release', {jumpHeld: false});
+                logStep('input','jump-release', {jumpHeld: false, releasedCarriedKey});
             } else {
                 const name = keys[e.code];
                 input[name] = false;
-                logStep('input','dir-release', {name, code: e.code});
+                logStep('input','dir-release', {name, code: e.code, releasedCarriedKey});
             }
         }
     });
@@ -3178,6 +3196,22 @@
         _goalHitJumped = false;
         _goalHitLevelIndex = -1;
         const idx = currentLevelIndex;
+        const carriedInput = { ...input };
+        const carriedKeyboardCodes = Array.from(_heldKeyboardCodes);
+        _blockedKeyboardCodesUntilRelease.clear();
+        for (const code of carriedKeyboardCodes) _blockedKeyboardCodesUntilRelease.add(code);
+        input.left = false;
+        input.right = false;
+        input.jumpPressed = false;
+        input.jumpHeld = false;
+        _activeTouchControls.clear();
+        player.moveDir = 0;
+        player.wantJump = false;
+        logStep('input', 'level-input-reset', {
+            levelIndex: idx,
+            carriedInput,
+            blockedKeyboardCodes: carriedKeyboardCodes
+        });
         // v4.9.6c 兜底0：当前关没开发+用户也知道要锁 → 不进入 playing，直接回 levelSelect
         const isAvail = _availableLevels.includes(idx);
         if (!isAvail && idx !== 0) {
