@@ -1,0 +1,37 @@
+{
+  "description": "怪奇之原微信小游戏版",
+  "compileType": "game",
+  "libVersion": "3.8.9",
+  "appid": "touristappid",
+  "isGameTourist": true,
+  "projectname": "smart-egg-wechat-minigame",
+  "simulatorType": "wechat",
+  "setting": {
+    "urlCheck": false,
+    "es6": true,
+    "enhance": true,
+    "compileHotReLoad": true,
+    "postcss": true,
+    "minified": false,
+    "checkInvalidKey": true,
+    "useApiHook": true,
+    "useApiHostProcess": true,
+    "babelSetting": {
+      "ignore": [],
+      "disablePlugins": [],
+      "outputPath": ""
+    }
+  },
+  "packOptions": {
+    "ignore": [
+      { "type": "folder", "value": "tests" },
+      { "type": "folder", "value": "tools" },
+      { "type": "file", "value": "README.md" },
+      { "type": "file", "value": "VERSION.md" },
+      { "type": "file", "value": ".gitignore" }
+    ]
+  },
+  "condition": {
+    "game": { "currentL": -1, "list": [] }
+  }
+}
