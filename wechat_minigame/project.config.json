@@ -2,8 +2,8 @@
   "description": "怪奇之原微信小游戏版",
   "compileType": "game",
   "libVersion": "3.8.9",
-  "appid": "touristappid",
-  "isGameTourist": true,
+  "appid": "wx0fe127f6004364f1",
+  "isGameTourist": false,
   "projectname": "smart-egg-wechat-minigame",
   "simulatorType": "wechat",
   "setting": {
