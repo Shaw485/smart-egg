@@ -1,4 +1,25 @@
 (() => {
+    const _platformGlobal = typeof GameGlobal !== 'undefined' ? GameGlobal : globalThis;
+    const _platformWindow = _platformGlobal.window || _platformGlobal;
+    const _wechatEnv = _platformWindow.__SMART_EGG_WECHAT_ENV__ || _platformGlobal.__SMART_EGG_WECHAT_ENV__;
+    const window = _wechatEnv ? _wechatEnv.window : _platformWindow;
+    const document = _wechatEnv ? _wechatEnv.document : window.document;
+    const location = _wechatEnv ? _wechatEnv.location : window.location;
+    const navigator = _wechatEnv ? _wechatEnv.navigator : window.navigator;
+    const localStorage = _wechatEnv ? _wechatEnv.localStorage : window.localStorage;
+    const performance = _wechatEnv ? _wechatEnv.performance : window.performance;
+    const fetch = _wechatEnv ? _wechatEnv.fetch : window.fetch.bind(window);
+    const alert = _wechatEnv ? _wechatEnv.alert : window.alert.bind(window);
+    const URLSearchParams = _wechatEnv ? _wechatEnv.URLSearchParams : window.URLSearchParams;
+    const btoa = _wechatEnv ? _wechatEnv.btoa : window.btoa.bind(window);
+    const atob = _wechatEnv ? _wechatEnv.atob : window.atob.bind(window);
+    const TextEncoder = _wechatEnv ? _wechatEnv.TextEncoder : window.TextEncoder;
+    const TextDecoder = _wechatEnv ? _wechatEnv.TextDecoder : window.TextDecoder;
+    const requestAnimationFrame = _wechatEnv
+        ? _wechatEnv.requestAnimationFrame
+        : window.requestAnimationFrame.bind(window);
+    const Event = _wechatEnv ? _wechatEnv.Event : window.Event;
+    const KeyboardEvent = _wechatEnv ? _wechatEnv.KeyboardEvent : window.KeyboardEvent;
     const canvas = document.getElementById('game-canvas');
     const ctx = canvas.getContext('2d', { alpha: false });
 
@@ -6,7 +27,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 160;   // 微信小游戏首版；网页/Android 主线仍保持 v159
+    const GAME_CODE_VERSION = 163;   // 微信开发者工具 A/D/空格实体键盘控制；网页/Android 主线仍保持 v159
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
         const last = parseInt(localStorage.getItem(LAST_KNOWN_KEY) || '0', 10);
@@ -15,7 +36,7 @@
             console.info('[CACHE BUSTER] 检测到代码版本落后：last=' + last + ' < current=' + GAME_CODE_VERSION + '，强制reload(true)清缓存');
             localStorage.setItem(LAST_KNOWN_KEY, String(GAME_CODE_VERSION));
             // reload(true) = 强制绕过 HTTP 磁盘缓存 + 内存缓存
-            window.location.reload(true);
+            location.reload(true);
             throw new Error('stop-exec-old-code'); // 防止老代码接着跑
         }
         // 记录这次最新版本号（下次用户打开别的tab/旧tab就能对比）
@@ -272,7 +293,7 @@
             sessionStartedAt: _logStartedAt,
             exportedAt: new Date().toISOString(),
             page: { href: location.href, protocol: location.protocol, online: navigator.onLine, visibility: document.visibilityState },
-            device: { userAgent: navigator.userAgent, platform: navigator.platform, language: navigator.language, dpr: window.devicePixelRatio, viewport: { width: innerWidth, height: innerHeight } },
+            device: { userAgent: navigator.userAgent, platform: navigator.platform, language: navigator.language, dpr: window.devicePixelRatio, viewport: { width: window.innerWidth, height: window.innerHeight } },
             backend: {
                 mode: location.protocol === 'file:' ? 'android-local-offline' : 'static-web-preview',
                 apiEndpoint: null,

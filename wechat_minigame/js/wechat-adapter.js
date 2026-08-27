@@ -1,7 +1,7 @@
 'use strict';
 
 /*
- * Smart Egg 微信小游戏兼容层 v160
+ * Smart Egg 微信小游戏兼容层 v163
  *
  * 游戏本体只在一个 1920×1080 Canvas 上绘制。本文件把微信小游戏的
  * Canvas、触摸、存储、音频、生命周期、键盘和日志文件接口映射成游戏
@@ -12,24 +12,73 @@
     throw new Error('wechat-adapter.js 必须在微信小游戏环境中运行');
   }
 
-  const root = typeof GameGlobal !== 'undefined' ? GameGlobal : globalThis;
-  root.window = root;
-  root.globalThis = root;
-  root.__wxMiniGame = true;
+  const gameGlobal = typeof GameGlobal !== 'undefined' ? GameGlobal : globalThis;
+
+  function readProperty(target, key) {
+    try { return target && target[key]; }
+    catch (_) { return undefined; }
+  }
+
+  function keepOrInstallProperty(target, key, value) {
+    const current = readProperty(target, key);
+    if (current !== undefined && current !== null) return current;
+    try {
+      target[key] = value;
+      return readProperty(target, key) || value;
+    } catch (_) {}
+    try {
+      Object.defineProperty(target, key, {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value
+      });
+      return value;
+    } catch (_) {
+      return current;
+    }
+  }
+
+  function installOwnProperty(target, key, value) {
+    try {
+      Object.defineProperty(target, key, {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value
+      });
+      return value;
+    } catch (_) {
+      try { target[key] = value; } catch (_) {}
+      return readProperty(target, key);
+    }
+  }
+
+  // 新版基础库把 GameGlobal 实现成 Window，window/globalThis 是只读 getter。
+  // 复用宿主对象即可，不能再用严格模式直接覆盖这两个别名。
+  const hostWindow = readProperty(gameGlobal, 'window');
+  const root = hostWindow && (typeof hostWindow === 'object' || typeof hostWindow === 'function')
+    ? hostWindow
+    : gameGlobal;
+  keepOrInstallProperty(gameGlobal, 'window', root);
+  keepOrInstallProperty(gameGlobal, 'globalThis', root);
+  keepOrInstallProperty(root, 'window', root);
+  keepOrInstallProperty(root, 'globalThis', root);
+  keepOrInstallProperty(root, '__wxMiniGame', true);
 
   function createEventTarget(target) {
     const listeners = Object.create(null);
-    target.addEventListener = function (type, listener) {
+    installOwnProperty(target, 'addEventListener', function (type, listener) {
       if (!listener) return;
       (listeners[type] || (listeners[type] = [])).push(listener);
-    };
-    target.removeEventListener = function (type, listener) {
+    });
+    installOwnProperty(target, 'removeEventListener', function (type, listener) {
       const list = listeners[type];
       if (!list) return;
       const index = list.indexOf(listener);
       if (index >= 0) list.splice(index, 1);
-    };
-    target.dispatchEvent = function (event) {
+    });
+    installOwnProperty(target, 'dispatchEvent', function (event) {
       if (!event || !event.type) return true;
       if (!event.target) event.target = target;
       event.currentTarget = target;
@@ -39,8 +88,8 @@
         catch (error) { setTimeout(function () { throw error; }, 0); }
       }
       return !event.defaultPrevented;
-    };
-    target.__listeners = listeners;
+    });
+    installOwnProperty(target, '__listeners', listeners);
     return target;
   }
 
@@ -51,11 +100,16 @@
   }
   MiniEvent.prototype.preventDefault = function () { this.defaultPrevented = true; };
   MiniEvent.prototype.stopPropagation = function () {};
-  // 小游戏事件对象需要可写 target/currentTarget；不要沿用宿主里只读的 DOM Event。
-  root.Event = MiniEvent;
-  root.KeyboardEvent = MiniEvent;
-
-  createEventTarget(root);
+  // 游戏使用独立的兼容窗口，不覆盖微信宿主 Window 的事件与动画方法；
+  // 开发者工具依赖这些宿主方法完成 MAIN_PACKAGE_LOADED 启动握手。
+  const browserWindow = createEventTarget(Object.create(root));
+  installOwnProperty(browserWindow, 'window', browserWindow);
+  installOwnProperty(browserWindow, 'globalThis', browserWindow);
+  installOwnProperty(browserWindow, '__wxMiniGame', true);
+  installOwnProperty(browserWindow, 'Event', MiniEvent);
+  installOwnProperty(browserWindow, 'KeyboardEvent', MiniEvent);
+  installOwnProperty(browserWindow, 'setInterval', function () { return setInterval.apply(null, arguments); });
+  installOwnProperty(browserWindow, 'clearInterval', function () { return clearInterval.apply(null, arguments); });
 
   const screenCanvas = wx.createCanvas();
   const screenContext = screenCanvas.getContext('2d');
@@ -64,6 +118,7 @@
   gameCanvas.style = gameCanvas.style || {};
 
   let windowInfo = {};
+  let viewportDpr = 1;
   let displayRect = { left: 0, top: 0, width: 1, height: 1, right: 1, bottom: 1 };
 
   function readWindowInfo() {
@@ -77,6 +132,7 @@
     const width = Math.max(1, windowInfo.windowWidth || windowInfo.screenWidth || 1280);
     const height = Math.max(1, windowInfo.windowHeight || windowInfo.screenHeight || 720);
     const dpr = Math.max(1, windowInfo.pixelRatio || 1);
+    viewportDpr = dpr;
     const safe = windowInfo.safeArea || { left: 0, top: 0, right: width, bottom: height, width, height };
     const safeLeft = Number.isFinite(safe.left) ? safe.left : 0;
     const safeTop = Number.isFinite(safe.top) ? safe.top : 0;
@@ -88,10 +144,10 @@
     const left = safeLeft + (safeWidth - drawWidth) / 2;
     const top = safeTop + (safeHeight - drawHeight) / 2;
 
-    root.innerWidth = width;
-    root.innerHeight = height;
-    root.devicePixelRatio = dpr;
-    root.screen = { width, height, availWidth: safeWidth, availHeight: safeHeight };
+    installOwnProperty(browserWindow, 'innerWidth', width);
+    installOwnProperty(browserWindow, 'innerHeight', height);
+    installOwnProperty(browserWindow, 'devicePixelRatio', dpr);
+    installOwnProperty(browserWindow, 'screen', { width, height, availWidth: safeWidth, availHeight: safeHeight });
     screenCanvas.width = Math.round(width * dpr);
     screenCanvas.height = Math.round(height * dpr);
     displayRect = {
@@ -105,7 +161,7 @@
   };
 
   function presentFrame() {
-    const dpr = root.devicePixelRatio || 1;
+    const dpr = viewportDpr;
     screenContext.setTransform(1, 0, 0, 1, 0, 0);
     screenContext.fillStyle = '#221d2c';
     screenContext.fillRect(0, 0, screenCanvas.width, screenCanvas.height);
@@ -126,13 +182,13 @@
     ? screenCanvas.cancelAnimationFrame.bind(screenCanvas)
     : clearTimeout;
 
-  root.requestAnimationFrame = function (callback) {
+  installOwnProperty(browserWindow, 'requestAnimationFrame', function (callback) {
     return nativeRequestAnimationFrame(function (time) {
       callback(time);
       presentFrame();
     });
-  };
-  root.cancelAnimationFrame = nativeCancelAnimationFrame;
+  });
+  installOwnProperty(browserWindow, 'cancelAnimationFrame', nativeCancelAnimationFrame);
 
   function ClassList(element) { this.element = element; }
   ClassList.prototype._list = function () {
@@ -186,18 +242,20 @@
     createElement: function (tagName) { return new FakeElement(tagName); },
     execCommand: function () { return false; }
   });
-  root.document = documentObject;
+  installOwnProperty(browserWindow, 'document', documentObject);
 
-  root.location = {
+  const locationObject = {
     href: 'wxgame://smart-egg/',
     protocol: 'wxgame:',
     search: '',
     hash: '',
     reload: function () {}
   };
+  installOwnProperty(browserWindow, 'location', locationObject);
 
-  if (!root.URLSearchParams) {
-    root.URLSearchParams = function (query) {
+  let URLSearchParamsObject = readProperty(root, 'URLSearchParams');
+  if (!URLSearchParamsObject) {
+    URLSearchParamsObject = function (query) {
       const values = Object.create(null);
       String(query || '').replace(/^\?/, '').split('&').forEach(function (pair) {
         if (!pair) return;
@@ -207,8 +265,10 @@
       this.get = function (key) { return Object.prototype.hasOwnProperty.call(values, key) ? values[key] : null; };
     };
   }
+  installOwnProperty(browserWindow, 'URLSearchParams', URLSearchParamsObject);
 
-  if (!root.performance) root.performance = { now: function () { return Date.now(); } };
+  const performanceObject = readProperty(root, 'performance') || { now: function () { return Date.now(); } };
+  installOwnProperty(browserWindow, 'performance', performanceObject);
 
   const appInfo = typeof wx.getAppBaseInfo === 'function' ? wx.getAppBaseInfo() : {};
   const deviceInfo = typeof wx.getDeviceInfo === 'function' ? wx.getDeviceInfo() : windowInfo;
@@ -225,18 +285,9 @@
       }
     }
   };
-  try {
-    Object.defineProperty(root, 'navigator', {
-      configurable: true,
-      enumerable: true,
-      writable: true,
-      value: navigatorObject
-    });
-  } catch (_) {
-    Object.assign(root.navigator || {}, navigatorObject);
-  }
+  installOwnProperty(browserWindow, 'navigator', navigatorObject);
 
-  root.localStorage = {
+  const localStorageObject = {
     getItem: function (key) {
       try {
         const value = wx.getStorageSync(String(key));
@@ -247,17 +298,20 @@
     removeItem: function (key) { wx.removeStorageSync(String(key)); },
     clear: function () { wx.clearStorageSync(); }
   };
+  installOwnProperty(browserWindow, 'localStorage', localStorageObject);
 
-  root.fetch = function () {
+  const fetchObject = function () {
     return Promise.reject(new Error('微信小游戏本地关卡使用 levels.js 内嵌数据，不使用 fetch'));
   };
-  root.alert = function (message) {
+  installOwnProperty(browserWindow, 'fetch', fetchObject);
+  const alertObject = function (message) {
     wx.showModal({ title: '提示', content: String(message), showCancel: false });
   };
 
   const base64Chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
-  if (!root.btoa) {
-    root.btoa = function (input) {
+  let btoaObject = readProperty(root, 'btoa');
+  if (!btoaObject) {
+    btoaObject = function (input) {
       let output = '', index = 0;
       const text = String(input);
       while (index < text.length) {
@@ -274,8 +328,10 @@
       return output;
     };
   }
-  if (!root.atob) {
-    root.atob = function (input) {
+  installOwnProperty(browserWindow, 'btoa', btoaObject);
+  let atobObject = readProperty(root, 'atob');
+  if (!atobObject) {
+    atobObject = function (input) {
       const text = String(input).replace(/[^A-Za-z0-9+/=]/g, '');
       let output = '', index = 0;
       while (index < text.length) {
@@ -290,19 +346,23 @@
       return output;
     };
   }
+  installOwnProperty(browserWindow, 'atob', atobObject);
 
-  if (!root.TextEncoder) {
-    root.TextEncoder = function () {};
-    root.TextEncoder.prototype.encode = function (text) {
+  let TextEncoderObject = readProperty(root, 'TextEncoder');
+  if (!TextEncoderObject) {
+    TextEncoderObject = function () {};
+    TextEncoderObject.prototype.encode = function (text) {
       const encoded = unescape(encodeURIComponent(String(text)));
       const bytes = new Uint8Array(encoded.length);
       for (let i = 0; i < encoded.length; i++) bytes[i] = encoded.charCodeAt(i);
       return bytes;
     };
   }
-  if (!root.TextDecoder) {
-    root.TextDecoder = function () {};
-    root.TextDecoder.prototype.decode = function (bytes) {
+  installOwnProperty(browserWindow, 'TextEncoder', TextEncoderObject);
+  let TextDecoderObject = readProperty(root, 'TextDecoder');
+  if (!TextDecoderObject) {
+    TextDecoderObject = function () {};
+    TextDecoderObject.prototype.decode = function (bytes) {
       let binary = '';
       for (let i = 0; i < bytes.length; i += 8192) {
         binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
@@ -310,6 +370,7 @@
       return decodeURIComponent(escape(binary));
     };
   }
+  installOwnProperty(browserWindow, 'TextDecoder', TextDecoderObject);
 
   function AudioParam(value) {
     this.value = value || 0;
@@ -387,8 +448,8 @@
     if (typeof wx.createWebAudioContext === 'function') return wx.createWebAudioContext();
     return new FallbackAudioContext();
   }
-  root.AudioContext = WechatAudioContext;
-  root.webkitAudioContext = WechatAudioContext;
+  installOwnProperty(browserWindow, 'AudioContext', WechatAudioContext);
+  installOwnProperty(browserWindow, 'webkitAudioContext', WechatAudioContext);
 
   function normalizeTouch(touch, fallbackId) {
     return {
@@ -411,38 +472,106 @@
   wx.onTouchEnd(function (event) { forwardTouch('touchend', event); });
   wx.onTouchCancel(function (event) { forwardTouch('touchcancel', event); });
 
+  // 微信小游戏本体运行在隔离的浏览器兼容环境中。开发者工具的实体键盘
+  // 事件仍由宿主 Window/document 接收，因此需要只读监听并转发给游戏文档。
+  // 不覆盖宿主事件方法，避免再次破坏开发者工具的启动与热更新握手。
+  const forwardedNativeKeyboardEvents = typeof WeakSet === 'function' ? new WeakSet() : null;
+  function normalizeKeyboardCode(nativeEvent) {
+    const rawCode = String(nativeEvent && nativeEvent.code || '');
+    if (rawCode) return rawCode;
+    const key = String(nativeEvent && nativeEvent.key || '');
+    const lowerKey = key.toLowerCase();
+    if (lowerKey === 'a') return 'KeyA';
+    if (lowerKey === 'd') return 'KeyD';
+    if (lowerKey === 'w') return 'KeyW';
+    if (key === ' ' || key === 'Spacebar' || key === 'Space') return 'Space';
+    if (key === 'ArrowLeft' || key === 'Left') return 'ArrowLeft';
+    if (key === 'ArrowRight' || key === 'Right') return 'ArrowRight';
+    if (key === 'ArrowUp' || key === 'Up') return 'ArrowUp';
+    const keyCode = Number(nativeEvent && (nativeEvent.keyCode || nativeEvent.which));
+    return ({ 32: 'Space', 37: 'ArrowLeft', 38: 'ArrowUp', 39: 'ArrowRight', 65: 'KeyA', 68: 'KeyD', 87: 'KeyW' })[keyCode] || '';
+  }
+  function keyboardKeyFromCode(code, nativeEvent) {
+    if (nativeEvent && nativeEvent.key != null) return String(nativeEvent.key);
+    return ({ KeyA: 'a', KeyD: 'd', KeyW: 'w', Space: ' ', ArrowLeft: 'ArrowLeft', ArrowRight: 'ArrowRight', ArrowUp: 'ArrowUp' })[code] || code;
+  }
+  function forwardKeyboard(type, nativeEvent) {
+    if (!nativeEvent) nativeEvent = {};
+    if (forwardedNativeKeyboardEvents && (typeof nativeEvent === 'object' || typeof nativeEvent === 'function')) {
+      if (forwardedNativeKeyboardEvents.has(nativeEvent)) return;
+      forwardedNativeKeyboardEvents.add(nativeEvent);
+    }
+    const code = normalizeKeyboardCode(nativeEvent);
+    if (!code) return;
+    const event = new MiniEvent(type, {
+      code,
+      key: keyboardKeyFromCode(code, nativeEvent),
+      keyCode: Number(nativeEvent.keyCode || nativeEvent.which) || 0,
+      which: Number(nativeEvent.which || nativeEvent.keyCode) || 0,
+      repeat: !!nativeEvent.repeat,
+      altKey: !!nativeEvent.altKey,
+      ctrlKey: !!nativeEvent.ctrlKey,
+      metaKey: !!nativeEvent.metaKey,
+      shiftKey: !!nativeEvent.shiftKey,
+      bubbles: true,
+      cancelable: true,
+      timeStamp: Number(nativeEvent.timeStamp) || Date.now()
+    });
+    event.preventDefault = function () {
+      this.defaultPrevented = true;
+      if (typeof nativeEvent.preventDefault === 'function') nativeEvent.preventDefault();
+    };
+    documentObject.dispatchEvent(event);
+  }
+  function registerKeyboardTarget(target) {
+    if (!target || target === browserWindow || target === documentObject || typeof target.addEventListener !== 'function') return;
+    try {
+      target.addEventListener('keydown', function (event) { forwardKeyboard('keydown', event); });
+      target.addEventListener('keyup', function (event) { forwardKeyboard('keyup', event); });
+    } catch (_) {}
+  }
+  registerKeyboardTarget(readProperty(root, 'document'));
+  registerKeyboardTarget(root);
+  // 部分微信开发者工具版本只把实体键盘事件派发给原生显示画布，
+  // 因此也监听 screenCanvas 及其 ownerDocument。重复事件由 WeakSet 去重。
+  registerKeyboardTarget(screenCanvas);
+  registerKeyboardTarget(readProperty(screenCanvas, 'ownerDocument'));
+  // 兼容未来或特定平台基础库直接提供的键盘监听接口。
+  if (typeof wx.onKeyDown === 'function') wx.onKeyDown(function (event) { forwardKeyboard('keydown', event); });
+  if (typeof wx.onKeyUp === 'function') wx.onKeyUp(function (event) { forwardKeyboard('keyup', event); });
+
   function setVisibility(hidden) {
     documentObject.hidden = hidden;
     documentObject.visibilityState = hidden ? 'hidden' : 'visible';
     documentObject.dispatchEvent(new MiniEvent('visibilitychange'));
-    if (hidden) root.dispatchEvent(new MiniEvent('blur'));
+    if (hidden) browserWindow.dispatchEvent(new MiniEvent('blur'));
   }
   wx.onHide(function () { setVisibility(true); });
   wx.onShow(function () { setVisibility(false); });
   if (typeof wx.onWindowResize === 'function') {
     wx.onWindowResize(function () {
       updateViewport();
-      root.dispatchEvent(new MiniEvent('resize'));
+      browserWindow.dispatchEvent(new MiniEvent('resize'));
     });
   }
   if (typeof wx.onNetworkStatusChange === 'function') {
     wx.onNetworkStatusChange(function (result) {
-      root.navigator.onLine = !!result.isConnected;
-      root.dispatchEvent(new MiniEvent(result.isConnected ? 'online' : 'offline'));
+      navigatorObject.onLine = !!result.isConnected;
+      browserWindow.dispatchEvent(new MiniEvent(result.isConnected ? 'online' : 'offline'));
     });
   }
   if (typeof wx.onError === 'function') {
     wx.onError(function (message) {
-      root.dispatchEvent(new MiniEvent('error', { message: String(message), filename: '', lineno: 0, colno: 0 }));
+      browserWindow.dispatchEvent(new MiniEvent('error', { message: String(message), filename: '', lineno: 0, colno: 0 }));
     });
   }
   if (typeof wx.onUnhandledRejection === 'function') {
     wx.onUnhandledRejection(function (event) {
-      root.dispatchEvent(new MiniEvent('unhandledrejection', { reason: event && event.reason }));
+      browserWindow.dispatchEvent(new MiniEvent('unhandledrejection', { reason: event && event.reason }));
     });
   }
 
-  root.__wxPromptLevelCode = function (onSubmit) {
+  const promptLevelCode = function (onSubmit) {
     let finished = false;
     let defaultValue = '';
     function cleanup() {
@@ -490,8 +619,9 @@
       });
     } else openKeyboard();
   };
+  installOwnProperty(browserWindow, '__wxPromptLevelCode', promptLevelCode);
 
-  root.AndroidLogExporter = {
+  const androidLogExporter = {
     exportLog: function (filename, text) {
       const fs = wx.getFileSystemManager();
       const base = wx.env && wx.env.USER_DATA_PATH ? wx.env.USER_DATA_PATH : '';
@@ -516,13 +646,38 @@
       });
     }
   };
+  installOwnProperty(browserWindow, 'AndroidLogExporter', androidLogExporter);
 
-  root.__SMART_EGG_WECHAT_BRIDGE__ = {
-    version: 160,
+  const wechatEnvironment = {
+    window: browserWindow,
+    document: documentObject,
+    location: locationObject,
+    navigator: navigatorObject,
+    localStorage: localStorageObject,
+    performance: performanceObject,
+    fetch: fetchObject,
+    alert: alertObject,
+    URLSearchParams: URLSearchParamsObject,
+    btoa: btoaObject,
+    atob: atobObject,
+    TextEncoder: TextEncoderObject,
+    TextDecoder: TextDecoderObject,
+    requestAnimationFrame: browserWindow.requestAnimationFrame,
+    cancelAnimationFrame: browserWindow.cancelAnimationFrame,
+    Event: MiniEvent,
+    KeyboardEvent: MiniEvent
+  };
+  installOwnProperty(root, '__SMART_EGG_WECHAT_ENV__', wechatEnvironment);
+  installOwnProperty(browserWindow, '__SMART_EGG_WECHAT_ENV__', wechatEnvironment);
+
+  const wechatBridge = {
+    version: 163,
     screenCanvas,
     gameCanvas,
     getDisplayRect: function () { return Object.assign({}, displayRect); },
     presentFrame,
     updateViewport
   };
+  installOwnProperty(root, '__SMART_EGG_WECHAT_BRIDGE__', wechatBridge);
+  installOwnProperty(browserWindow, '__SMART_EGG_WECHAT_BRIDGE__', wechatBridge);
 })();
