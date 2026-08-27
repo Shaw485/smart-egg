@@ -1,0 +1,23 @@
+{
+  "$schema": "Part7_level_json_schema_v1",
+  "id": 9,
+  "name": "纸上有路",
+  "type": "word_bridge",
+  "mechanics": ["word_bridge"],
+  "description": {
+    "定位": "文字变成场景元素的拖放关。",
+    "正解": "把标题中的“路”拖到断口，文字会变成可站立的桥。",
+    "hint_l1": "有些话，不只是说说而已。"
+  },
+  "world_size": {"w": 1920, "h": 1080},
+  "spawn": {"x": 350, "y": 810},
+  "platforms": [
+    {"x": 360, "y": 1090, "w": 720, "h": 440, "kind": "ground"},
+    {"x": 1550, "y": 1090, "w": 740, "h": 440, "kind": "ground"}
+  ],
+  "doors": [
+    {"id": "entry_door_9", "x": 300, "y": 765, "w": 150, "h": 210, "is_goal": false},
+    {"id": "goal_door_9", "x": 1535, "y": 765, "w": 150, "h": 210, "is_goal": true}
+  ],
+  "crates": [], "keys": [], "question_blocks": [], "decor": []
+}

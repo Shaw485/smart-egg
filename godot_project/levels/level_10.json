@@ -1,0 +1,29 @@
+{
+  "$schema": "Part7_level_json_schema_v1",
+  "id": 10,
+  "name": "痕迹未散",
+  "type": "persistent_reset",
+  "mechanics": ["persistent_reset"],
+  "no_fall": true,
+  "description": {
+    "定位": "重来状态反向利用关。每次重来都会多留下一个楼梯箱。",
+    "正解": "连续点击两次重来，留下三个箱子组成楼梯，再跳到高处的门。",
+    "hint_l1": "每次点击重来，箱子都会留下。多重来几次，把它们变成楼梯。"
+  },
+  "world_size": {"w": 1920, "h": 1080},
+  "spawn": {"x": 350, "y": 810},
+  "platforms": [
+    {"x": 960, "y": 1090, "w": 1920, "h": 440, "kind": "ground"},
+    {"x": 1480, "y": 476, "w": 500, "h": 52, "kind": "goal_step"}
+  ],
+  "crates": [
+    {"id": "memory_box_1", "x": 730, "y": 817.5, "w": 210, "h": 105, "static_platform": true},
+    {"id": "memory_box_2", "x": 920, "y": 712.5, "w": 210, "h": 105, "static_platform": true},
+    {"id": "memory_box_3", "x": 1110, "y": 607.5, "w": 210, "h": 105, "static_platform": true}
+  ],
+  "doors": [
+    {"id": "entry_door_10", "x": 300, "y": 765, "w": 150, "h": 210, "is_goal": false},
+    {"id": "goal_door_10", "x": 1515, "y": 345, "w": 150, "h": 210, "is_goal": true}
+  ],
+  "keys": [], "question_blocks": [], "decor": []
+}

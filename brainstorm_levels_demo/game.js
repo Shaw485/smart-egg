@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const VERSION = 1;
+  const VERSION = 2;
   const W = 1920;
   const H = 1080;
   const GROUND_Y = 790;
@@ -15,7 +15,7 @@
     { id: 8, title: '日影无声', mechanic: 'shadow', hint: '真正先到门口的，也许不是你。' },
     { id: 9, title: '等风来', mechanic: 'stillness', hint: '有时越着急，远方就越远。' },
     { id: 10, title: '纸上有路', mechanic: 'word_bridge', hint: '有些话，不只是说说而已。' },
-    { id: 11, title: '痕迹未散', mechanic: 'persistent_reset', hint: '有些东西，不会跟你一起回到起点。' },
+    { id: 11, title: '痕迹未散', mechanic: 'persistent_reset', hint: '每次点击重来，箱子都会留下。多重来几次，把它们变成楼梯。' },
     { id: 12, title: '远方未远', mechanic: 'drag_world', hint: '远方不一定需要一步步抵达。' }
   ];
 
@@ -42,7 +42,8 @@
     stillDoorX: 1510,
     wordPlaced: false,
     wordPos: { x: 0, y: 0 },
-    mapOffset: 0
+    mapOffset: 0,
+    cameraX: 0
   };
 
   const HIT = {
@@ -102,6 +103,7 @@
     state.wordPlaced = false;
     state.wordPos = { x: 0, y: 0 };
     state.mapOffset = 0;
+    state.cameraX = 0;
     persistentBoxes = 1;
     resetPlayer();
     log('state', 'level-enter', { reason: reason || 'direct', mechanic: level.mechanic, title: level.title });
@@ -304,13 +306,16 @@
       return floors;
     }
     if (level.mechanic === 'persistent_reset') {
-      const floors = [{ x: 0, y: GROUND_Y, w: W, h: 80 }, { x: 1260, y: 350, w: 500, h: 55 }];
+      const floors = [{ x: 0, y: GROUND_Y, w: W, h: 80 }, { x: 1260, y: 370, w: 500, h: 55 }];
       const steps = [
-        { x: 760, y: 665, w: 170, h: 125 },
-        { x: 930, y: 540, w: 170, h: 125 },
-        { x: 1100, y: 415, w: 170, h: 125 }
+        { x: 730, y: 685, w: 210, h: 105 },
+        { x: 920, y: 580, w: 210, h: 105 },
+        { x: 1110, y: 475, w: 210, h: 105 }
       ];
       return floors.concat(steps.slice(0, persistentBoxes));
+    }
+    if (level.mechanic === 'stillness') {
+      return [{ x: -1000000, y: GROUND_Y, w: 2000000, h: 80 }];
     }
     return [{ x: 0, y: GROUND_Y, w: W, h: 80 }];
   }
@@ -321,21 +326,31 @@
     player.vx = direction * 310;
     if (direction) player.facing = direction;
     player.x += player.vx * dt;
-    player.x = clamp(player.x, 55, W - 55);
+    player.x = level.mechanic === 'stillness'
+      ? Math.max(55, player.x)
+      : clamp(player.x, 55, W - 55);
     player.vy = Math.min(1200, player.vy + 1900 * dt);
     const previousBottom = player.y + player.h / 2;
     player.y += player.vy * dt;
     player.onGround = false;
     const nextBottom = player.y + player.h / 2;
     const floors = floorsForLevel();
+    const landingCandidates = [];
     for (const floor of floors) {
       const overlapsX = player.x + player.w / 2 > floor.x && player.x - player.w / 2 < floor.x + floor.w;
       if (overlapsX && player.vy >= 0 && previousBottom <= floor.y + 8 && nextBottom >= floor.y) {
-        player.y = floor.y - player.h / 2;
-        player.vy = 0;
-        player.onGround = true;
-        break;
+        landingCandidates.push(floor);
       }
+    }
+    if (landingCandidates.length) {
+      const landing = landingCandidates.reduce(function (best, floor) { return floor.y < best.y ? floor : best; });
+      player.y = landing.y - player.h / 2;
+      player.vy = 0;
+      player.onGround = true;
+    }
+    if (level.mechanic === 'stillness') {
+      const targetCameraX = Math.max(0, player.x - 420);
+      state.cameraX += (targetCameraX - state.cameraX) * Math.min(1, dt * 7);
     }
     if (player.y > H + 160) {
       log('state', 'player-fell', { x: Math.round(player.x), y: Math.round(player.y) }, 'warn');
@@ -361,7 +376,9 @@
       if (active) {
         if (state.stillTime > .1) log('mechanic', 'stillness-broken', { held_seconds: Number(state.stillTime.toFixed(2)) });
         state.stillTime = 0;
-        state.stillDoorX = Math.min(1680, state.stillDoorX + 260 * dt);
+        const direction = (rightHeld() ? 1 : 0) - (leftHeld() ? 1 : 0);
+        if (direction) state.stillDoorX += direction * 310 * dt;
+        state.stillDoorX = Math.max(player.x + 520, state.stillDoorX);
       } else {
         state.stillTime += dt;
         if (state.stillTime > 2.2) state.stillDoorX += (player.x + 135 - state.stillDoorX) * Math.min(1, dt * 1.35);
@@ -475,6 +492,10 @@
       drawDoor(1540, GROUND_Y, state.unlocked);
     } else if (level.mechanic === 'stillness') {
       drawDoor(state.stillDoorX, GROUND_Y, state.stillTime > 2.2);
+      for (let x = Math.floor((state.cameraX - 180) / 210) * 210; x < state.cameraX + W + 180; x += 210) {
+        ctx.strokeStyle = '#17343a'; ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.moveTo(x, GROUND_Y); ctx.lineTo(x - 10, GROUND_Y - 22); ctx.moveTo(x, GROUND_Y); ctx.lineTo(x + 13, GROUND_Y - 18); ctx.stroke();
+      }
       if (state.stillTime > .3) {
         const dots = Math.min(3, Math.floor(state.stillTime));
         ctx.fillStyle = '#fff0bd'; ctx.font = '800 42px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('·'.repeat(dots), state.stillDoorX, GROUND_Y - 255);
@@ -488,7 +509,7 @@
     } else if (level.mechanic === 'persistent_reset') {
       const boxFloors = floorsForLevel().slice(2);
       boxFloors.forEach(drawCrate);
-      drawDoor(1515, 350, persistentBoxes >= 3);
+      drawDoor(1515, 370, persistentBoxes >= 3);
     } else if (level.mechanic === 'drag_world') {
       ctx.save();
       ctx.translate(state.mapOffset, 0);
@@ -498,9 +519,6 @@
       }
       drawDoor(3500, GROUND_Y, 3500 + state.mapOffset < 1800);
       ctx.restore();
-      if (state.mapOffset > -350) {
-        ctx.fillStyle = 'rgba(255,240,189,.72)'; ctx.font = '700 28px "PingFang SC", sans-serif'; ctx.textAlign = 'center'; ctx.fillText('远处安静得看不见尽头', 1260, 660);
-      }
     }
   }
 
@@ -561,12 +579,18 @@
 
   function render() {
     drawBackdrop();
+    if (level.mechanic === 'stillness') {
+      ctx.save();
+      ctx.translate(-state.cameraX, 0);
+    }
     floorsForLevel().forEach(function (floor, index) {
       if (level.mechanic === 'persistent_reset' && index >= 2) return;
-      drawGround(floor);
+      if (level.mechanic === 'stillness') drawGround({ x: state.cameraX - 200, y: floor.y, w: W + 400, h: floor.h });
+      else drawGround(floor);
     });
     drawMechanic();
     drawPlayer();
+    if (level.mechanic === 'stillness') ctx.restore();
     drawTopUI();
     drawControls();
     drawHint();
@@ -589,7 +613,7 @@
 
   document.getElementById('download-logs').addEventListener('click', function () {
     log('runtime', 'log-export', { entries: logger.entries.length });
-    logger.download('smart-egg-brainstorm-v1-level-' + level.id + '.json');
+    logger.download('smart-egg-brainstorm-v2-level-' + level.id + '.json');
   });
   window.addEventListener('error', function (event) {
     log('runtime', 'uncaught-error', { message: event.message, file: event.filename, line: event.lineno }, 'error');

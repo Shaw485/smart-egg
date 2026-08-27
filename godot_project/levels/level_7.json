@@ -1,0 +1,23 @@
+{
+  "$schema": "Part7_level_json_schema_v1",
+  "id": 7,
+  "name": "日影无声",
+  "type": "shadow_switch",
+  "mechanics": ["shadow_switch"],
+  "no_fall": true,
+  "description": {
+    "定位": "光影交互关。拖动太阳，让人物的影子落到机关上。",
+    "正解": "拖动太阳改变影子方向，影子持续压住地面机关后进入右门。",
+    "hint_l1": "真正先到门口的，也许不是你。"
+  },
+  "world_size": {"w": 1920, "h": 1080},
+  "spawn": {"x": 420, "y": 810},
+  "sun": {"x": 880, "y": 220, "min_x": 90, "max_x": 1510},
+  "shadow_switch": {"x": 820, "y": 858, "w": 116, "h": 24, "hold_seconds": 0.65},
+  "platforms": [{"x": 960, "y": 1090, "w": 1920, "h": 440, "kind": "ground"}],
+  "doors": [
+    {"id": "entry_door_7", "x": 300, "y": 765, "w": 150, "h": 210, "is_goal": false},
+    {"id": "goal_door_7", "x": 1540, "y": 765, "w": 150, "h": 210, "is_goal": true, "locked": true}
+  ],
+  "crates": [], "keys": [], "question_blocks": [], "decor": []
+}

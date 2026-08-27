@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 159;   // 跟 index.html 的 ?v=159 保持一致
+    const GAME_CODE_VERSION = 164;   // 跟 index.html 的 ?v=164 保持一致
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
         const last = parseInt(localStorage.getItem(LAST_KNOWN_KEY) || '0', 10);
@@ -30,7 +30,8 @@
     const W = 1920, H = 1080;
     const FANTASY_TITLES = [
         '风起之门', '云阶试炼', '锁语遗迹', '断崖双跃',
-        '守门人的礼仪', '花之暗号', '逃走的门'
+        '守门人的礼仪', '花之暗号', '逃走的门',
+        '日影无声', '等风来', '纸上有路', '痕迹未散', '远方未远'
     ];
     const GRAVITY = 2000.0;
     const MAX_FALL = 1200.0;
@@ -104,6 +105,14 @@
     let _creatorShareCode = '';
     let _creatorShareIndex = -1;
     let _creatorImportPreview = null;
+    // 第 8–12 关独立机制状态：每关可单独日志和复位，不污染其他关卡。
+    let _sceneDrag = null;
+    let _shadowSunX = 880, _shadowTipX = 0, _shadowHold = 0, _shadowUnlocked = false;
+    let _stillTime = 0, _stillApproachLogged = false;
+    let _wordPlaced = false, _wordDragPos = {x:0,y:0};
+    let _persistentCrateCount = 1;
+    let _persistentLevelActive = false;
+    let _dragWorldOffset = 0;
     function _mechanicsOf(lv) {
         if(!lv)return [];
         if(Array.isArray(lv.mechanics))return lv.mechanics.filter(x=>x&&x!=='normal');
@@ -114,6 +123,126 @@
         return result;
     }
     function _hasMechanic(name) { return _mechanicsOf(levelData).includes(name); }
+    function _resetMainlineMechanicState() {
+        _sceneDrag = null;
+        _shadowSunX = Number(levelData && levelData.sun && levelData.sun.x) || 880;
+        _shadowTipX = 0;
+        _shadowHold = 0;
+        _shadowUnlocked = false;
+        _stillTime = 0;
+        _stillApproachLogged = false;
+        _wordPlaced = false;
+        _wordDragPos = {x:0,y:0};
+        _dragWorldOffset = 0;
+        logStep('mechanic', 'level-mechanic-reset', {
+            levelIndex: currentLevelIndex,
+            mechanics: _mechanicsOf(levelData),
+            persistentCrates: _persistentCrateCount
+        });
+    }
+    function _wordHomeRect() {
+        return {x:W/2+60,y:20,w:105,h:105};
+    }
+    function _beginSceneGesture(p, pointerId) {
+        if (gameState !== 'playing' || !levelData) return false;
+        const world = {x:p.x+_cameraX,y:p.y+_cameraY};
+        if (_hasMechanic('shadow_switch')) {
+            const dx = world.x - _shadowSunX, dy = world.y - 220;
+            if (dx*dx + dy*dy <= 95*95) {
+                _sceneDrag = {type:'sun',pointerId,lastPoint:p};
+                logStep('mechanic','shadow-drag-start',{pointerId,sunX:Math.round(_shadowSunX)});
+                return true;
+            }
+        }
+        if (_hasMechanic('word_bridge') && !_wordPlaced && inRect(p,_wordHomeRect())) {
+            _sceneDrag = {type:'word',pointerId,lastPoint:p};
+            _wordDragPos = world;
+            logStep('mechanic','word-drag-start',{pointerId,token:'路'});
+            return true;
+        }
+        if (_hasMechanic('drag_world') && p.y < 850) {
+            _sceneDrag = {type:'world',pointerId,lastX:p.x,lastPoint:p};
+            logStep('mechanic','world-drag-start',{pointerId,offset:Math.round(_dragWorldOffset)});
+            return true;
+        }
+        return false;
+    }
+    function _moveSceneGesture(p, pointerId) {
+        if (!_sceneDrag || _sceneDrag.pointerId !== pointerId) return false;
+        _sceneDrag.lastPoint = p;
+        const world = {x:p.x+_cameraX,y:p.y+_cameraY};
+        if (_sceneDrag.type === 'sun') {
+            _shadowSunX = Math.max(90,Math.min(1510,world.x));
+        } else if (_sceneDrag.type === 'word') {
+            _wordDragPos = world;
+        } else if (_sceneDrag.type === 'world') {
+            const delta = p.x - _sceneDrag.lastX;
+            _sceneDrag.lastX = p.x;
+            const previous = _dragWorldOffset;
+            _dragWorldOffset = Math.max(-3000,Math.min(0,_dragWorldOffset + delta));
+            const door = (levelData.doors||[]).find(d=>d.is_goal);
+            if (door) door.x += _dragWorldOffset - previous;
+        }
+        return true;
+    }
+    function _endSceneGesture(p, pointerId, reason) {
+        if (!_sceneDrag || _sceneDrag.pointerId !== pointerId) return false;
+        const drag = _sceneDrag;
+        p = p || drag.lastPoint || {x:0,y:0};
+        _sceneDrag = null;
+        if (drag.type === 'word') {
+            const accepted = p.x > 690 && p.x < 1230 && p.y > 540 && p.y < 820;
+            if (accepted) {
+                _wordPlaced = true;
+                _wordDragPos = {x:950,y:700};
+                if (!(levelData.platforms||[]).some(item=>item.kind==='word_bridge')) {
+                    levelData.platforms.push({id:'word_bridge_surface',x:950,y:730,w:460,h:60,kind:'word_bridge'});
+                }
+                playSfx('unlock');
+            }
+            logStep('mechanic','word-drop',{accepted,pointerId,x:Math.round(p.x),y:Math.round(p.y),reason});
+        } else if (drag.type === 'sun') {
+            logStep('mechanic','shadow-drag-end',{pointerId,sunX:Math.round(_shadowSunX),shadowTipX:Math.round(_shadowTipX),reason});
+        } else if (drag.type === 'world') {
+            const door = (levelData.doors||[]).find(d=>d.is_goal);
+            logStep('mechanic','world-drag-end',{pointerId,offset:Math.round(_dragWorldOffset),doorX:door&&Math.round(door.x),reason});
+        }
+        return true;
+    }
+    function _updateNewLevelMechanics(dt) {
+        if (_hasMechanic('shadow_switch')) {
+            _shadowTipX = Math.max(30,Math.min(W-30,player.x+(player.x-_shadowSunX)*1.75));
+            const cfg = levelData.shadow_switch || {x:820,hold_seconds:.65};
+            const touching = Math.abs(_shadowTipX-cfg.x)<78;
+            _shadowHold = touching ? _shadowHold+dt : Math.max(0,_shadowHold-dt*2);
+            if (!_shadowUnlocked && _shadowHold >= (cfg.hold_seconds||.65)) {
+                _shadowUnlocked = true;
+                const door=(levelData.doors||[]).find(d=>d.is_goal);
+                if(door)unlockedDoors.add(door.id);
+                playSfx('unlock');
+                logStep('mechanic','shadow-switch-unlocked',{sunX:Math.round(_shadowSunX),shadowTipX:Math.round(_shadowTipX),hold:Number(_shadowHold.toFixed(2))});
+            }
+        }
+        if (_hasMechanic('still_door')) {
+            const door=(levelData.doors||[]).find(d=>d.is_goal);
+            if(!door)return;
+            const direction=(input.right?1:0)-(input.left?1:0);
+            const active=direction!==0||input.jumpHeld||Math.abs(player.vy)>35;
+            if(active){
+                if(_stillTime>.08)logStep('mechanic','stillness-broken',{heldSeconds:Number(_stillTime.toFixed(2)),playerX:Math.round(player.x),doorX:Math.round(door.x)});
+                _stillTime=0;_stillApproachLogged=false;
+                if(direction)door.x+=direction*MOVE_SPEED*dt;
+                door.x=Math.max(player.x+520,door.x);
+            }else{
+                _stillTime+=dt;
+                const delay=Number(levelData.idle_delay)||2.2;
+                if(_stillTime>delay){
+                    if(!_stillApproachLogged){_stillApproachLogged=true;logStep('mechanic','stillness-approach-start',{delay,playerX:Math.round(player.x),doorX:Math.round(door.x)});}
+                    door.x+=(player.x+105-door.x)*Math.min(1,dt*1.35);
+                }
+            }
+        }
+    }
     function _mapExtent(lv){
         const e=(lv&&lv.map_extent)||{};
         return {left:Math.max(0,Math.floor(e.left||0)),right:Math.max(0,Math.floor(e.right||0)),up:Math.max(0,Math.floor(e.up||0))};
@@ -194,6 +323,14 @@
         return gameState;
       },
       getLevelData: () => levelData,
+      getMechanicState: () => ({
+        mechanics: _mechanicsOf(levelData),
+        shadow: { sunX:_shadowSunX, tipX:_shadowTipX, hold:_shadowHold, unlocked:_shadowUnlocked },
+        stillness: { seconds:_stillTime, approachStarted:_stillApproachLogged },
+        wordBridge: { placed:_wordPlaced, drag:_sceneDrag&&_sceneDrag.type },
+        persistentReset: { crates:_persistentCrateCount, active:_persistentLevelActive },
+        dragWorld: { offset:_dragWorldOffset }
+      }),
       setFrameHandler: (fn) => {
         // 让外部在每帧执行一个钩子（用于自动化测试）
         window.__frameHook = fn;
@@ -209,6 +346,12 @@
     let _logSequence = 0;
     const _logStartedAt = new Date().toISOString();
     window.__gameLogs = window.__gameLogs || [];
+    const _logModules = new Map([
+        ['runtime',true],['state',true],['input',true],['mechanic',true],['level-load',true],
+        ['door',true],['collide',true],['puzzle',true],['progress',true],['audio',true],
+        ['creator',true],['export',true],['dead',true],['guard',true],['fatal',true],
+        ['snapshot',true],['debug',true],['physics',location.search.includes('verbose=1')]
+    ]);
     // v4.9.7a 死亡/坏关卡前 10 帧 player 快照（环形buffer），排查"为什么掉下去/为什么没碰门"直接回溯状态
     const PLAYER_RING_SIZE = 10;
     const _playerRing = [];
@@ -223,6 +366,7 @@
         if (_playerRing.length > PLAYER_RING_SIZE) _playerRing.shift();
     }
     function logStep(cat, tag, kv) {
+        if (_logModules.get(cat) === false) return null;
         const entry = {
             seq: ++_logSequence,
             f: frameCount,
@@ -262,8 +406,15 @@
     };
     window._deadSnaps = function() { return _playerRing.slice(); };
     window._stateChanges = function() { return window._findLogs('', 'state'); };
+    window._setLogModule = function(category, enabled) {
+        _logModules.set(String(category), !!enabled);
+        return {category:String(category),enabled:!!enabled};
+    };
+    window._logModuleStatus = function() { return Object.fromEntries(_logModules.entries()); };
     // 暴露 ring buffer 到 debug
     window.__debug.getLastPlayerSnaps = window._deadSnaps;
+    window.__debug.setLogModule = window._setLogModule;
+    window.__debug.getLogModules = window._logModuleStatus;
 
     function _runtimeSnapshot() {
         return {
@@ -278,6 +429,7 @@
                 apiEndpoint: null,
                 note: '当前游戏无业务后端；关卡来自内置 levels_bundle.js 或本地 JSON。所有资源读取结果记录在 level-load/network 分类。'
             },
+            logging: { maxEntries: LOG_MAX, modules: Object.fromEntries(_logModules.entries()), verboseQuery: location.search.includes('verbose=1') },
             game: {
                 pageName: currentPageName(),
                 state: gameState, levelIndex: currentLevelIndex,
@@ -755,12 +907,16 @@
     let unlockedDoors = new Set();
 
     function resetCratesFromLevel() {
-        crates = (levelData && levelData.crates || []).map((c, i) => ({
+        const source = (levelData && levelData.crates || []);
+        const visible = _hasMechanic('persistent_reset') ? source.slice(0, _persistentCrateCount) : source;
+        crates = visible.map((c, i) => ({
             id: c.id || ('crate_' + i),
             x: c.x, y: c.y, w: c.w || 130, h: c.h || 140,
             spawnX: c.x, spawnY: c.y,
-            vy: 0, onGround: false, hold_to_stop: !!c.hold_to_stop
+            vy: 0, onGround: false, hold_to_stop: !!c.hold_to_stop,
+            static_platform: !!c.static_platform
         }));
+        logStep('mechanic','crates-reset',{levelIndex:currentLevelIndex,total:source.length,visible:crates.length,persistent:_hasMechanic('persistent_reset')});
     }
 
     function resetKeysFromLevel() {
@@ -1060,9 +1216,16 @@
 
         // 所有关卡标题水平居中；第四关仍单独下移一行，避免与顶部按钮挤在一起。
         const titleIsLower = currentLevelIndex === 3;
-        sketchBold(_playingCustom ? ((levelData && levelData.name) || '无名秘境') : (FANTASY_TITLES[currentLevelIndex] || (levelData && levelData.name) || '风在门后等待'),
-                   W / 2,
-                   titleIsLower ? 190 : 74, 58);
+        if (!_playingCustom && _hasMechanic('word_bridge')) {
+            sketchBold('纸上有', W / 2 - 42, titleIsLower ? 190 : 74, 58);
+            if (!_wordPlaced && !(_sceneDrag && _sceneDrag.type === 'word')) {
+                sketchBold('路', W / 2 + 112, titleIsLower ? 190 : 74, 58);
+            }
+        } else {
+            sketchBold(_playingCustom ? ((levelData && levelData.name) || '无名秘境') : (FANTASY_TITLES[currentLevelIndex] || (levelData && levelData.name) || '风在门后等待'),
+                       W / 2,
+                       titleIsLower ? 190 : 74, 58);
+        }
     }
 
     // 画实心三角形（手绘感，带轻微抖动，默认白色，底部按键传黑色）
@@ -1152,7 +1315,15 @@
     function drawGameplayMessage() {
         if (!helpVisible && gameState !== 'paused') return;
         const isPaused = gameState === 'paused';
-        const boxW = 760, boxH = isPaused ? 260 : 150;
+        const hint = levelData && levelData.description && levelData.description.hint_l1
+            ? levelData.description.hint_l1 : '按 ← → 移动，点击右下按钮跳跃。';
+        const hintLines=[];
+        if(!isPaused){
+            ctx.save();ctx.font='700 25px "PingFang SC",sans-serif';let line='';
+            for(const char of Array.from(hint)){const next=line+char;if(line&&ctx.measureText(next).width>680){hintLines.push(line);line=char;}else line=next;}
+            if(line)hintLines.push(line);ctx.restore();
+        }
+        const boxW = 760, boxH = isPaused ? 260 : Math.max(150,118+hintLines.length*38);
         const boxX = (W - boxW) / 2, boxY = 180;
         ctx.save();
         ctx.fillStyle = 'rgba(255,255,255,0.96)';
@@ -1181,9 +1352,7 @@
             uiBTN.pauseLevelSelect = null;
             uiBTN.pauseResume = null;
             sketchBold('提示', W / 2, boxY + 48, 36);
-            const hint = levelData && levelData.description && levelData.description.hint_l1
-                ? levelData.description.hint_l1 : '按 ← → 移动，点击右下按钮跳跃。';
-            sketchBold(hint, W / 2, boxY + 104, 25);
+            hintLines.forEach((line,index)=>sketchBold(line,W/2,boxY+100+index*38,25));
         }
     }
 
@@ -1255,7 +1424,7 @@
     }
 
     // ===== v4.9.6 选关 + 通关存档 =====
-    const TOTAL_LEVELS = 10;
+    const TOTAL_LEVELS = 12;
     const LS_KEY = 'big_clever_save_v1';
     // v4.9.6 关卡加载缓存（死亡重来的同步保证，必须声明在最前面避免 TDZ）
     const _cachedLevels = {};
@@ -1465,6 +1634,7 @@
         });
 
         _updateMovingTargets(dt);
+        _updateNewLevelMechanics(dt);
         // ② 进门判定（playing状态下才检查，命中后立刻冻结+return）
         const PLAYER_HALF_AREA = HALF_W * 2 * HALF_H * 2 * 0.5;
         // v4.9.7a E类：门碰撞日志（每个门每帧 overlap 详情，排查"蛋在门口没触发过关"最关键）
@@ -1505,13 +1675,14 @@
             const knockGateOpen = !_hasMechanic('knock_twice') || _validKnockCount >= 2;
             const passwordGateOpen = !_hasMechanic('flower_password') || _passwordSolved;
             const movingGateOpen = !_hasMechanic('hold_to_stop') || !d.hold_to_stop || _isMovingHeld(d);
+            const persistentGateOpen = !_hasMechanic('persistent_reset') || _persistentCrateCount >= 3;
             if (d.is_goal && _hasMechanic('flower_password') && !_passwordSolved && performance.now() >= _passwordDismissUntil && overlap >= PLAYER_HALF_AREA) {
                 _passwordVisible = true;
                 _resetAllInput('password-panel-open', { blockHeldKeyboard: true });
                 logStep('puzzle','password-panel-open',{input:_passwordInput, revealed:_questionBlocks.map(b=>b.revealed)});
                 return;
             }
-            if (d.is_goal && !doorLocked && knockGateOpen && passwordGateOpen && movingGateOpen && overlap >= PLAYER_HALF_AREA) {
+            if (d.is_goal && !doorLocked && knockGateOpen && passwordGateOpen && movingGateOpen && persistentGateOpen && overlap >= PLAYER_HALF_AREA) {
                 // v19.0 简化阻断：只阻断「倒计时进行中（_goalHitStartMs>0）」的重复触发
                 //   v18 阻断了 _goalHitJumped=true（上一次已经跳完的标志）→ 但跳完后下一关进入前，loadLevelAndStart 会清零这个标志
                 //   双重保险：这里只看「现在是否在倒计时中」→ 更安全（即便 loadLevel 清零遗漏也不会卡 goal-hit）
@@ -1620,6 +1791,7 @@
         const plats = levelData.platforms || [];
         // 木箱重力与平台碰撞。木箱可坠落，重开关卡时由 JSON 初始位置恢复。
         for (const c of crates) {
+            if(c.static_platform){c.vy=0;c.onGround=true;continue;}
             if(c.hold_to_stop&&_isMovingHeld(c)){c.vy=0;continue;}
             if (levelData.no_fall&&!levelData.infinite_horizontal){const mb=_mapBounds(levelData);c.x=Math.max(mb.minX+c.w/2,Math.min(mb.maxX-c.w/2,c.x));}
             c.vy = Math.min(MAX_FALL, c.vy + GRAVITY * dt);
@@ -1659,6 +1831,7 @@
         }
         // 玩家左右接触木箱时推动它；平台或另一只木箱挡住时停止。
         for (const c of crates) {
+            if(c.static_platform)continue;
             if (!rectVsRect(player.x - HALF_W, player.y - HALF_H, HALF_W * 2, HALF_H * 2,
                             c.x - c.w / 2, c.y - c.h / 2, c.w, c.h)) continue;
             if (player.vx === 0) continue;
@@ -1691,6 +1864,7 @@
             }
         }
         // Y 方向
+        const previousPlayerBottom = player.y + HALF_H;
         player.y += player.vy * dt;
         const landingSpeed = player.vy;
         if (player.vy < 0 && _questionBlocks.length) {
@@ -1723,8 +1897,17 @@
                 }
             }
         }
-        // 木箱也是可站立的动态平台。
+        // 木箱也是可站立的动态平台。第11关的楼梯箱只使用稳定顶面：
+        // 同一帧同时穿过多个箱子接缝时，固定选择最高顶面，避免受数组顺序/帧率影响。
+        const staticLandingCandidates = [];
         for (const c of crates) {
+            if(c.static_platform){
+                const top=c.y-c.h/2;
+                const overlapsX=player.x+HALF_W>c.x-c.w/2&&player.x-HALF_W<c.x+c.w/2;
+                const crossedTop=player.vy>=0&&previousPlayerBottom<=top+10&&player.y+HALF_H>=top;
+                if(overlapsX&&crossedTop)staticLandingCandidates.push(c);
+                continue;
+            }
             if (!rectVsRect(player.x - HALF_W, player.y - HALF_H, HALF_W * 2, HALF_H * 2,
                             c.x - c.w / 2, c.y - c.h / 2, c.w, c.h)) continue;
             if (player.vy > 0) {
@@ -1737,6 +1920,13 @@
                 player.y = c.y + c.h / 2 + HALF_H;
                 player.vy = 0;
             }
+        }
+        if(staticLandingCandidates.length){
+            const landing=staticLandingCandidates.reduce((best,c)=>(c.y-c.h/2)<(best.y-best.h/2)?c:best);
+            player.y=landing.y-landing.h/2-HALF_H;
+            player.vy=0;player.onGround=true;player.jumpsLeft=levelData.double_jump?2:1;
+            if(landingSpeed>260)playSfx('land');
+            logStep('collide','persistent-crate-land',{crate:landing.id,top:Math.round(landing.y-landing.h/2),candidates:staticLandingCandidates.map(c=>c.id),px:Math.round(player.x)});
         }
 
         // 门判定（已移到顶部，这里不再重复）
@@ -2928,20 +3118,20 @@
         ctx.restore();
     }
 
-    // ===== v4.9.6 选关页面（2 排 × 5 列） =====
+    // ===== v164 选关页面（3 排 × 4 列） =====
     function drawLevelSelect() {
         drawGrid();
         // 标题
         sketchBold('旅途篇章', W / 2, H * 0.12, 72);
         sketchText('已通关: ' + _progress.completed.length + ' / ' + TOTAL_LEVELS, W / 2, H * 0.18, 28, 'center', false, 'rgba(0,0,0,0.5)');
 
-        // 布局：2 排 × 5 列
-        const cols = 5, rows = 2;
-        const cellW = 300, cellH = 200, gapX = 50, gapY = 50;
+        // 12 关完整展示：3 排 × 4 列，保留底部返回按钮的安全距离。
+        const cols = 4, rows = 3;
+        const cellW = 330, cellH = 150, gapX = 38, gapY = 30;
         const totalW = cellW * cols + gapX * (cols - 1);
         const totalH = cellH * rows + gapY * (rows - 1);
         const startX = (W - totalW) / 2;
-        const startY = H * 0.30;
+        const startY = H * 0.235;
 
         uiBTN.levelSelect_btns = [];
 
@@ -2975,9 +3165,9 @@
 
             // 画关卡编号
             if (canPlay) {
-                sketchBold(String(idx + 1), bx + cellW / 2, by + cellH * 0.35, 56);
-                sketchText(completed ? '✓ 已通关' : '未通关', bx + cellW / 2, by + cellH * 0.62, 26, 'center', false, completed ? '#2a8a2a' : 'rgba(0,0,0,0.5)');
-                sketchText('第 ' + (idx + 1) + ' 关', bx + cellW / 2, by + cellH * 0.82, 22, 'center', false, 'rgba(0,0,0,0.4)');
+                sketchBold(String(idx + 1), bx + cellW / 2, by + cellH * 0.34, 46);
+                sketchText(completed ? '✓ 已通关' : '未通关', bx + cellW / 2, by + cellH * 0.62, 23, 'center', false, completed ? '#2a8a2a' : 'rgba(0,0,0,0.5)');
+                sketchText(FANTASY_TITLES[idx] || ('第 ' + (idx + 1) + ' 关'), bx + cellW / 2, by + cellH * 0.84, 20, 'center', false, 'rgba(0,0,0,0.48)');
             } else {
                 // 不可玩：一律浅灰 + 锁图标 + 🔒未解锁/📝待开发 小字
                 drawLockIcon(bx + cellW / 2, by + cellH / 2 - 10);
@@ -3310,7 +3500,8 @@
             }
         }
     }
-    function handleUp(reason = 'mouse-up') {
+    function handleUp(reason = 'mouse-up', point = null) {
+        _endSceneGesture(point, 'mouse', reason);
         const control = _mouseControl;
         _mouseControl = null;
         if (control) {
@@ -3334,12 +3525,15 @@
     canvas.addEventListener('mousedown', e => {
         handleUp('mouse-new-down');
         const p = getMousePos(e), t = gameState === 'playing' ? _movingTargetAt(p) : null;
-        if (t) {
+        if (_beginSceneGesture(p, 'mouse')) {
+            return;
+        } else if (t) {
             _mouseMovingTarget = t.obj;
             logStep('input','moving-element-hold',{kind:t.kind,id:t.obj.id,pointer:'mouse'});
         } else handleDown(p);
     });
-    canvas.addEventListener('mouseup', () => handleUp('canvas-mouseup'));
+    canvas.addEventListener('mousemove', e => _moveSceneGesture(getMousePos(e), 'mouse'));
+    canvas.addEventListener('mouseup', e => handleUp('canvas-mouseup', getMousePos(e)));
     canvas.addEventListener('mouseleave', () => handleUp('canvas-mouseleave'));
     window.addEventListener('mouseup', () => handleUp('window-mouseup'));
     function _touchPos(touch) {
@@ -3358,6 +3552,7 @@
         for (const touch of Array.from(e.changedTouches)) {
             const p = _touchPos(touch);
             const moving = gameState === 'playing' ? _movingTargetAt(p) : null;
+            if(_beginSceneGesture(p,touch.identifier))continue;
             if(moving){_heldMovingTargets.set(touch.identifier,moving.obj);logStep('input','moving-element-hold',{kind:moving.kind,id:moving.obj.id,pointer:touch.identifier});continue;}
             const control = gameState === 'playing' ? _controlAt(p) : null;
             if (control) {
@@ -3370,9 +3565,14 @@
             }
         }
     }, { passive: false });
+    canvas.addEventListener('touchmove', e => {
+        e.preventDefault();
+        for(const touch of Array.from(e.changedTouches))_moveSceneGesture(_touchPos(touch),touch.identifier);
+    }, { passive: false });
     function _releaseChangedTouches(e, reason) {
         e.preventDefault();
         for (const touch of Array.from(e.changedTouches)) {
+            if(_endSceneGesture(_touchPos(touch),touch.identifier,reason))continue;
             if(_heldMovingTargets.has(touch.identifier)){const obj=_heldMovingTargets.get(touch.identifier);_heldMovingTargets.delete(touch.identifier);logStep('input','moving-element-release',{id:obj&&obj.id,pointer:touch.identifier,reason});continue;}
             const control = _activeTouchControls.get(touch.identifier);
             if (!control) continue;
@@ -3452,6 +3652,15 @@
     function loadLevelByIndex(idx) {
         // v4.9.7a D类：从什么来源进入（选关页 / 通关自动跳 / 重来快捷键 / 死亡重来 / 死亡重来拦截）
         const _prev = gameState;
+        const samePersistentRestart = idx === currentLevelIndex && _persistentLevelActive
+            && (gameState === 'playing' || gameState === 'paused');
+        if (samePersistentRestart) {
+            const before = _persistentCrateCount;
+            _persistentCrateCount = Math.min(3, _persistentCrateCount + 1);
+            logStep('mechanic','persistent-reset-step',{before,after:_persistentCrateCount,levelIndex:idx});
+        } else {
+            _persistentCrateCount = 1;
+        }
         currentLevelIndex = idx;
         const isAvail = _availableLevels.includes(idx);
         const isUnlocked = (idx+1) <= _progress.unlocked;
@@ -3547,6 +3756,8 @@
         player.jumpsLeft = levelData.double_jump ? 2 : 1;
         resetCratesFromLevel();
         resetKeysFromLevel();
+        _persistentLevelActive = _hasMechanic('persistent_reset');
+        _resetMainlineMechanicState();
         _questionBlocks = (levelData.question_blocks || []).map(b => ({ ...b, remaining: b.count, revealed: 0 }));
         _flowerBursts = [];
         _passwordDismissUntil = 0;
@@ -3645,6 +3856,34 @@
             }else{
                 ctx.save();ctx.fillStyle='#d9bd71';ctx.strokeStyle='#17343a';ctx.lineWidth=5;_roundPath(x,y,w,h,Math.min(15,h*.25));ctx.fill();ctx.stroke();ctx.fillStyle='#f3dc96';ctx.fillRect(x+12,y+9,w-24,Math.max(7,h*.22));ctx.strokeStyle='#9b7e42';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(x+w*.2,y+h*.67);ctx.lineTo(x+w*.42,y+h*.64);ctx.moveTo(x+w*.65,y+h*.7);ctx.lineTo(x+w*.8,y+h*.66);ctx.stroke();ctx.restore();
             }
+        }
+    }
+    function drawNewLevelMechanics(){
+        if(_hasMechanic('shadow_switch')){
+            const cfg=levelData.shadow_switch||{x:820};
+            const glow=ctx.createRadialGradient(_shadowSunX,220,12,_shadowSunX,220,108);
+            glow.addColorStop(0,'rgba(255,240,189,.95)');glow.addColorStop(1,'rgba(255,240,189,0)');
+            ctx.fillStyle=glow;ctx.beginPath();ctx.arc(_shadowSunX,220,110,0,Math.PI*2);ctx.fill();
+            ctx.fillStyle='#e7c767';ctx.strokeStyle='#17343a';ctx.lineWidth=6;ctx.beginPath();ctx.arc(_shadowSunX,220,54,0,Math.PI*2);ctx.fill();ctx.stroke();
+            ctx.fillStyle='rgba(23,52,58,.38)';ctx.beginPath();ctx.moveTo(player.x-25,866);ctx.lineTo(player.x+25,866);ctx.lineTo(_shadowTipX+25,879);ctx.lineTo(_shadowTipX-25,879);ctx.closePath();ctx.fill();
+            ctx.fillStyle=_shadowUnlocked?'#e7c767':'#405653';ctx.strokeStyle='#17343a';ctx.lineWidth=5;_roundPath(cfg.x-58,846,116,24,8);ctx.fill();ctx.stroke();
+        }
+        if(_hasMechanic('still_door')&&_stillTime>.3){
+            const door=(levelData.doors||[]).find(d=>d.is_goal);
+            if(door){ctx.fillStyle='#fff0bd';ctx.font='800 42px sans-serif';ctx.textAlign='center';ctx.fillText('·'.repeat(Math.min(3,Math.floor(_stillTime))),door.x,door.y-door.h/2-36);}
+        }
+        if(_hasMechanic('word_bridge')){
+            if(_wordPlaced){
+                ctx.fillStyle='#17343a';ctx.font='900 82px "PingFang SC",sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('路',950,728);
+            }else if(_sceneDrag&&_sceneDrag.type==='word'){
+                ctx.save();ctx.fillStyle='#fff0bd';ctx.strokeStyle='#17343a';ctx.lineWidth=6;_roundPath(_wordDragPos.x-52,_wordDragPos.y-52,104,104,18);ctx.fill();ctx.stroke();
+                ctx.fillStyle='#17343a';ctx.font='900 66px "PingFang SC",sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('路',_wordDragPos.x,_wordDragPos.y);ctx.restore();
+            }
+        }
+        if(_hasMechanic('drag_world')){
+            ctx.save();ctx.translate(_dragWorldOffset,0);ctx.strokeStyle='#17343a';ctx.lineWidth=5;
+            for(let x=700;x<3900;x+=330){ctx.beginPath();ctx.moveTo(x,870);ctx.lineTo(x-12,844);ctx.moveTo(x,870);ctx.lineTo(x+17,850);ctx.stroke();}
+            ctx.restore();
         }
     }
     function drawFantasyDoors(){
@@ -3895,6 +4134,7 @@
             else {
                 ctx.save();ctx.translate(-_cameraX,-_cameraY);
                 drawFantasyPlatforms();
+                drawNewLevelMechanics();
                 drawDecor();
                 drawFantasyCrates();
                 drawKeys();
