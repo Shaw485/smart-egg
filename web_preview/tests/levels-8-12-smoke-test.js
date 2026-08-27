@@ -10,8 +10,8 @@ const gameSource = fs.readFileSync(path.join(root, 'web_preview/game.js'), 'utf8
 const indexSource = fs.readFileSync(path.join(root, 'web_preview/index.html'), 'utf8');
 const debugGuide = fs.readFileSync(path.join(root, 'web_preview/README.md'), 'utf8');
 
-assert.match(gameSource, /const GAME_CODE_VERSION = 168/);
-assert.match(indexSource, /game\.js\?v=168/);
+assert.match(gameSource, /const GAME_CODE_VERSION = 169/);
+assert.match(indexSource, /game\.js\?v=169/);
 assert.match(gameSource, /const TOTAL_LEVELS = 12/);
 assert.match(gameSource, /_updateNewLevelMechanics\(dt\)/);
 assert.match(gameSource, /persistent-crate-land/);
@@ -25,6 +25,9 @@ assert.match(gameSource, /_sceneGestureBlockedByUI\(p\)/);
 assert.match(gameSource, /scene-gesture-bypassed-ui/);
 assert.match(gameSource, /help-default-closed/);
 assert.match(gameSource, /stillness-door-overlap-ready/);
+assert.match(gameSource, /help-auto-close-for-gesture/);
+assert.match(gameSource, /word-bridge-created/);
+assert.match(gameSource, /function _wordBridgeGeometry/);
 assert.ok(gameSource.includes("'日影无声'") && gameSource.includes("'远方未远'"));
 assert.match(gameSource, /window\._setLogModule/);
 assert.match(gameSource, /\['physics',\s*location\.search\.includes\('verbose=1'\)\]/);
@@ -56,6 +59,28 @@ assert.match(levels[4].description.hint_l1, /场景空白处.*向左拖动.*地�
 assert.strictEqual(levels[3].crates.length, 3);
 assert.ok(levels[3].crates.every(crate => crate.static_platform));
 assert.ok(!JSON.stringify(levels[4]).includes('远处安静得看不见尽头'));
+
+// 第10关几何回归：自然放到断口地面线必须成功，桥面必须与两岸齐平。
+const wordLevel = levels[2];
+const wordGrounds = wordLevel.platforms.filter(item => item.kind === 'ground').sort((a,b) => a.x - b.x);
+const wordGapLeft = wordGrounds[0].x + wordGrounds[0].w / 2;
+const wordGapRight = wordGrounds[1].x - wordGrounds[1].w / 2;
+const wordGroundTop = Math.min(
+  wordGrounds[0].y - wordGrounds[0].h / 2,
+  wordGrounds[1].y - wordGrounds[1].h / 2
+);
+const wordDropZone = {x:wordGapLeft-90,y:wordGroundTop-330,w:(wordGapRight-wordGapLeft)+180,h:390};
+const naturalDrop = {x:(wordGapLeft+wordGapRight)/2,y:wordGroundTop};
+assert.ok(naturalDrop.x >= wordDropZone.x && naturalDrop.x <= wordDropZone.x + wordDropZone.w
+  && naturalDrop.y >= wordDropZone.y && naturalDrop.y <= wordDropZone.y + wordDropZone.h,
+  '第10关在视觉地面线放下“路”字必须被接受');
+const wordBridge = {x:(wordGapLeft+wordGapRight)/2,y:wordGroundTop+30,w:wordGapRight-wordGapLeft,h:60};
+assert.strictEqual(wordBridge.x - wordBridge.w / 2, wordGapLeft, '第10关桥左边必须接左岸');
+assert.strictEqual(wordBridge.x + wordBridge.w / 2, wordGapRight, '第10关桥右边必须接右岸');
+assert.strictEqual(wordBridge.y - wordBridge.h / 2, wordGroundTop, '第10关桥面必须与地面齐平');
+assert.ok(1300 > wordDropZone.x + wordDropZone.w, '第10关断口外的落点必须拒绝');
+assert.match(gameSource, /inRect\(world,geometry\.dropZone\)/);
+assert.doesNotMatch(gameSource, /p\.y > 540 && p\.y < 820/);
 
 // 第9关可达性回归：静止后门必须真正进入通关碰撞阈值，不能只在视觉上靠近。
 const stillLevel = levels[1];
@@ -110,4 +135,4 @@ for (let index = 0; index <= 11; index += 1) {
   );
 }
 
-console.log('主线关卡冒烟测试通过：提示具体且默认关闭，第9关静止后可达通关阈值，全部12关离线包与JSON一致。');
+console.log('主线关卡冒烟测试通过：提示默认关闭，第9关可达，第10关自然落点与齐平桥面有效，全部12关离线包与JSON一致。');

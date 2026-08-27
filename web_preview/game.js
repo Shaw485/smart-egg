@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 168;   // 跟 index.html 的 ?v=168 保持一致
+    const GAME_CODE_VERSION = 169;   // 跟 index.html 的 ?v=169 保持一致
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
         const last = parseInt(localStorage.getItem(LAST_KNOWN_KEY) || '0', 10);
@@ -124,7 +124,11 @@
     }
     function _hasMechanic(name) { return _mechanicsOf(levelData).includes(name); }
     function _sceneGestureBlockedByUI(p) {
-        const overlayVisible = helpVisible || showSuccess || showDead;
+        // “路”字位于提示框上方且仍清晰可见：用户照着提示按住它时，允许同一次按下
+        // 自动收起提示并开始拖拽。成功/死亡弹层与顶部按钮仍保持完全阻断。
+        const visibleWordHandle = helpVisible && _hasMechanic('word_bridge') && !_wordPlaced
+            && inRect(p, _wordHomeRect());
+        const overlayVisible = showSuccess || showDead || (helpVisible && !visibleWordHandle);
         const topButton = [uiBTN.help, uiBTN.restart, uiBTN.pause].some(rect => inRect(p, rect));
         return overlayVisible || topButton;
     }
@@ -150,6 +154,27 @@
     function _wordHomeRect() {
         return {x:W/2+60,y:20,w:105,h:105};
     }
+    function _wordBridgeGeometry() {
+        const grounds = (levelData && levelData.platforms || [])
+            .filter(item => (item.kind || 'ground') === 'ground')
+            .slice()
+            .sort((a,b) => a.x - b.x);
+        const left = grounds[0] || {x:360,y:1090,w:720,h:440};
+        const right = grounds[grounds.length - 1] || {x:1550,y:1090,w:740,h:440};
+        const gapLeft = left.x + left.w / 2;
+        const gapRight = right.x - right.w / 2;
+        const groundTop = Math.min(left.y - left.h / 2, right.y - right.h / 2);
+        const gapWidth = Math.max(120, gapRight - gapLeft);
+        const bridgeH = 60;
+        return {
+            gapLeft,
+            gapRight,
+            groundTop,
+            dropZone: {x:gapLeft-90,y:groundTop-330,w:gapWidth+180,h:390},
+            bridge: {id:'word_bridge_surface',x:(gapLeft+gapRight)/2,y:groundTop+bridgeH/2,w:gapWidth,h:bridgeH,kind:'word_bridge'},
+            token: {x:(gapLeft+gapRight)/2,y:groundTop-20}
+        };
+    }
     function _beginSceneGesture(p, pointerId) {
         if (gameState !== 'playing' || !levelData) return false;
         // 新增的场景拖拽不能抢走旧 UI：提示、重来、暂停和弹层永远先交给 handleDown。
@@ -174,9 +199,14 @@
             }
         }
         if (_hasMechanic('word_bridge') && !_wordPlaced && inRect(p,_wordHomeRect())) {
+            if (helpVisible) {
+                helpVisible = false;
+                logStep('state','help-auto-close-for-gesture',{pointerId,gesture:'word-drag',levelIndex:currentLevelIndex});
+            }
             _sceneDrag = {type:'word',pointerId,lastPoint:p};
             _wordDragPos = world;
-            logStep('mechanic','word-drag-start',{pointerId,token:'路'});
+            const geometry = _wordBridgeGeometry();
+            logStep('mechanic','word-drag-start',{pointerId,token:'路',dropZone:geometry.dropZone});
             return true;
         }
         if (_hasMechanic('drag_world') && p.y < 850) {
@@ -215,16 +245,35 @@
         p = p || drag.lastPoint || {x:0,y:0};
         _sceneDrag = null;
         if (drag.type === 'word') {
-            const accepted = p.x > 690 && p.x < 1230 && p.y > 540 && p.y < 820;
+            const world = {x:p.x+_cameraX,y:p.y+_cameraY};
+            const geometry = _wordBridgeGeometry();
+            const accepted = inRect(world,geometry.dropZone);
             if (accepted) {
                 _wordPlaced = true;
-                _wordDragPos = {x:950,y:700};
+                _wordDragPos = geometry.token;
                 if (!(levelData.platforms||[]).some(item=>item.kind==='word_bridge')) {
-                    levelData.platforms.push({id:'word_bridge_surface',x:950,y:730,w:460,h:60,kind:'word_bridge'});
+                    levelData.platforms.push({...geometry.bridge});
                 }
                 playSfx('unlock');
+                logStep('mechanic','word-bridge-created',{
+                    pointerId,
+                    gapLeft:Math.round(geometry.gapLeft),
+                    gapRight:Math.round(geometry.gapRight),
+                    groundTop:Math.round(geometry.groundTop),
+                    bridge:geometry.bridge
+                });
             }
-            logStep('mechanic','word-drop',{accepted,pointerId,x:Math.round(p.x),y:Math.round(p.y),reason});
+            const rejectReason = accepted ? null :
+                (world.x < geometry.dropZone.x || world.x > geometry.dropZone.x + geometry.dropZone.w
+                    ? 'outside-horizontal' : 'outside-vertical');
+            logStep('mechanic','word-drop',{
+                accepted,pointerId,
+                screen:{x:Math.round(p.x),y:Math.round(p.y)},
+                world:{x:Math.round(world.x),y:Math.round(world.y)},
+                dropZone:geometry.dropZone,
+                rejectReason,
+                reason
+            });
         } else if (drag.type === 'sun') {
             logStep('mechanic','shadow-drag-end',{pointerId,sunX:Math.round(_shadowSunX),shadowTipX:Math.round(_shadowTipX),moved:_shadowSunMoved,reason});
         } else if (drag.type === 'world') {
@@ -3918,9 +3967,12 @@
             if(door){ctx.fillStyle='#fff0bd';ctx.font='800 42px sans-serif';ctx.textAlign='center';ctx.fillText('·'.repeat(Math.min(3,Math.floor(_stillTime))),door.x,door.y-door.h/2-36);}
         }
         if(_hasMechanic('word_bridge')){
+            const geometry=_wordBridgeGeometry();
             if(_wordPlaced){
-                ctx.fillStyle='#17343a';ctx.font='900 82px "PingFang SC",sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('路',950,728);
+                ctx.fillStyle='#17343a';ctx.font='900 82px "PingFang SC",sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('路',_wordDragPos.x,_wordDragPos.y);
             }else if(_sceneDrag&&_sceneDrag.type==='word'){
+                ctx.save();ctx.globalAlpha=.38;ctx.strokeStyle='#e7c767';ctx.lineWidth=8;ctx.setLineDash([20,14]);
+                _roundPath(geometry.bridge.x-geometry.bridge.w/2,geometry.groundTop,geometry.bridge.w,geometry.bridge.h,12);ctx.stroke();ctx.restore();
                 ctx.save();ctx.fillStyle='#fff0bd';ctx.strokeStyle='#17343a';ctx.lineWidth=6;_roundPath(_wordDragPos.x-52,_wordDragPos.y-52,104,104,18);ctx.fill();ctx.stroke();
                 ctx.fillStyle='#17343a';ctx.font='900 66px "PingFang SC",sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('路',_wordDragPos.x,_wordDragPos.y);ctx.restore();
             }

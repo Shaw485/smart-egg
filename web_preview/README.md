@@ -2,10 +2,10 @@
 
 ## 关卡与版本
 
-- 网页主线当前为代码版本 `v168`，共 12 关。
+- 网页主线当前为代码版本 `v169`，共 12 关。
 - 第 8–12 关依次为影子机关、静止追门、标题拖字成桥、重来保留箱子、拖动世界。
 - 正式关卡数据位于 `../godot_project/levels/level_0.json` 至 `level_11.json`，离线包位于 `../godot_project/levels/levels_bundle.js`。
-- `index.html` 的脚本与样式缓存参数已同步为 `v168`。
+- `index.html` 的脚本与样式缓存参数已同步为 `v169`。
 - `?screen=levelSelect` 可从独立试玩页安全返回完整主线选关页；不带该参数时仍从首页启动。
 
 ## 日志与独立调试
@@ -18,7 +18,9 @@
 
 第 9 关停止操作后，门以 `approach_offset=55` 靠近人物。门首次进入真实通关碰撞面积时记录 `mechanic/stillness-door-overlap-ready`，包含 `overlap`、`threshold`、人物与门坐标，便于独立判断“视觉上贴近”和“物理上可通关”是否一致。
 
-`tests/mainline-function-parity-test.js` 是 UI 改版的功能守恒检查：固定验证首页、主线选关、暂停返回、创造模式、编辑器撤销与移动、键盘控制、日志导出及提示跨关复位仍然存在。`tests/levels-8-12-smoke-test.js` 还会模拟第 9 关静止等待，确认门最终达到通关碰撞阈值，并核对全部 12 关 JSON 与离线包一致。
+第 10 关按住标题中的“路”字时会记录 `mechanic/word-drag-start`；若提示正开着，会先记录 `state/help-auto-close-for-gesture` 并在同一次按下开始拖拽。放下时 `mechanic/word-drop` 会记录屏幕/世界坐标、目标区域与拒绝原因；成功后 `mechanic/word-bridge-created` 会记录两岸、地面顶和桥面几何。桥面由两岸数据计算并与地面齐平。
+
+`tests/mainline-function-parity-test.js` 是 UI 改版的功能守恒检查：固定验证首页、主线选关、暂停返回、创造模式、编辑器撤销与移动、键盘控制、日志导出及提示跨关复位仍然存在。`tests/levels-8-12-smoke-test.js` 会模拟第 9 关静止等待，并校验第 10 关自然落点、桥两端及桥面高度，同时核对全部 12 关 JSON 与离线包一致。
 
 第 12 关的全景拖拽会先调用 `_sceneGestureBlockedByUI(p)`；提示、重来、暂停以及提示/成功/死亡弹层区域会记录 `mechanic/scene-gesture-bypassed-ui` 并交还旧 UI 点击处理，避免新增手势吞掉原按钮。
 

@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const VERSION = 8;
+  const VERSION = 9;
   const W = 1920;
   const H = 1080;
   const GROUND_Y = 790;
@@ -156,8 +156,8 @@
 
   function returnToMainlineSelection(source) {
     clearLiveInput('pause-return-mainline');
-    log('state', 'pause-return-mainline-selection', { source: source, target: '../web_preview/index.html?mainline=v168&screen=levelSelect' });
-    window.location.href = '../web_preview/index.html?mainline=v168&screen=levelSelect';
+    log('state', 'pause-return-mainline-selection', { source: source, target: '../web_preview/index.html?mainline=v169&screen=levelSelect' });
+    window.location.href = '../web_preview/index.html?mainline=v169&screen=levelSelect';
   }
 
   let audioContext = null;
@@ -256,9 +256,13 @@
       }
     }
     if (level.mechanic === 'word_bridge' && !state.wordPlaced && inside(point, wordHomeRect())) {
+      if (hintVisible) {
+        hintVisible = false;
+        log('state', 'hint-auto-close-for-gesture', { gesture: 'word-drag' });
+      }
       pointerDrag = { type: 'word', id: event.pointerId };
       state.wordPos = point;
-      log('mechanic', 'word-drag-start', { token: '路' });
+      log('mechanic', 'word-drag-start', { token: '路', drop_zone: { x: 630, y: 460, w: 640, h: 390 } });
       return;
     }
     if (level.mechanic === 'drag_world' && point.y < UI_Y) {
@@ -293,13 +297,22 @@
     if (releasedControl) log('input', 'control-up', { pointer_id: event.pointerId, control: releasedControl });
     if (!pointerDrag || pointerDrag.id !== event.pointerId) return;
     if (pointerDrag.type === 'word') {
-      const accepted = point.x > 700 && point.x < 1210 && point.y > 560 && point.y < 790;
+      const dropZone = { x: 630, y: 460, w: 640, h: 390 };
+      const accepted = inside(point, dropZone);
       state.wordPlaced = accepted;
       if (accepted) {
-        state.wordPos = { x: 950, y: 700 };
+        state.wordPos = { x: 950, y: GROUND_Y - 20 };
         tone(610, .08);
       }
-      log('mechanic', 'word-drop', { accepted: accepted, x: Math.round(point.x), y: Math.round(point.y) });
+      const rejectReason = accepted ? null :
+        (point.x < dropZone.x || point.x > dropZone.x + dropZone.w ? 'outside-horizontal' : 'outside-vertical');
+      log('mechanic', 'word-drop', {
+        accepted: accepted,
+        x: Math.round(point.x),
+        y: Math.round(point.y),
+        drop_zone: dropZone,
+        reject_reason: rejectReason
+      });
     } else if (pointerDrag.type === 'sun') {
       log('mechanic', 'sun-drag-end', { x: Math.round(state.sunX), shadow_tip_x: Math.round(state.shadowTipX), moved: state.sunMoved });
     } else if (pointerDrag.type === 'world') {
@@ -343,7 +356,7 @@
         { x: 0, y: GROUND_Y, w: 720, h: 80 },
         { x: 1180, y: GROUND_Y, w: 740, h: 80 }
       ];
-      if (state.wordPlaced) floors.push({ x: 720, y: 690, w: 460, h: 55, word: true });
+      if (state.wordPlaced) floors.push({ x: 720, y: GROUND_Y, w: 460, h: 55, word: true });
       return floors;
     }
     if (level.mechanic === 'persistent_reset') {
@@ -560,6 +573,8 @@
     } else if (level.mechanic === 'word_bridge') {
       drawDoor(1535, GROUND_Y, state.wordPlaced);
       if (pointerDrag && pointerDrag.type === 'word') {
+        ctx.save();ctx.globalAlpha=.38;ctx.strokeStyle='#e5bd66';ctx.lineWidth=8;ctx.setLineDash([20,14]);
+        roundedRect(720,GROUND_Y,460,55,12,null,'#e5bd66',8);ctx.restore();
         roundedRect(state.wordPos.x - 52, state.wordPos.y - 52, 104, 104, 18, '#fff0bd', '#17343a', 6);
         ctx.fillStyle = '#17343a'; ctx.font = '900 66px "PingFang SC", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('路', state.wordPos.x, state.wordPos.y);
       }
@@ -711,7 +726,7 @@
 
   document.getElementById('download-logs').addEventListener('click', function () {
     log('runtime', 'log-export', { entries: logger.entries.length });
-    logger.download('smart-egg-brainstorm-v8-level-' + level.id + '.json');
+    logger.download('smart-egg-brainstorm-v9-level-' + level.id + '.json');
   });
   window.addEventListener('error', function (event) {
     log('runtime', 'uncaught-error', { message: event.message, file: event.filename, line: event.lineno }, 'error');
@@ -742,7 +757,16 @@
 
   resize();
   window.addEventListener('resize', resize);
-  log('runtime', 'boot', { version: VERSION, levels: LEVELS.map(function (item) { return item.id; }), backend: { mode: 'offline-prototype', requests: 'none' } });
-  enterLevel(0, 'boot');
+  const requestedLevelId = Number(new URLSearchParams(location.search).get('level'));
+  const requestedLevelIndex = LEVELS.findIndex(function (item) { return item.id === requestedLevelId; });
+  const startupLevelIndex = requestedLevelIndex >= 0 ? requestedLevelIndex : 0;
+  log('runtime', 'boot', {
+    version: VERSION,
+    levels: LEVELS.map(function (item) { return item.id; }),
+    requested_level: Number.isFinite(requestedLevelId) ? requestedLevelId : null,
+    resolved_level: LEVELS[startupLevelIndex].id,
+    backend: { mode: 'offline-prototype', requests: 'none' }
+  });
+  enterLevel(startupLevelIndex, requestedLevelIndex >= 0 ? 'startup-query' : 'boot');
   requestAnimationFrame(tick);
 })();
