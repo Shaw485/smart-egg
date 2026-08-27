@@ -2,16 +2,21 @@
 
 ## 关卡与版本
 
-- 网页主线当前为代码版本 `v166`，共 12 关。
+- 网页主线当前为代码版本 `v167`，共 12 关。
 - 第 8–12 关依次为影子机关、静止追门、标题拖字成桥、重来保留箱子、拖动世界。
 - 正式关卡数据位于 `../godot_project/levels/level_0.json` 至 `level_11.json`，离线包位于 `../godot_project/levels/levels_bundle.js`。
-- `index.html` 的脚本与样式缓存参数已同步为 `v166`。
+- `index.html` 的脚本与样式缓存参数已同步为 `v167`。
+- `?screen=levelSelect` 可从独立试玩页安全返回完整主线选关页；不带该参数时仍从首页启动。
 
 ## 日志与独立调试
 
 首页右上角的日志按钮可以导出 JSON。每条记录包含时间、帧号、会话标识、模块、事件和必要的非敏感状态；当前网页版本没有服务端业务请求，运行时会明确记录关卡数据来自离线包或本地 JSON。
 
 第 8 关会在玩家真实拖动太阳至少 12 个逻辑像素时记录 `mechanic/shadow-drag-armed`；未达到该阈值时，即使走路令影尖经过机关也不会累计开门时间。`__debug.getMechanicState().shadow.moved` 可单独检查该状态。
+
+`tests/mainline-function-parity-test.js` 是 UI 改版的功能守恒检查：固定验证首页、主线选关、暂停返回、创造模式、编辑器撤销与移动、键盘控制和日志导出仍然存在。
+
+第 12 关的全景拖拽会先调用 `_sceneGestureBlockedByUI(p)`；提示、重来、暂停以及提示/成功/死亡弹层区域会记录 `mechanic/scene-gesture-bypassed-ui` 并交还旧 UI 点击处理，避免新增手势吞掉原按钮。
 
 日志模块可分别启停，默认关闭逐帧 `physics` 噪声日志。需要排查物理过程时，可以在地址后追加 `?verbose=1`，或在控制台单独开启：
 

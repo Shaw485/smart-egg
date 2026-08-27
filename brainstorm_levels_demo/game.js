@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const VERSION = 6;
+  const VERSION = 7;
   const W = 1920;
   const H = 1080;
   const GROUND_Y = 790;
@@ -50,6 +50,9 @@
   const HIT = {
     hint: { x: 285, y: 40, w: 92, h: 92 },
     reset: { x: 395, y: 40, w: 92, h: 92 },
+    pause: { x: 505, y: 40, w: 92, h: 92 },
+    pauseBack: { x: 570, y: 575, w: 350, h: 96 },
+    pauseResume: { x: 1000, y: 575, w: 350, h: 96 },
     left: { x: 120, y: 895, w: 180, h: 135 },
     right: { x: 330, y: 895, w: 180, h: 135 },
     jump: { x: 1615, y: 895, w: 185, h: 135 },
@@ -135,6 +138,28 @@
     setTimeout(function () { tone(880, .14); }, 120);
   }
 
+  function clearLiveInput(reason) {
+    heldKeys.clear();
+    heldControls.clear();
+    pointerDrag = null;
+    log('input', 'all-input-reset', { reason: reason });
+  }
+
+  function setPaused(paused, source) {
+    if (gameStatus === 'success') return;
+    gameStatus = paused ? 'paused' : 'playing';
+    hintVisible = false;
+    clearLiveInput(paused ? 'pause-open' : 'pause-resume');
+    log('state', paused ? 'playing-to-paused' : 'paused-to-playing', { source: source });
+    tone(paused ? 260 : 420, .05);
+  }
+
+  function returnToMainlineSelection(source) {
+    clearLiveInput('pause-return-mainline');
+    log('state', 'pause-return-mainline-selection', { source: source, target: '../web_preview/index.html?mainline=v167&screen=levelSelect' });
+    window.location.href = '../web_preview/index.html?mainline=v167&screen=levelSelect';
+  }
+
   let audioContext = null;
   function tone(frequency, duration) {
     try {
@@ -195,6 +220,11 @@
       else if (inside(point, HIT.replay)) enterLevel(levelIndex, 'success-replay');
       return;
     }
+    if (gameStatus === 'paused') {
+      if (inside(point, HIT.pauseBack)) returnToMainlineSelection('pause-back-button');
+      else if (inside(point, HIT.pauseResume) || inside(point, HIT.pause)) setPaused(false, 'pause-resume-button');
+      return;
+    }
     if (inside(point, HIT.hint)) {
       hintVisible = !hintVisible;
       log('state', 'hint-toggle', { visible: hintVisible });
@@ -203,6 +233,10 @@
     }
     if (inside(point, HIT.reset)) {
       restart('button');
+      return;
+    }
+    if (inside(point, HIT.pause)) {
+      setPaused(true, 'top-pause-button');
       return;
     }
     const control = controlForPoint(point);
@@ -276,8 +310,13 @@
 
   window.addEventListener('keydown', function (event) {
     const code = event.code || '';
-    if (['KeyA', 'KeyD', 'KeyW', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'Space', 'KeyR'].includes(code)) event.preventDefault();
+    if (['KeyA', 'KeyD', 'KeyW', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'Space', 'KeyR', 'KeyP', 'Escape'].includes(code)) event.preventDefault();
     if (event.repeat) return;
+    if (code === 'KeyP' || code === 'Escape') {
+      if (gameStatus === 'playing' || gameStatus === 'paused') setPaused(gameStatus !== 'paused', 'keyboard:' + code);
+      return;
+    }
+    if (gameStatus === 'paused') return;
     heldKeys.add(code);
     log('input', 'key-down', { code: code });
     if (code === 'Space' || code === 'KeyW' || code === 'ArrowUp') tryJump('keyboard:' + code);
@@ -573,6 +612,11 @@
     ctx.lineTo(rx - 23, ry + 7);
     ctx.closePath(); ctx.fill();
     ctx.restore();
+    roundedRect(HIT.pause.x, HIT.pause.y, HIT.pause.w, HIT.pause.h, 18, '#fff0bd', '#17343a', 6);
+    const px = HIT.pause.x + HIT.pause.w / 2;
+    const py = HIT.pause.y + HIT.pause.h / 2;
+    roundedRect(px - 19, py - 28, 13, 56, 5, '#17343a', null, 0);
+    roundedRect(px + 6, py - 28, 13, 56, 5, '#17343a', null, 0);
 
     ctx.fillStyle = '#17343a'; ctx.font = '800 58px "PingFang SC", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
     if (level.mechanic === 'word_bridge') {
@@ -616,6 +660,20 @@
     ctx.fillStyle = '#fff0bd'; ctx.fillText(levelIndex === LEVELS.length - 1 ? '回到第8关' : '下一关', HIT.next.x + HIT.next.w / 2, HIT.next.y + HIT.next.h / 2);
   }
 
+  function drawPause() {
+    if (gameStatus !== 'paused') return;
+    ctx.fillStyle = 'rgba(25,23,36,.62)'; ctx.fillRect(0, 0, W, H);
+    roundedRect(475, 265, 970, 500, 36, '#fff0bd', '#17343a', 9);
+    ctx.fillStyle = '#17343a'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = '900 70px "PingFang SC", sans-serif'; ctx.fillText('已暂停', W / 2, 395);
+    ctx.font = '600 30px "PingFang SC", sans-serif'; ctx.fillText('关卡状态会保留', W / 2, 475);
+    roundedRect(HIT.pauseBack.x, HIT.pauseBack.y, HIT.pauseBack.w, HIT.pauseBack.h, 22, '#fff0bd', '#17343a', 6);
+    roundedRect(HIT.pauseResume.x, HIT.pauseResume.y, HIT.pauseResume.w, HIT.pauseResume.h, 22, '#e7c66d', '#17343a', 6);
+    ctx.fillStyle = '#17343a'; ctx.font = '800 30px "PingFang SC", sans-serif';
+    ctx.fillText('回到主线选关', HIT.pauseBack.x + HIT.pauseBack.w / 2, HIT.pauseBack.y + HIT.pauseBack.h / 2);
+    ctx.fillText('返回游戏', HIT.pauseResume.x + HIT.pauseResume.w / 2, HIT.pauseResume.y + HIT.pauseResume.h / 2);
+  }
+
   function render() {
     drawBackdrop();
     if (level.mechanic === 'stillness') {
@@ -634,6 +692,7 @@
     drawControls();
     drawHint();
     drawSuccess();
+    drawPause();
   }
 
   function tick(now) {
@@ -652,7 +711,7 @@
 
   document.getElementById('download-logs').addEventListener('click', function () {
     log('runtime', 'log-export', { entries: logger.entries.length });
-    logger.download('smart-egg-brainstorm-v6-level-' + level.id + '.json');
+    logger.download('smart-egg-brainstorm-v7-level-' + level.id + '.json');
   });
   window.addEventListener('error', function (event) {
     log('runtime', 'uncaught-error', { message: event.message, file: event.filename, line: event.lineno }, 'error');

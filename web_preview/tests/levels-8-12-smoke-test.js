@@ -10,8 +10,8 @@ const gameSource = fs.readFileSync(path.join(root, 'web_preview/game.js'), 'utf8
 const indexSource = fs.readFileSync(path.join(root, 'web_preview/index.html'), 'utf8');
 const debugGuide = fs.readFileSync(path.join(root, 'web_preview/README.md'), 'utf8');
 
-assert.match(gameSource, /const GAME_CODE_VERSION = 166/);
-assert.match(indexSource, /game\.js\?v=166/);
+assert.match(gameSource, /const GAME_CODE_VERSION = 167/);
+assert.match(indexSource, /game\.js\?v=167/);
 assert.match(gameSource, /const TOTAL_LEVELS = 12/);
 assert.match(gameSource, /_updateNewLevelMechanics\(dt\)/);
 assert.match(gameSource, /persistent-crate-land/);
@@ -19,6 +19,10 @@ assert.match(gameSource, /staticLandingCandidates\.reduce/);
 assert.match(gameSource, /_shadowTipX\+34,842/);
 assert.match(gameSource, /_shadowSunMoved && Math\.abs\(_shadowTipX-cfg\.x\)<78/);
 assert.match(gameSource, /shadow-drag-armed/);
+assert.match(gameSource, /requestedScreen === 'levelSelect'/);
+assert.match(gameSource, /'startup-route'/);
+assert.match(gameSource, /_sceneGestureBlockedByUI\(p\)/);
+assert.match(gameSource, /scene-gesture-bypassed-ui/);
 assert.ok(gameSource.includes("'日影无声'") && gameSource.includes("'远方未远'"));
 assert.match(gameSource, /window\._setLogModule/);
 assert.match(gameSource, /\['physics',\s*location\.search\.includes\('verbose=1'\)\]/);

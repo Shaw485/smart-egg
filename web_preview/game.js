@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 166;   // 跟 index.html 的 ?v=166 保持一致
+    const GAME_CODE_VERSION = 167;   // 跟 index.html 的 ?v=167 保持一致
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
         const last = parseInt(localStorage.getItem(LAST_KNOWN_KEY) || '0', 10);
@@ -123,6 +123,11 @@
         return result;
     }
     function _hasMechanic(name) { return _mechanicsOf(levelData).includes(name); }
+    function _sceneGestureBlockedByUI(p) {
+        const overlayVisible = helpVisible || showSuccess || showDead;
+        const topButton = [uiBTN.help, uiBTN.restart, uiBTN.pause].some(rect => inRect(p, rect));
+        return overlayVisible || topButton;
+    }
     function _resetMainlineMechanicState() {
         _sceneDrag = null;
         _shadowSunX = Number(levelData && levelData.sun && levelData.sun.x) || 100;
@@ -146,6 +151,18 @@
     }
     function _beginSceneGesture(p, pointerId) {
         if (gameState !== 'playing' || !levelData) return false;
+        // 新增的场景拖拽不能抢走旧 UI：提示、重来、暂停和弹层永远先交给 handleDown。
+        if (_sceneGestureBlockedByUI(p)) {
+            logStep('mechanic', 'scene-gesture-bypassed-ui', {
+                pointerId,
+                x: Math.round(p.x),
+                y: Math.round(p.y),
+                helpVisible: !!helpVisible,
+                showSuccess: !!showSuccess,
+                showDead: !!showDead
+            });
+            return false;
+        }
         const world = {x:p.x+_cameraX,y:p.y+_cameraY};
         if (_hasMechanic('shadow_switch')) {
             const dx = world.x - _shadowSunX, dy = world.y - 220;
@@ -4354,6 +4371,14 @@
         await probeAvailableLevels();
         // 预加载第 0 关数据（菜单页背景用不到，只是启动热身）
         await loadLevelData();
+        const requestedScreen = new URLSearchParams(location.search).get('screen');
+        if (requestedScreen === 'levelSelect') {
+            gameState = 'levelSelect';
+            logStep('state', 'startup-route', { requested: requestedScreen, resolved: gameState });
+        } else if (requestedScreen === 'menu') {
+            gameState = 'menu';
+            logStep('state', 'startup-route', { requested: requestedScreen, resolved: gameState });
+        }
         if (new URLSearchParams(location.search).get('inputtest') === '1') {
             setTimeout(() => {
                 _runInputRegressionTests().catch(error => {
