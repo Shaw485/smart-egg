@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const VERSION = 7;
+  const VERSION = 8;
   const W = 1920;
   const H = 1080;
   const GROUND_Y = 790;
@@ -12,11 +12,11 @@
   ['runtime', 'state', 'input', 'mechanic', 'render'].forEach(function (name) { logger.setModule(name, true); });
 
   const LEVELS = [
-    { id: 8, title: '日影无声', mechanic: 'shadow', hint: '真正先到门口的，也许不是你。' },
-    { id: 9, title: '等风来', mechanic: 'stillness', hint: '有时越着急，远方就越远。' },
-    { id: 10, title: '纸上有路', mechanic: 'word_bridge', hint: '有些话，不只是说说而已。' },
-    { id: 11, title: '痕迹未散', mechanic: 'persistent_reset', hint: '每次点击重来，箱子都会留下。多重来几次，把它们变成楼梯。' },
-    { id: 12, title: '远方未远', mechanic: 'drag_world', hint: '远方不一定需要一步步抵达。' }
+    { id: 8, title: '日影无声', mechanic: 'shadow', hint: '拖动天空中的太阳，让人物的影子压住地面机关；机关亮起后，走进右侧门。' },
+    { id: 9, title: '等风来', mechanic: 'stillness', hint: '先向右走一段，然后松开所有方向和跳跃按键，原地不动约 2 秒；门会自己靠近，继续不动直到通关。' },
+    { id: 10, title: '纸上有路', mechanic: 'word_bridge', hint: '按住屏幕上方的“路”字，把它拖到两块地面之间并松手；它变成桥后，走到右侧门。' },
+    { id: 11, title: '痕迹未散', mechanic: 'persistent_reset', hint: '连续点击顶部重来按钮两次，让三只箱子依次留下形成楼梯；踩着箱子跳到右上平台并进入门。' },
+    { id: 12, title: '远方未远', mechanic: 'drag_world', hint: '按住场景空白处向左拖动整张地图，把远处的门拖到人物面前；松手后走进门。' }
   ];
 
   let levelIndex = 0;
@@ -156,8 +156,8 @@
 
   function returnToMainlineSelection(source) {
     clearLiveInput('pause-return-mainline');
-    log('state', 'pause-return-mainline-selection', { source: source, target: '../web_preview/index.html?mainline=v167&screen=levelSelect' });
-    window.location.href = '../web_preview/index.html?mainline=v167&screen=levelSelect';
+    log('state', 'pause-return-mainline-selection', { source: source, target: '../web_preview/index.html?mainline=v168&screen=levelSelect' });
+    window.location.href = '../web_preview/index.html?mainline=v168&screen=levelSelect';
   }
 
   let audioContext = null;
@@ -711,7 +711,7 @@
 
   document.getElementById('download-logs').addEventListener('click', function () {
     log('runtime', 'log-export', { entries: logger.entries.length });
-    logger.download('smart-egg-brainstorm-v7-level-' + level.id + '.json');
+    logger.download('smart-egg-brainstorm-v8-level-' + level.id + '.json');
   });
   window.addEventListener('error', function (event) {
     log('runtime', 'uncaught-error', { message: event.message, file: event.filename, line: event.lineno }, 'error');

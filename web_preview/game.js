@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 167;   // 跟 index.html 的 ?v=167 保持一致
+    const GAME_CODE_VERSION = 168;   // 跟 index.html 的 ?v=168 保持一致
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
         const last = parseInt(localStorage.getItem(LAST_KNOWN_KEY) || '0', 10);
@@ -108,7 +108,7 @@
     // 第 8–12 关独立机制状态：每关可单独日志和复位，不污染其他关卡。
     let _sceneDrag = null;
     let _shadowSunX = 100, _shadowSunMoved = false, _shadowTipX = 0, _shadowHold = 0, _shadowUnlocked = false;
-    let _stillTime = 0, _stillApproachLogged = false;
+    let _stillTime = 0, _stillApproachLogged = false, _stillDoorReadyLogged = false;
     let _wordPlaced = false, _wordDragPos = {x:0,y:0};
     let _persistentCrateCount = 1;
     let _persistentLevelActive = false;
@@ -137,6 +137,7 @@
         _shadowUnlocked = false;
         _stillTime = 0;
         _stillApproachLogged = false;
+        _stillDoorReadyLogged = false;
         _wordPlaced = false;
         _wordDragPos = {x:0,y:0};
         _dragWorldOffset = 0;
@@ -261,8 +262,19 @@
                 _stillTime+=dt;
                 const delay=Number(levelData.idle_delay)||2.2;
                 if(_stillTime>delay){
-                    if(!_stillApproachLogged){_stillApproachLogged=true;logStep('mechanic','stillness-approach-start',{delay,playerX:Math.round(player.x),doorX:Math.round(door.x)});}
-                    door.x+=(player.x+105-door.x)*Math.min(1,dt*1.35);
+                    const approachOffset = Number(levelData.approach_offset) || 55;
+                    const targetX = player.x + approachOffset;
+                    if(!_stillApproachLogged){_stillApproachLogged=true;logStep('mechanic','stillness-approach-start',{delay,approachOffset,targetX:Math.round(targetX),playerX:Math.round(player.x),doorX:Math.round(door.x)});}
+                    door.x+=(targetX-door.x)*Math.min(1,dt*1.35);
+                    const overlap = rectOverlapArea(
+                        player.x-HALF_W,player.y-HALF_H,HALF_W*2,HALF_H*2,
+                        door.x-door.w/2,door.y-door.h/2,door.w,door.h
+                    );
+                    const threshold = HALF_W*2*HALF_H*2*.5;
+                    if(!_stillDoorReadyLogged && overlap>=threshold){
+                        _stillDoorReadyLogged=true;
+                        logStep('mechanic','stillness-door-overlap-ready',{overlap:Math.round(overlap),threshold,approachOffset,playerX:Math.round(player.x),doorX:Math.round(door.x)});
+                    }
                 }
             }
         }
@@ -3730,6 +3742,13 @@
         }
     }
     function loadLevelAndStart() {
+        const helpWasVisible = helpVisible;
+        helpVisible = false;
+        logStep('state', 'help-default-closed', {
+            levelIndex: currentLevelIndex,
+            previousVisible: helpWasVisible,
+            reason: 'level-load'
+        });
         showSuccess = false; successTimer = SUCCESS_TOTAL; doorOpenT = 0; showDead = false;
         _validKnockCount = 0;
         _heldMovingTargets.clear();_mouseMovingTarget=null;_cameraX=0;_cameraY=0;

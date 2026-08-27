@@ -32,6 +32,9 @@ assert.match(game, /_creatorSelected/, '编辑器元素选择\/移动功能必�
 assert.match(game, /menu-export-log-click/, '日志导出功能必须保留');
 assert.match(game, /_sceneGestureBlockedByUI\(p\)/, '新增场景拖拽不能吞掉旧顶部按钮');
 assert.match(game, /scene-gesture-bypassed-ui/, '场景手势绕过 UI 时必须有可诊断日志');
+assert.match(game, /function loadLevelAndStart\(\) \{\s*const helpWasVisible = helpVisible;\s*helpVisible = false;/s,
+  '每次进入、重来或切换关卡时提示必须默认关闭');
+assert.match(game, /help-default-closed/, '提示自动关闭必须留下状态日志');
 assert.match(game, /KeyA/);
 assert.match(game, /KeyD/);
 assert.match(game, /Space/);
