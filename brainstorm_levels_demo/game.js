@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const VERSION = 4;
+  const VERSION = 5;
   const W = 1920;
   const H = 1080;
   const GROUND_Y = 790;
@@ -549,16 +549,20 @@
     ctx.beginPath(); ctx.arc(qx, qy + 29, 5, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
     roundedRect(HIT.reset.x, HIT.reset.y, HIT.reset.w, HIT.reset.h, 18, '#fff0bd', '#17343a', 6);
-    // 纯线条重来图标，避免 ↻ 在部分内置浏览器字体中显示为空白。
+    // 明确的手绘回转箭头：圆弧在左上留口，并用独立的大箭头指向左侧，缩小后仍可辨认。
     const rx = HIT.reset.x + HIT.reset.w / 2;
     const ry = HIT.reset.y + HIT.reset.h / 2;
     ctx.save();
     ctx.strokeStyle = '#17343a'; ctx.fillStyle = '#17343a'; ctx.lineWidth = 7; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    ctx.beginPath(); ctx.arc(rx, ry + 2, 24, -.45, Math.PI * 1.62, false); ctx.stroke();
+    const arcR = 25;
     ctx.beginPath();
-    ctx.moveTo(rx - 26, ry - 5);
-    ctx.lineTo(rx - 10, ry - 4);
-    ctx.lineTo(rx - 20, ry + 10);
+    ctx.arc(rx + 2, ry + 3, arcR, -Math.PI * .35, Math.PI * 1.25, false);
+    ctx.stroke();
+    // 固定几何比切线计算更稳定，箭头尖不会与圆弧融成字母 C。
+    ctx.beginPath();
+    ctx.moveTo(rx - 16, ry - 15);
+    ctx.lineTo(rx - 37, ry - 8);
+    ctx.lineTo(rx - 23, ry + 7);
     ctx.closePath(); ctx.fill();
     ctx.restore();
 
@@ -640,7 +644,7 @@
 
   document.getElementById('download-logs').addEventListener('click', function () {
     log('runtime', 'log-export', { entries: logger.entries.length });
-    logger.download('smart-egg-brainstorm-v4-level-' + level.id + '.json');
+    logger.download('smart-egg-brainstorm-v5-level-' + level.id + '.json');
   });
   window.addEventListener('error', function (event) {
     log('runtime', 'uncaught-error', { message: event.message, file: event.filename, line: event.lineno }, 'error');
