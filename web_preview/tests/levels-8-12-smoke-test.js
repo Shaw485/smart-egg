@@ -10,13 +10,15 @@ const gameSource = fs.readFileSync(path.join(root, 'web_preview/game.js'), 'utf8
 const indexSource = fs.readFileSync(path.join(root, 'web_preview/index.html'), 'utf8');
 const debugGuide = fs.readFileSync(path.join(root, 'web_preview/README.md'), 'utf8');
 
-assert.match(gameSource, /const GAME_CODE_VERSION = 165/);
-assert.match(indexSource, /game\.js\?v=165/);
+assert.match(gameSource, /const GAME_CODE_VERSION = 166/);
+assert.match(indexSource, /game\.js\?v=166/);
 assert.match(gameSource, /const TOTAL_LEVELS = 12/);
 assert.match(gameSource, /_updateNewLevelMechanics\(dt\)/);
 assert.match(gameSource, /persistent-crate-land/);
 assert.match(gameSource, /staticLandingCandidates\.reduce/);
 assert.match(gameSource, /_shadowTipX\+34,842/);
+assert.match(gameSource, /_shadowSunMoved && Math\.abs\(_shadowTipX-cfg\.x\)<78/);
+assert.match(gameSource, /shadow-drag-armed/);
 assert.ok(gameSource.includes("'日影无声'") && gameSource.includes("'远方未远'"));
 assert.match(gameSource, /window\._setLogModule/);
 assert.match(gameSource, /\['physics',\s*location\.search\.includes\('verbose=1'\)\]/);
@@ -35,6 +37,9 @@ for (let index = 7; index <= 11; index += 1) {
 }
 
 assert.strictEqual(levels[1].infinite_horizontal, true, '第9关必须是无限横向地图');
+assert.strictEqual(levels[0].sun.x, 100, '第8关太阳必须从左侧开始');
+const initialShadowTip = levels[0].spawn.x + (levels[0].spawn.x - levels[0].sun.x) * 1.75;
+assert.ok(Math.abs(initialShadowTip - levels[0].shadow_switch.x) >= 78, '第8关初始影子不能压住机关');
 assert.ok(levels[1].world_size.w >= 1000000, '第9关逻辑宽度应足够大');
 assert.match(levels[3].description.hint_l1, /重来.*箱子/);
 assert.strictEqual(levels[3].crates.length, 3);
@@ -55,4 +60,4 @@ for (let index = 7; index <= 11; index += 1) {
   );
 }
 
-console.log('主线第8–12关冒烟测试通过：12关入口、无限第9关、第11关稳定箱子与第12关文案删除均已验证。');
+console.log('主线第8–12关冒烟测试通过：第8关强制拖动太阳、无限第9关、第11关稳定箱子与第12关文案删除均已验证。');

@@ -12,7 +12,7 @@
   },
   "world_size": {"w": 1920, "h": 1080},
   "spawn": {"x": 420, "y": 810},
-  "sun": {"x": 880, "y": 220, "min_x": 90, "max_x": 1510},
+  "sun": {"x": 100, "y": 220, "min_x": 90, "max_x": 1510},
   "shadow_switch": {"x": 820, "y": 858, "w": 116, "h": 24, "hold_seconds": 0.65},
   "platforms": [{"x": 960, "y": 1090, "w": 1920, "h": 440, "kind": "ground"}],
   "doors": [

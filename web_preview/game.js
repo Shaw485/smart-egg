@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 165;   // 跟 index.html 的 ?v=165 保持一致
+    const GAME_CODE_VERSION = 166;   // 跟 index.html 的 ?v=166 保持一致
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
         const last = parseInt(localStorage.getItem(LAST_KNOWN_KEY) || '0', 10);
@@ -107,7 +107,7 @@
     let _creatorImportPreview = null;
     // 第 8–12 关独立机制状态：每关可单独日志和复位，不污染其他关卡。
     let _sceneDrag = null;
-    let _shadowSunX = 880, _shadowTipX = 0, _shadowHold = 0, _shadowUnlocked = false;
+    let _shadowSunX = 100, _shadowSunMoved = false, _shadowTipX = 0, _shadowHold = 0, _shadowUnlocked = false;
     let _stillTime = 0, _stillApproachLogged = false;
     let _wordPlaced = false, _wordDragPos = {x:0,y:0};
     let _persistentCrateCount = 1;
@@ -125,7 +125,8 @@
     function _hasMechanic(name) { return _mechanicsOf(levelData).includes(name); }
     function _resetMainlineMechanicState() {
         _sceneDrag = null;
-        _shadowSunX = Number(levelData && levelData.sun && levelData.sun.x) || 880;
+        _shadowSunX = Number(levelData && levelData.sun && levelData.sun.x) || 100;
+        _shadowSunMoved = false;
         _shadowTipX = 0;
         _shadowHold = 0;
         _shadowUnlocked = false;
@@ -149,7 +150,7 @@
         if (_hasMechanic('shadow_switch')) {
             const dx = world.x - _shadowSunX, dy = world.y - 220;
             if (dx*dx + dy*dy <= 95*95) {
-                _sceneDrag = {type:'sun',pointerId,lastPoint:p};
+                _sceneDrag = {type:'sun',pointerId,lastPoint:p,startSunX:_shadowSunX};
                 logStep('mechanic','shadow-drag-start',{pointerId,sunX:Math.round(_shadowSunX)});
                 return true;
             }
@@ -172,7 +173,12 @@
         _sceneDrag.lastPoint = p;
         const world = {x:p.x+_cameraX,y:p.y+_cameraY};
         if (_sceneDrag.type === 'sun') {
-            _shadowSunX = Math.max(90,Math.min(1510,world.x));
+            const nextSunX = Math.max(90,Math.min(1510,world.x));
+            if (!_shadowSunMoved && Math.abs(nextSunX-_sceneDrag.startSunX)>=12) {
+                _shadowSunMoved = true;
+                logStep('mechanic','shadow-drag-armed',{pointerId,startSunX:Math.round(_sceneDrag.startSunX),sunX:Math.round(nextSunX),minimumDelta:12});
+            }
+            _shadowSunX = nextSunX;
         } else if (_sceneDrag.type === 'word') {
             _wordDragPos = world;
         } else if (_sceneDrag.type === 'world') {
@@ -202,7 +208,7 @@
             }
             logStep('mechanic','word-drop',{accepted,pointerId,x:Math.round(p.x),y:Math.round(p.y),reason});
         } else if (drag.type === 'sun') {
-            logStep('mechanic','shadow-drag-end',{pointerId,sunX:Math.round(_shadowSunX),shadowTipX:Math.round(_shadowTipX),reason});
+            logStep('mechanic','shadow-drag-end',{pointerId,sunX:Math.round(_shadowSunX),shadowTipX:Math.round(_shadowTipX),moved:_shadowSunMoved,reason});
         } else if (drag.type === 'world') {
             const door = (levelData.doors||[]).find(d=>d.is_goal);
             logStep('mechanic','world-drag-end',{pointerId,offset:Math.round(_dragWorldOffset),doorX:door&&Math.round(door.x),reason});
@@ -213,14 +219,15 @@
         if (_hasMechanic('shadow_switch')) {
             _shadowTipX = Math.max(30,Math.min(W-30,player.x+(player.x-_shadowSunX)*1.75));
             const cfg = levelData.shadow_switch || {x:820,hold_seconds:.65};
-            const touching = Math.abs(_shadowTipX-cfg.x)<78;
+            // 人物走动也会改变影尖位置；未真实拖动太阳时禁止机关积累计时。
+            const touching = _shadowSunMoved && Math.abs(_shadowTipX-cfg.x)<78;
             _shadowHold = touching ? _shadowHold+dt : Math.max(0,_shadowHold-dt*2);
             if (!_shadowUnlocked && _shadowHold >= (cfg.hold_seconds||.65)) {
                 _shadowUnlocked = true;
                 const door=(levelData.doors||[]).find(d=>d.is_goal);
                 if(door)unlockedDoors.add(door.id);
                 playSfx('unlock');
-                logStep('mechanic','shadow-switch-unlocked',{sunX:Math.round(_shadowSunX),shadowTipX:Math.round(_shadowTipX),hold:Number(_shadowHold.toFixed(2))});
+                logStep('mechanic','shadow-switch-unlocked',{sunX:Math.round(_shadowSunX),shadowTipX:Math.round(_shadowTipX),sunMoved:_shadowSunMoved,hold:Number(_shadowHold.toFixed(2))});
             }
         }
         if (_hasMechanic('still_door')) {
@@ -325,7 +332,7 @@
       getLevelData: () => levelData,
       getMechanicState: () => ({
         mechanics: _mechanicsOf(levelData),
-        shadow: { sunX:_shadowSunX, tipX:_shadowTipX, hold:_shadowHold, unlocked:_shadowUnlocked },
+        shadow: { sunX:_shadowSunX, moved:_shadowSunMoved, tipX:_shadowTipX, hold:_shadowHold, unlocked:_shadowUnlocked },
         stillness: { seconds:_stillTime, approachStarted:_stillApproachLogged },
         wordBridge: { placed:_wordPlaced, drag:_sceneDrag&&_sceneDrag.type },
         persistentReset: { crates:_persistentCrateCount, active:_persistentLevelActive },

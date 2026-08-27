@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const VERSION = 5;
+  const VERSION = 6;
   const W = 1920;
   const H = 1080;
   const GROUND_Y = 790;
@@ -34,7 +34,8 @@
 
   const player = { x: 350, y: GROUND_Y - 55, w: 70, h: 110, vx: 0, vy: 0, onGround: true, facing: 1 };
   const state = {
-    sunX: 880,
+    sunX: 100,
+    sunMoved: false,
     shadowTipX: 0,
     shadowHold: 0,
     unlocked: false,
@@ -78,7 +79,7 @@
   function clamp(value, min, max) { return Math.max(min, Math.min(max, value)); }
 
   function resetPlayer() {
-    player.x = level.mechanic === 'drag_world' ? 420 : 350;
+    player.x = (level.mechanic === 'drag_world' || level.mechanic === 'shadow') ? 420 : 350;
     player.y = GROUND_Y - player.h / 2;
     player.vx = 0;
     player.vy = 0;
@@ -94,7 +95,8 @@
     successAt = 0;
     levelStartedAt = performance.now();
     pointerDrag = null;
-    state.sunX = 880;
+    state.sunX = 100;
+    state.sunMoved = false;
     state.shadowTipX = 0;
     state.shadowHold = 0;
     state.unlocked = false;
@@ -214,7 +216,7 @@
       const dx = point.x - state.sunX;
       const dy = point.y - 205;
       if (dx * dx + dy * dy < 95 * 95) {
-        pointerDrag = { type: 'sun', id: event.pointerId };
+        pointerDrag = { type: 'sun', id: event.pointerId, startSunX: state.sunX };
         log('mechanic', 'sun-drag-start', { x: Math.round(state.sunX) });
         return;
       }
@@ -235,7 +237,12 @@
     if (!pointerDrag || pointerDrag.id !== event.pointerId) return;
     const point = pointFromEvent(event);
     if (pointerDrag.type === 'sun') {
-      state.sunX = clamp(point.x, 90, 1510);
+      const nextSunX = clamp(point.x, 90, 1510);
+      if (!state.sunMoved && Math.abs(nextSunX - pointerDrag.startSunX) >= 12) {
+        state.sunMoved = true;
+        log('mechanic', 'sun-drag-armed', { start_x: Math.round(pointerDrag.startSunX), current_x: Math.round(nextSunX), minimum_delta: 12 });
+      }
+      state.sunX = nextSunX;
     } else if (pointerDrag.type === 'word') {
       state.wordPos = point;
     } else if (pointerDrag.type === 'world') {
@@ -260,7 +267,7 @@
       }
       log('mechanic', 'word-drop', { accepted: accepted, x: Math.round(point.x), y: Math.round(point.y) });
     } else if (pointerDrag.type === 'sun') {
-      log('mechanic', 'sun-drag-end', { x: Math.round(state.sunX), shadow_tip_x: Math.round(state.shadowTipX) });
+      log('mechanic', 'sun-drag-end', { x: Math.round(state.sunX), shadow_tip_x: Math.round(state.shadowTipX), moved: state.sunMoved });
     } else if (pointerDrag.type === 'world') {
       log('mechanic', 'world-drag-end', { map_offset: Math.round(state.mapOffset), door_screen_x: Math.round(3500 + state.mapOffset) });
     }
@@ -358,11 +365,12 @@
     if (gameStatus !== 'playing') return;
     if (level.mechanic === 'shadow') {
       state.shadowTipX = clamp(player.x + (player.x - state.sunX) * 1.75, 30, W - 30);
-      const touching = Math.abs(state.shadowTipX - 820) < 78;
+      // 走路也会改变影子；必须确认玩家真实拖动过太阳，才能开始机关计时。
+      const touching = state.sunMoved && Math.abs(state.shadowTipX - 820) < 78;
       state.shadowHold = touching ? state.shadowHold + dt : Math.max(0, state.shadowHold - dt * 2);
       if (!state.unlocked && state.shadowHold > .65) {
         state.unlocked = true;
-        log('mechanic', 'shadow-switch-unlocked', { sun_x: Math.round(state.sunX), shadow_tip_x: Math.round(state.shadowTipX) });
+        log('mechanic', 'shadow-switch-unlocked', { sun_x: Math.round(state.sunX), shadow_tip_x: Math.round(state.shadowTipX), sun_moved: state.sunMoved });
         tone(740, .13);
       }
       if (state.unlocked && Math.abs(player.x - 1540) < 85) complete('shadow-door');
@@ -479,7 +487,7 @@
 
   function drawMechanic() {
     if (level.mechanic === 'shadow') {
-      const switchOn = state.unlocked || Math.abs(state.shadowTipX - 820) < 78;
+      const switchOn = state.unlocked || (state.sunMoved && Math.abs(state.shadowTipX - 820) < 78);
       const sunGlow = ctx.createRadialGradient(state.sunX, 205, 10, state.sunX, 205, 105);
       sunGlow.addColorStop(0, '#fff0bd'); sunGlow.addColorStop(1, 'rgba(255,240,189,0)');
       ctx.fillStyle = sunGlow; ctx.beginPath(); ctx.arc(state.sunX, 205, 110, 0, Math.PI * 2); ctx.fill();
@@ -644,7 +652,7 @@
 
   document.getElementById('download-logs').addEventListener('click', function () {
     log('runtime', 'log-export', { entries: logger.entries.length });
-    logger.download('smart-egg-brainstorm-v5-level-' + level.id + '.json');
+    logger.download('smart-egg-brainstorm-v6-level-' + level.id + '.json');
   });
   window.addEventListener('error', function (event) {
     log('runtime', 'uncaught-error', { message: event.message, file: event.filename, line: event.lineno }, 'error');
