@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const VERSION = 3;
+  const VERSION = 4;
   const W = 1920;
   const H = 1080;
   const GROUND_Y = 790;
@@ -191,11 +191,6 @@
     if (gameStatus === 'success') {
       if (inside(point, HIT.next)) enterLevel(levelIndex + 1, 'success-next');
       else if (inside(point, HIT.replay)) enterLevel(levelIndex, 'success-replay');
-      return;
-    }
-    if (point.x > 1660 && point.y > 185 && point.y < 575) {
-      const slot = Math.floor((point.y - 185) / 76);
-      if (slot >= 0 && slot < LEVELS.length) enterLevel(slot, 'side-selector');
       return;
     }
     if (inside(point, HIT.hint)) {
@@ -541,11 +536,31 @@
     roundedRect(52, 38, 205, 96, 18, '#fff0bd', '#17343a', 6);
     ctx.fillStyle = '#17343a'; ctx.font = '800 42px "PingFang SC", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('第 ' + level.id + ' 关', 154, 86);
     roundedRect(HIT.hint.x, HIT.hint.y, HIT.hint.w, HIT.hint.h, 18, '#fff0bd', '#17343a', 6);
-    ctx.fillStyle = '#17343a';
-    ctx.font = '900 58px sans-serif'; ctx.fillText('?', HIT.hint.x + HIT.hint.w / 2, HIT.hint.y + HIT.hint.h / 2 + 2);
+    // 纯线条问号，不依赖系统字体是否包含对应符号。
+    const qx = HIT.hint.x + HIT.hint.w / 2;
+    const qy = HIT.hint.y + HIT.hint.h / 2;
+    ctx.save();
+    ctx.strokeStyle = '#17343a'; ctx.fillStyle = '#17343a'; ctx.lineWidth = 7; ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(qx - 16, qy - 17);
+    ctx.bezierCurveTo(qx - 12, qy - 35, qx + 20, qy - 34, qx + 20, qy - 12);
+    ctx.bezierCurveTo(qx + 20, qy + 1, qx + 1, qy + 2, qx, qy + 15);
+    ctx.stroke();
+    ctx.beginPath(); ctx.arc(qx, qy + 29, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
     roundedRect(HIT.reset.x, HIT.reset.y, HIT.reset.w, HIT.reset.h, 18, '#fff0bd', '#17343a', 6);
-    ctx.fillStyle = '#17343a';
-    ctx.font = '800 50px sans-serif'; ctx.fillText('↻', HIT.reset.x + HIT.reset.w / 2, HIT.reset.y + HIT.reset.h / 2 + 1);
+    // 纯线条重来图标，避免 ↻ 在部分内置浏览器字体中显示为空白。
+    const rx = HIT.reset.x + HIT.reset.w / 2;
+    const ry = HIT.reset.y + HIT.reset.h / 2;
+    ctx.save();
+    ctx.strokeStyle = '#17343a'; ctx.fillStyle = '#17343a'; ctx.lineWidth = 7; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath(); ctx.arc(rx, ry + 2, 24, -.45, Math.PI * 1.62, false); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(rx - 26, ry - 5);
+    ctx.lineTo(rx - 10, ry - 4);
+    ctx.lineTo(rx - 20, ry + 10);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
 
     ctx.fillStyle = '#17343a'; ctx.font = '800 58px "PingFang SC", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
     if (level.mechanic === 'word_bridge') {
@@ -557,11 +572,6 @@
       ctx.fillText(level.title, W / 2, 120);
     }
 
-    LEVELS.forEach(function (candidate, index) {
-      const y = 195 + index * 76;
-      roundedRect(1740, y, 92, 58, 14, index === levelIndex ? '#f3cf66' : 'rgba(255,240,189,.78)', '#17343a', 4);
-      ctx.fillStyle = '#17343a'; ctx.font = '800 25px sans-serif'; ctx.textBaseline = 'middle'; ctx.fillText(String(candidate.id), 1786, y + 29);
-    });
   }
 
   function drawControls() {
@@ -630,7 +640,7 @@
 
   document.getElementById('download-logs').addEventListener('click', function () {
     log('runtime', 'log-export', { entries: logger.entries.length });
-    logger.download('smart-egg-brainstorm-v3-level-' + level.id + '.json');
+    logger.download('smart-egg-brainstorm-v4-level-' + level.id + '.json');
   });
   window.addEventListener('error', function (event) {
     log('runtime', 'uncaught-error', { message: event.message, file: event.filename, line: event.lineno }, 'error');
