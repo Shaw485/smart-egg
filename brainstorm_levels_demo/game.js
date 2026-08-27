@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const VERSION = 2;
+  const VERSION = 3;
   const W = 1920;
   const H = 1080;
   const GROUND_Y = 790;
@@ -413,8 +413,11 @@
     gradient.addColorStop(1, '#d27d70');
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = 'rgba(255,240,189,.9)';
-    ctx.beginPath(); ctx.arc(1510, 175, 72, 0, Math.PI * 2); ctx.fill();
+    // 影子机关本身已有可拖动太阳；该关隐藏装饰太阳，避免画面出现两个太阳。
+    if (level.mechanic !== 'shadow') {
+      ctx.fillStyle = 'rgba(255,240,189,.9)';
+      ctx.beginPath(); ctx.arc(1510, 175, 72, 0, Math.PI * 2); ctx.fill();
+    }
     ctx.fillStyle = 'rgba(255,255,255,.62)';
     [[330,160,120],[690,225,80],[1250,120,110]].forEach(function (cloud) {
       roundedRect(cloud[0], cloud[1], cloud[2], 28, 20, 'rgba(255,255,255,.55)');
@@ -486,8 +489,20 @@
       sunGlow.addColorStop(0, '#fff0bd'); sunGlow.addColorStop(1, 'rgba(255,240,189,0)');
       ctx.fillStyle = sunGlow; ctx.beginPath(); ctx.arc(state.sunX, 205, 110, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = '#f3cf66'; ctx.strokeStyle = '#17343a'; ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(state.sunX, 205, 55, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = 'rgba(23,52,58,.38)';
-      ctx.beginPath(); ctx.moveTo(player.x - 24, GROUND_Y - 4); ctx.lineTo(player.x + 24, GROUND_Y - 4); ctx.lineTo(state.shadowTipX + 26, GROUND_Y + 8); ctx.lineTo(state.shadowTipX - 26, GROUND_Y + 8); ctx.closePath(); ctx.fill();
+      // 影子必须在缩放后的手机/电脑画面中仍清晰可见，不能和地面描边重合。
+      ctx.save();
+      ctx.fillStyle = 'rgba(23,52,58,.36)';
+      ctx.strokeStyle = 'rgba(23,52,58,.62)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(player.x - 24, GROUND_Y - 3);
+      ctx.lineTo(player.x + 24, GROUND_Y - 3);
+      ctx.lineTo(state.shadowTipX + 34, GROUND_Y - 28);
+      ctx.lineTo(state.shadowTipX - 34, GROUND_Y - 28);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
       roundedRect(765, GROUND_Y - 16, 110, 24, 9, switchOn ? '#f3cf66' : '#435654', '#17343a', 5);
       drawDoor(1540, GROUND_Y, state.unlocked);
     } else if (level.mechanic === 'stillness') {
@@ -526,8 +541,10 @@
     roundedRect(52, 38, 205, 96, 18, '#fff0bd', '#17343a', 6);
     ctx.fillStyle = '#17343a'; ctx.font = '800 42px "PingFang SC", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('第 ' + level.id + ' 关', 154, 86);
     roundedRect(HIT.hint.x, HIT.hint.y, HIT.hint.w, HIT.hint.h, 18, '#fff0bd', '#17343a', 6);
+    ctx.fillStyle = '#17343a';
     ctx.font = '900 58px sans-serif'; ctx.fillText('?', HIT.hint.x + HIT.hint.w / 2, HIT.hint.y + HIT.hint.h / 2 + 2);
     roundedRect(HIT.reset.x, HIT.reset.y, HIT.reset.w, HIT.reset.h, 18, '#fff0bd', '#17343a', 6);
+    ctx.fillStyle = '#17343a';
     ctx.font = '800 50px sans-serif'; ctx.fillText('↻', HIT.reset.x + HIT.reset.w / 2, HIT.reset.y + HIT.reset.h / 2 + 1);
 
     ctx.fillStyle = '#17343a'; ctx.font = '800 58px "PingFang SC", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
@@ -613,7 +630,7 @@
 
   document.getElementById('download-logs').addEventListener('click', function () {
     log('runtime', 'log-export', { entries: logger.entries.length });
-    logger.download('smart-egg-brainstorm-v2-level-' + level.id + '.json');
+    logger.download('smart-egg-brainstorm-v3-level-' + level.id + '.json');
   });
   window.addEventListener('error', function (event) {
     log('runtime', 'uncaught-error', { message: event.message, file: event.filename, line: event.lineno }, 'error');

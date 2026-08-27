@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 164;   // 跟 index.html 的 ?v=164 保持一致
+    const GAME_CODE_VERSION = 165;   // 跟 index.html 的 ?v=165 保持一致
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
         const last = parseInt(localStorage.getItem(LAST_KNOWN_KEY) || '0', 10);
@@ -3865,7 +3865,9 @@
             glow.addColorStop(0,'rgba(255,240,189,.95)');glow.addColorStop(1,'rgba(255,240,189,0)');
             ctx.fillStyle=glow;ctx.beginPath();ctx.arc(_shadowSunX,220,110,0,Math.PI*2);ctx.fill();
             ctx.fillStyle='#e7c767';ctx.strokeStyle='#17343a';ctx.lineWidth=6;ctx.beginPath();ctx.arc(_shadowSunX,220,54,0,Math.PI*2);ctx.fill();ctx.stroke();
-            ctx.fillStyle='rgba(23,52,58,.38)';ctx.beginPath();ctx.moveTo(player.x-25,866);ctx.lineTo(player.x+25,866);ctx.lineTo(_shadowTipX+25,879);ctx.lineTo(_shadowTipX-25,879);ctx.closePath();ctx.fill();
+            // 影子抬离地面描边形成清晰梯形，缩小显示时仍能看出方向和长度。
+            ctx.save();ctx.fillStyle='rgba(23,52,58,.36)';ctx.strokeStyle='rgba(23,52,58,.62)';ctx.lineWidth=3;
+            ctx.beginPath();ctx.moveTo(player.x-25,866);ctx.lineTo(player.x+25,866);ctx.lineTo(_shadowTipX+34,842);ctx.lineTo(_shadowTipX-34,842);ctx.closePath();ctx.fill();ctx.stroke();ctx.restore();
             ctx.fillStyle=_shadowUnlocked?'#e7c767':'#405653';ctx.strokeStyle='#17343a';ctx.lineWidth=5;_roundPath(cfg.x-58,846,116,24,8);ctx.fill();ctx.stroke();
         }
         if(_hasMechanic('still_door')&&_stillTime>.3){

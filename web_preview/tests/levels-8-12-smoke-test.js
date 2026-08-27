@@ -10,12 +10,13 @@ const gameSource = fs.readFileSync(path.join(root, 'web_preview/game.js'), 'utf8
 const indexSource = fs.readFileSync(path.join(root, 'web_preview/index.html'), 'utf8');
 const debugGuide = fs.readFileSync(path.join(root, 'web_preview/README.md'), 'utf8');
 
-assert.match(gameSource, /const GAME_CODE_VERSION = 164/);
-assert.match(indexSource, /game\.js\?v=164/);
+assert.match(gameSource, /const GAME_CODE_VERSION = 165/);
+assert.match(indexSource, /game\.js\?v=165/);
 assert.match(gameSource, /const TOTAL_LEVELS = 12/);
 assert.match(gameSource, /_updateNewLevelMechanics\(dt\)/);
 assert.match(gameSource, /persistent-crate-land/);
 assert.match(gameSource, /staticLandingCandidates\.reduce/);
+assert.match(gameSource, /_shadowTipX\+34,842/);
 assert.ok(gameSource.includes("'日影无声'") && gameSource.includes("'远方未远'"));
 assert.match(gameSource, /window\._setLogModule/);
 assert.match(gameSource, /\['physics',\s*location\.search\.includes\('verbose=1'\)\]/);
