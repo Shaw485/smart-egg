@@ -6,7 +6,8 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 170;   // 跟 index.html 的 ?v=170 保持一致
+    const GAME_CODE_VERSION = 171;   // 跟 index.html 的 ?v=171 保持一致
+    const GAME_TITLE = '怪奇之原';
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
         const last = parseInt(localStorage.getItem(LAST_KNOWN_KEY) || '0', 10);
@@ -505,6 +506,7 @@
     function _runtimeSnapshot() {
         return {
             codeVersion: GAME_CODE_VERSION,
+            branding: { title: GAME_TITLE },
             sessionId: LOG_SESSION_ID,
             sessionStartedAt: _logStartedAt,
             exportedAt: new Date().toISOString(),
@@ -2978,10 +2980,8 @@
         _wonkyRectPath(logX, logY, logW, logH, 20, 55139, 2); ctx.stroke(); ctx.restore();
         sketchBold('导出日志', logX + logW / 2, logY + logH / 2 + 5, 30);
         uiBTN.exportLog = { x: logX, y: logY, w: logW, h: logH };
-        // 主菜单保持简单风格
-        // 正式游戏名暂时保持主线现有名称；F4 只替换视觉与音乐。
-        sketchBold('大聪明', W / 2, H * 0.24, 100);
-        sketchBold('脑洞蛋', W / 2, H * 0.40, 120);
+        // 正式游戏名：单行居中，保留 F4 旷野视觉的留白。
+        sketchBold(GAME_TITLE, W / 2, H * 0.34, 120);
         const bw = W * 0.28, bh = 135, gap=70, bx = W/2-bw-gap/2, by = H * 0.58;
         // 开始按钮（不规则圆角方形白底黑描边）
         ctx.save();

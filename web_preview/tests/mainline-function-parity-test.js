@@ -6,6 +6,7 @@ const path = require('path');
 
 const root = path.resolve(__dirname, '../..');
 const game = fs.readFileSync(path.join(root, 'web_preview/game.js'), 'utf8');
+const index = fs.readFileSync(path.join(root, 'web_preview/index.html'), 'utf8');
 
 // UI 和关卡可以继续扩展，但旧主线的入口、模式和关键返回路径不得被裁掉。
 const requiredFunctions = [
@@ -22,6 +23,9 @@ for (const name of requiredFunctions) {
 }
 
 assert.match(game, /let gameState = 'menu'/, '启动入口必须保留首页');
+assert.match(game, /const GAME_TITLE = '怪奇之原'/, '首页正式标题必须保持为“怪奇之原”');
+assert.match(game, /sketchBold\(GAME_TITLE, W \/ 2, H \* 0\.34, 120\)/, '首页标题必须单行居中绘制');
+assert.match(index, /<title>怪奇之原 · F4 旷野版<\/title>/, '浏览器窗口标题必须与正式游戏名一致');
 assert.match(game, /gameState = 'levelSelect'/, '必须保留主线选关页');
 assert.match(game, /gameState='creatorList'/, '必须保留创造模式列表页');
 assert.match(game, /gameState='creatorEdit'/, '必须保留关卡编辑器页');
