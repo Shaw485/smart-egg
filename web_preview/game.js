@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 171;   // 跟 index.html 的 ?v=171 保持一致
+    const GAME_CODE_VERSION = 172;   // 跟 index.html 的 ?v=172 保持一致
     const GAME_TITLE = '怪奇之原';
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
@@ -436,7 +436,7 @@
         ['runtime',true],['state',true],['input',true],['mechanic',true],['level-load',true],
         ['door',true],['collide',true],['puzzle',true],['progress',true],['audio',true],
         ['creator',true],['export',true],['dead',true],['guard',true],['fatal',true],
-        ['snapshot',true],['debug',true],['level-select',true],
+        ['snapshot',true],['debug',true],['level-select',true],['render',true],
         ['physics',location.search.includes('verbose=1')]
     ]);
     // v4.9.7a 死亡/坏关卡前 10 帧 player 快照（环形buffer），排查"为什么掉下去/为什么没碰门"直接回溯状态
@@ -4046,6 +4046,20 @@
         // v4.9.6c 坏关卡保护：启动健康计数器（进入 playing 后 30 帧检查）
         _healthGuardFrames = 30;
         gameState = 'playing';
+        const dropTerrain = _fantasyGroundLayout(levelData);
+        logStep('render', 'drop-terrain-layout', {
+            style: 'high-cliff-v2',
+            levelIndex: idx,
+            groundCount: dropTerrain.grounds.length,
+            gapCount: dropTerrain.gaps.length,
+            gaps: dropTerrain.gaps.map(gap => ({
+                left: Math.round(gap.left),
+                right: Math.round(gap.right),
+                width: Math.round(gap.right - gap.left),
+                top: Math.round(gap.top)
+            })),
+            collisionGeometryChanged: false
+        });
         logStep('state', 'enter-playing', {
             levelIndex: idx,
             hasLevelData: !!levelData,
@@ -4125,16 +4139,101 @@
     let last = performance.now();
     let _prevState = 'menu';
     function _fantasyLine(points,color='#17343a',width=5){ctx.beginPath();points.forEach((p,i)=>i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));ctx.strokeStyle=color;ctx.lineWidth=width;ctx.lineCap='round';ctx.lineJoin='round';ctx.stroke();}
+
+    // 只负责断崖视觉，不参与任何碰撞计算。所有顶面、断口宽度仍以 levelData.platforms 为准。
+    function _fantasyGroundLayout(lv){
+        const source=(lv&&lv.platforms||[]).filter(p=>(p.kind||'ground')==='ground');
+        const grounds=source.map(p=>({
+            x:p.x-p.w/2,
+            y:p.y-p.h/2,
+            w:p.w,
+            h:p.h
+        })).sort((a,b)=>a.x-b.x);
+        if(lv&&lv.infinite_horizontal&&grounds.length){
+            return {grounds:[{x:_cameraX-200,y:grounds[0].y,w:W+400,h:grounds[0].h}],gaps:[]};
+        }
+        const gaps=[];
+        for(let i=0;i<grounds.length-1;i++){
+            const leftGround=grounds[i];
+            const rightGround=grounds[i+1];
+            const left=leftGround.x+leftGround.w;
+            const right=rightGround.x;
+            if(right-left>20){
+                gaps.push({
+                    left,
+                    right,
+                    top:Math.min(leftGround.y,rightGround.y),
+                    leftTop:leftGround.y,
+                    rightTop:rightGround.y,
+                    depth:Math.max(leftGround.h,rightGround.h,360)
+                });
+            }
+        }
+        return {grounds,gaps};
+    }
+    window.__debug.getDropTerrainLayout=()=>JSON.parse(JSON.stringify(_fantasyGroundLayout(levelData)));
+
+    function drawFantasyDropTerrain(){
+        const layout=_fantasyGroundLayout(levelData);
+        for(const gap of layout.gaps){
+            const bottom=Math.max(H+_cameraY+140,gap.top+gap.depth);
+            const shade=ctx.createLinearGradient(0,gap.top,0,bottom);
+            shade.addColorStop(0,'rgba(24,47,49,.62)');
+            shade.addColorStop(.28,'rgba(23,40,43,.86)');
+            shade.addColorStop(1,'rgba(18,26,32,.97)');
+            ctx.save();
+            ctx.fillStyle=shade;
+            ctx.beginPath();
+            ctx.moveTo(gap.left,gap.leftTop+5);
+            ctx.lineTo(gap.right,gap.rightTop+5);
+            // 深渊向断崖背后扩展，由后绘制的岩壁覆盖，避免侧壁折角漏出天空/谷底色。
+            ctx.lineTo(gap.right+18,gap.rightTop+38);
+            ctx.lineTo(gap.right+34,bottom);
+            ctx.lineTo(gap.left-34,bottom);
+            ctx.lineTo(gap.left-18,gap.leftTop+38);
+            ctx.closePath();
+            ctx.fill();
+            ctx.clip();
+            const mist=ctx.createLinearGradient(0,gap.top+70,0,bottom);
+            mist.addColorStop(0,'rgba(202,217,187,0)');
+            mist.addColorStop(1,'rgba(202,217,187,.2)');
+            ctx.fillStyle=mist;
+            ctx.fillRect(gap.left,gap.top,gap.right-gap.left,bottom-gap.top);
+            ctx.strokeStyle='rgba(192,199,164,.15)';
+            ctx.lineWidth=10;
+            ctx.beginPath();
+            ctx.moveTo(gap.left+35,gap.top+120);
+            ctx.bezierCurveTo((gap.left+gap.right)/2,gap.top+90,(gap.left+gap.right)/2,gap.top+230,gap.right-35,gap.top+190);
+            ctx.stroke();
+            ctx.restore();
+        }
+    }
+
     function drawFantasyPlatforms(){
+        const layout=_fantasyGroundLayout(levelData);
         for(let i=0;i<(levelData&&levelData.platforms||[]).length;i++){
             const p=levelData.platforms[i],kind=p.kind||'ground';let x=p.x-p.w/2,w=p.w,y=p.y-p.h/2,h=p.h;if(levelData.infinite_horizontal&&kind==='ground'){x=_cameraX-200;w=W+400;}
             if(kind==='ground'){
-                // 玩家活动层是高处悬崖：薄草顶、明亮岩沿、向下延伸的峭壁
-                const cliff=ctx.createLinearGradient(0,y,0,y+h);cliff.addColorStop(0,'#777b63');cliff.addColorStop(.25,'#655f54');cliff.addColorStop(1,'#3e4442');ctx.fillStyle=cliff;ctx.fillRect(x,y,w,h);ctx.fillStyle='#83975e';ctx.fillRect(x,y,w,24);ctx.fillStyle='#d7bb6e';ctx.fillRect(x,y,w,8);_fantasyLine([[x,y],[x+w,y]],'#17343a',6);
-                if(x>1)_fantasyLine([[x,y],[x,y+h]],'#17343a',6);if(x+w<W-1)_fantasyLine([[x+w,y],[x+w,y+h]],'#17343a',6);
+                // 顶边与碰撞严格齐平；断口侧壁从顶边下方才轻微折入，形成高处悬崖而非规则方洞。
+                const leftCliff=layout.gaps.some(g=>Math.abs(g.right-x)<1);
+                const rightCliff=layout.gaps.some(g=>Math.abs(g.left-(x+w))<1);
+                const groundPath=()=>{
+                    ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+w,y);
+                    if(rightCliff){ctx.lineTo(x+w,y+20);ctx.lineTo(x+w-8,y+58);ctx.lineTo(x+w+2,y+104);ctx.lineTo(x+w-12,y+166);ctx.lineTo(x+w-7,y+h);}
+                    else ctx.lineTo(x+w,y+h);
+                    if(leftCliff){ctx.lineTo(x+7,y+h);ctx.lineTo(x+12,y+166);ctx.lineTo(x-2,y+104);ctx.lineTo(x+8,y+58);ctx.lineTo(x,y+20);}
+                    else ctx.lineTo(x,y+h);
+                    ctx.closePath();
+                };
+                const cliff=ctx.createLinearGradient(0,y,0,y+h);cliff.addColorStop(0,'#777b63');cliff.addColorStop(.25,'#655f54');cliff.addColorStop(1,'#3e4442');ctx.fillStyle=cliff;groundPath();ctx.fill();
+                ctx.save();groundPath();ctx.clip();ctx.fillStyle='#83975e';ctx.fillRect(x,y,w,24);ctx.fillStyle='#d7bb6e';ctx.fillRect(x,y,w,8);
                 const first=levelData.infinite_horizontal?Math.floor((_cameraX-150)/150)*150:x+60,last=levelData.infinite_horizontal?_cameraX+W+150:x+w-40;for(let gx=first;gx<last;gx+=150){_fantasyLine([[gx,y],[gx-5,y-15]],'#34483e',3);_fantasyLine([[gx,y],[gx+7,y-12]],'#34483e',3);}
                 ctx.strokeStyle='rgba(38,48,48,.72)';ctx.lineWidth=4;for(let rx=x+95,ri=0;rx<x+w-40;rx+=170,ri++){const len=50+(ri%3)*34;ctx.beginPath();ctx.moveTo(rx,y+38);ctx.lineTo(rx-12,y+38+len*.45);ctx.lineTo(rx+7,y+38+len);ctx.stroke();}
                 ctx.fillStyle='rgba(228,205,142,.18)';for(let sx=x+60; sx<x+w; sx+=210){ctx.beginPath();ctx.ellipse(sx,y+75,42,9,-.08,0,Math.PI*2);ctx.fill();}
+                ctx.restore();
+                _fantasyLine([[x,y],[x+w,y]],'#17343a',6);
+                if(leftCliff)_fantasyLine([[x,y+18],[x+8,y+58],[x-2,y+104],[x+12,y+166],[x+7,y+h]],'#17343a',6);
+                if(rightCliff)_fantasyLine([[x+w,y+18],[x+w-8,y+58],[x+w+2,y+104],[x+w-12,y+166],[x+w-7,y+h]],'#17343a',6);
             }else{
                 ctx.save();ctx.fillStyle='#d9bd71';ctx.strokeStyle='#17343a';ctx.lineWidth=5;_roundPath(x,y,w,h,Math.min(15,h*.25));ctx.fill();ctx.stroke();ctx.fillStyle='#f3dc96';ctx.fillRect(x+12,y+9,w-24,Math.max(7,h*.22));ctx.strokeStyle='#9b7e42';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(x+w*.2,y+h*.67);ctx.lineTo(x+w*.42,y+h*.64);ctx.moveTo(x+w*.65,y+h*.7);ctx.lineTo(x+w*.8,y+h*.66);ctx.stroke();ctx.restore();
             }
@@ -4420,6 +4519,7 @@
             else if (gameState === 'complete' || gameState === 'completeIntro') drawComplete();
             else {
                 ctx.save();ctx.translate(-_cameraX,-_cameraY);
+                drawFantasyDropTerrain();
                 drawFantasyPlatforms();
                 drawNewLevelMechanics();
                 drawDecor();

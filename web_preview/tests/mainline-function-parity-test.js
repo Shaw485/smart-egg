@@ -46,4 +46,13 @@ assert.match(game, /KeyD/);
 assert.match(game, /Space/);
 assert.match(game, /requestedScreen === 'levelSelect'/, '试玩页返回必须能直达完整主线选关页');
 
+assert.match(game, /function\s+drawFantasyDropTerrain\s*\(/, '必须保留共享断崖\/掉落地形绘制函数');
+const dropTerrainCall = game.indexOf('drawFantasyDropTerrain();');
+const platformCallAfterDropTerrain = game.indexOf('drawFantasyPlatforms();', dropTerrainCall);
+assert.ok(dropTerrainCall >= 0 && platformCallAfterDropTerrain > dropTerrainCall,
+  '断崖深度必须先于平台绘制，避免覆盖平台顶面和碰撞落脚线');
+assert.match(game, /high-cliff-v2/, '共享断崖视觉必须标记 high-cliff-v2 样式版本');
+assert.match(game, /drop-terrain-layout/, '断崖布局必须提供 render 模块诊断事件');
+assert.match(game, /collisionGeometryChanged:\s*false/, '视觉升级必须明确声明没有修改碰撞几何');
+
 console.log('主线功能守恒测试通过：首页、选关、暂停返回、创造模式、编辑器、控制与日志均保留。');

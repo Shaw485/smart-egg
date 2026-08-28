@@ -1,16 +1,17 @@
 (function () {
   'use strict';
 
-  const VERSION = 'round2-v1';
+  const VERSION = 'round2-v2';
   const W = 1920;
   const H = 1080;
   const GROUND_Y = 790;
-  const UI_Y = 830;
+  const INK_SURFACE_Y = GROUND_Y;
+  const UI_Y = 870;
   const logic = window.GuaiqiRoundTwoLogic;
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d', { alpha: false });
   const logger = new window.GuaiqiRoundTwoLogger({ version: VERSION, maxEntries: 1000, minLevel: 'info' });
-  ['runtime', 'state', 'input', 'gesture', 'render', 'export', 'mechanic:level13', 'mechanic:level14', 'mechanic:level15', 'mechanic:level16'].forEach(function (name) { logger.setModule(name, true); });
+  ['runtime', 'state', 'input', 'gesture', 'render', 'export', 'mechanic:level13', 'mechanic:level15'].forEach(function (name) { logger.setModule(name, true); });
   logger.setModule('physics', false);
 
   const LEVELS = [
@@ -22,25 +23,11 @@
       hint: '同时按住左、右按钮约一秒，让两股力量在断口中间相遇。'
     },
     {
-      id: 14,
-      title: '薄处有光',
-      mechanic: 'spread_crack',
-      teaser: '最窄的地方，藏着出口。',
-      hint: '手机：两指按住亮缝两侧向外分开。电脑：分别把裂缝两边向外拖。'
-    },
-    {
       id: 15,
       title: '一笔成路',
       mechanic: 'ink_path',
-      teaser: '脚下没有路，手里还有一笔。',
-      hint: '从断口左边起笔，一笔画到右边再松手；线不能超过墨量。'
-    },
-    {
-      id: 16,
-      title: '请稍候',
-      mechanic: 'fake_loading',
-      teaser: '它不是卡住了，只是在等你。',
-      hint: '加载条里的小人可以移动；走到最右端，并跳过中间的缺口。'
+      teaser: '空白处，也许并不是真的空。',
+      hint: '空白并不一定无路。'
     }
   ];
 
@@ -74,7 +61,7 @@
   let successAt = 0;
   let audioContext = null;
 
-  const player = { x: 350, y: GROUND_Y - 55, w: 70, h: 110, vx: 0, vy: 0, onGround: true, facing: 1 };
+  const player = { x: 350, y: GROUND_Y - 72, w: 70, h: 144, vx: 0, vy: 0, onGround: true, facing: 1 };
   const state = createMechanicState();
 
   function createMechanicState() {
@@ -83,18 +70,10 @@
       dualStarted: false,
       dualMilestone: 0,
       bridgeBuilt: false,
-      crackLeft: 948,
-      crackRight: 972,
-      crackWidth: 24,
-      crackOpen: false,
-      crackMilestone: 0,
       inkPath: [],
       inkBridge: false,
       inkError: '',
-      inkErrorUntil: 0,
-      loadingProgress: 43,
-      loadingMilestone: 43,
-      loadingPulse: 0
+      inkErrorUntil: 0
     };
   }
 
@@ -166,13 +145,10 @@
   }
 
   function resetPlayer() {
-    const fakeLoading = level && level.mechanic === 'fake_loading';
-    player.w = fakeLoading ? 52 : 70;
-    player.h = fakeLoading ? 78 : 110;
-    // 假加载关从 43% 的填充末端附近出生，让人物和“卡住的进度”在视觉上对应。
-    player.x = fakeLoading ? 840 : 350;
-    const top = fakeLoading ? 650 : GROUND_Y;
-    player.y = top - player.h / 2;
+    player.w = 70;
+    player.h = 144;
+    player.x = 350;
+    player.y = GROUND_Y - player.h / 2;
     player.vx = 0;
     player.vy = 0;
     player.onGround = true;
@@ -183,8 +159,7 @@
   function selectCards() {
     return LEVELS.map(function (item, index) {
       const column = index % 2;
-      const row = Math.floor(index / 2);
-      return { level: item, index: index, x: 335 + column * 650, y: 285 + row * 270, w: 600, h: 215 };
+      return { level: item, index: index, x: 335 + column * 650, y: 365, w: 600, h: 235 };
     });
   }
 
@@ -208,8 +183,13 @@
     clearLiveInput('level-enter');
     resetMechanicState();
     resetPlayer();
+    const terrain = terrainLayout();
     log('state', 'level-enter', { reason: reason || 'direct', title: level.title });
-    if (level.mechanic === 'fake_loading') log('mechanic:level16', 'fake-load-enter', { displayed_progress: 43, actual_network_requests: 0 });
+    log('render', 'drop-terrain-layout', {
+      style: 'high-cliff-v2',
+      gaps: terrain.gaps.map(function (gap) { return { left: gap.left, right: gap.right, width: gap.right - gap.left }; }),
+      collision_geometry_changed: false
+    });
   }
 
   function restart(reason) {
@@ -240,8 +220,8 @@
   }
 
   function returnToMainline() {
-    log('state', 'return-mainline-selection', { target: '../web_preview/index.html?mainline=v171&screen=levelSelect' });
-    window.location.href = '../web_preview/index.html?mainline=v171&screen=levelSelect';
+    log('state', 'return-mainline-selection', { target: '../web_preview/index.html?mainline=v172&screen=levelSelect' });
+    window.location.href = '../web_preview/index.html?mainline=v172&screen=levelSelect';
   }
 
   function controlForPoint(point) {
@@ -260,7 +240,7 @@
 
   function tryJump(source) {
     if (status !== 'playing' || !player.onGround) return false;
-    player.vy = level && level.mechanic === 'fake_loading' ? -690 : -900;
+    player.vy = -900;
     player.onGround = false;
     log('input', 'jump', { source: source, x: Math.round(player.x), y: Math.round(player.y) });
     tone(360, .06);
@@ -273,58 +253,10 @@
     log('state', 'hint-auto-close-for-gesture', { gesture: gesture });
   }
 
-  function crackActiveSides() {
-    const sides = new Set();
-    pointerModes.forEach(function (mode) { if (mode.type === 'crack') sides.add(mode.side); });
-    return sides;
-  }
-
-  function updateCrackFromPointer(event, point) {
-    const mode = pointerModes.get(event.pointerId);
-    if (!mode || mode.type !== 'crack' || state.crackOpen) return;
-    mode.lastX = point.x;
-    const touchRequiresPair = mode.pointerType === 'touch';
-    const activeSides = crackActiveSides();
-    if (touchRequiresPair && !(activeSides.has('left') && activeSides.has('right'))) return;
-    if (mode.side === 'left') state.crackLeft = logic.clamp(point.x, 780, state.crackRight - 20);
-    else state.crackRight = logic.clamp(point.x, state.crackLeft + 20, 1140);
-    if (touchRequiresPair) {
-      pointerModes.forEach(function (candidate) {
-        if (candidate.type !== 'crack' || candidate.pointerType !== 'touch') return;
-        if (candidate.side === 'left') state.crackLeft = logic.clamp(candidate.lastX, 780, state.crackRight - 20);
-        if (candidate.side === 'right') state.crackRight = logic.clamp(candidate.lastX, state.crackLeft + 20, 1140);
-      });
-    }
-    state.crackWidth = logic.spreadWidth(state.crackLeft, state.crackRight, 20, 360);
-    const milestone = Math.floor(state.crackWidth / 40) * 40;
-    if (milestone > state.crackMilestone) {
-      state.crackMilestone = milestone;
-      log('gesture', 'crack-width-milestone', { width: Math.round(state.crackWidth), active_sides: Array.from(activeSides), pointer_type: mode.pointerType });
-    }
-    const leftReady = state.crackLeft <= 890;
-    const rightReady = state.crackRight >= 1030;
-    if (leftReady && rightReady) {
-      state.crackOpen = true;
-      state.crackLeft = 870;
-      state.crackRight = 1050;
-      state.crackWidth = 180;
-      log('mechanic:level14', 'crack-opened', {
-        width: state.crackWidth,
-        left_side_ready: leftReady,
-        right_side_ready: rightReady,
-        input_mode: touchRequiresPair ? 'two-finger-spread' : 'desktop-sequential-edge-drag'
-      });
-      tone(610, .12);
-    }
-  }
-
   function startInkStroke(event, point) {
     const allowedStart = point.x >= 585 && point.x <= 740 && point.y >= 640 && point.y <= 820;
     if (!allowedStart) {
-      state.inkError = '要从左侧断口边缘起笔';
-      state.inkErrorUntil = performance.now() + 1200;
       log('gesture', 'ink-start-rejected', { x: Math.round(point.x), y: Math.round(point.y), reason: 'outside-start-zone' }, 'warn');
-      tone(150, .08);
       return false;
     }
     closeHintForGesture('ink-stroke');
@@ -370,16 +302,7 @@
     } else {
       state.inkPath = mode.points.slice();
       state.inkBridge = false;
-      const messages = {
-        'wrong-start': '要从左边起笔',
-        'wrong-end': '这一笔还没碰到右边',
-        'too-short': '线还没有连到另一边',
-        'ink-exhausted': '墨用完了，画得短一点',
-        'outside-canvas-band': '这一笔离断口太远',
-        'backtracked-too-far': '一笔要朝右连过去',
-        'too-few-points': '这一笔太短了'
-      };
-      state.inkError = messages[result.reason] || '这一笔没有成为路';
+      state.inkError = '这道痕迹还站不住。';
       state.inkErrorUntil = performance.now() + 1600;
       tone(150, .1);
     }
@@ -433,13 +356,6 @@
       return;
     }
 
-    if (level.mechanic === 'spread_crack' && point.y >= 245 && point.y <= GROUND_Y && point.x >= 790 && point.x <= 1130) {
-      closeHintForGesture('spread-crack');
-      const side = point.x < 960 ? 'left' : 'right';
-      pointerModes.set(event.pointerId, { type: 'crack', side: side, pointerType: event.pointerType || 'mouse', lastX: point.x });
-      log('gesture', 'crack-edge-grabbed', { side: side, x: Math.round(point.x), pointer_type: event.pointerType || 'mouse', active_sides: Array.from(crackActiveSides()) });
-      return;
-    }
     if (level.mechanic === 'ink_path' && point.y < UI_Y) startInkStroke(event, point);
   }
 
@@ -448,8 +364,7 @@
     activePointers.set(event.pointerId, point);
     const mode = pointerModes.get(event.pointerId);
     if (!mode || status !== 'playing') return;
-    if (mode.type === 'crack') updateCrackFromPointer(event, point);
-    else if (mode.type === 'ink') updateInkStroke(event, point);
+    if (mode.type === 'ink') updateInkStroke(event, point);
   }
 
   function onPointerUp(event) {
@@ -468,16 +383,6 @@
       returnToMainline();
     } else if (mode && mode.type === 'ink') {
       finishInkStroke(event);
-    } else if (mode && mode.type === 'crack') {
-      log('gesture', 'crack-edge-released', { side: mode.side, width: Math.round(state.crackWidth), opened: state.crackOpen, pointer_type: mode.pointerType });
-      if (mode.pointerType === 'touch' && !state.crackOpen) {
-        const cancelledWidth = state.crackWidth;
-        state.crackLeft = 948;
-        state.crackRight = 972;
-        state.crackWidth = 24;
-        state.crackMilestone = 0;
-        log('gesture', 'crack-touch-pair-cancelled', { released_side: mode.side, width_before_reset: Math.round(cancelledWidth), reason: 'finger-released-before-both-sides-ready' });
-      }
     }
     pointerModes.delete(event.pointerId);
   }
@@ -517,14 +422,8 @@
     }
     if (level.mechanic === 'ink_path') {
       const floors = [{ x: 0, y: GROUND_Y, w: 650, h: 80 }, { x: 1270, y: GROUND_Y, w: 650, h: 80 }];
-      if (state.inkBridge) floors.push({ x: 650, y: GROUND_Y, w: 620, h: 52, special: 'ink' });
+      if (state.inkBridge) floors.push({ x: 650, y: INK_SURFACE_Y, w: 620, h: 24, special: 'ink' });
       return floors;
-    }
-    if (level.mechanic === 'fake_loading') {
-      return [
-        { x: 460, y: 650, w: 520, h: 38, special: 'loading' },
-        { x: 1080, y: 650, w: 400, h: 38, special: 'loading' }
-      ];
     }
     return [{ x: 0, y: GROUND_Y, w: W, h: 80 }];
   }
@@ -532,21 +431,11 @@
   function updatePlayer(dt) {
     if (!level || status !== 'playing') return;
     const direction = (rightHeld() ? 1 : 0) - (leftHeld() ? 1 : 0);
-    const speed = level.mechanic === 'fake_loading' ? 245 : 310;
-    player.vx = direction * speed;
+    player.vx = direction * 310;
     if (direction) player.facing = direction;
-    const previousX = player.x;
     player.x += player.vx * dt;
-    if (level.mechanic === 'spread_crack' && !state.crackOpen) {
-      const wallLeft = 815;
-      const wallRight = 1105;
-      if (previousX <= wallLeft && player.x + player.w / 2 > wallLeft) player.x = wallLeft - player.w / 2;
-      if (previousX >= wallRight && player.x - player.w / 2 < wallRight) player.x = wallRight + player.w / 2;
-    }
-    const minX = level.mechanic === 'fake_loading' ? 485 : 55;
-    const maxX = level.mechanic === 'fake_loading' ? 1450 : W - 55;
-    player.x = logic.clamp(player.x, minX, maxX);
-    player.vy = Math.min(1200, player.vy + (level.mechanic === 'fake_loading' ? 1500 : 1900) * dt);
+    player.x = logic.clamp(player.x, 55, W - 55);
+    player.vy = Math.min(1200, player.vy + 1900 * dt);
     const previousBottom = player.y + player.h / 2;
     player.y += player.vy * dt;
     player.onGround = false;
@@ -562,15 +451,9 @@
       player.vy = 0;
       player.onGround = true;
     }
-    const fallLimit = level.mechanic === 'fake_loading' ? 810 : H + 140;
-    if (player.y > fallLimit) {
+    if (player.y > H + 140) {
       log('physics', 'player-fell', { x: Math.round(player.x), y: Math.round(player.y), mechanic_preserved: true }, 'warn');
       resetPlayer();
-      if (level.mechanic === 'fake_loading') {
-        state.loadingProgress = 43;
-        state.loadingMilestone = 43;
-        log('mechanic:level16', 'fake-load-fall-reset', { restored_progress: 43 });
-      }
       tone(120, .12);
     }
   }
@@ -603,24 +486,8 @@
         tone(620, .12);
       }
       if (state.bridgeBuilt && player.x > 1540) complete('crossed-dual-bridge');
-    } else if (level.mechanic === 'spread_crack') {
-      if (state.crackOpen && player.x > 1540) complete('passed-open-crack');
     } else if (level.mechanic === 'ink_path') {
       if (state.inkBridge && player.x > 1540) complete('crossed-drawn-path');
-    } else if (level.mechanic === 'fake_loading') {
-      state.loadingPulse += dt;
-      const next = logic.loadingProgress(player.x, 840, 1430);
-      state.loadingProgress = Math.max(state.loadingProgress, next);
-      const milestone = [50, 65, 80, 95, 100].find(function (value) { return value > state.loadingMilestone && state.loadingProgress >= value; });
-      if (milestone) {
-        state.loadingMilestone = milestone;
-        log('mechanic:level16', 'fake-load-progress', { percent: milestone, player_x: Math.round(player.x), network_progress: null });
-        tone(420 + milestone * 2, .04, .025);
-      }
-      if (player.x >= 1428) {
-        state.loadingProgress = 100;
-        complete('mini-player-reached-load-end');
-      }
     }
   }
 
@@ -644,16 +511,105 @@
     ctx.moveTo(0, 650); ctx.quadraticCurveTo(260, 585, 520, 660); ctx.quadraticCurveTo(830, 590, 1120, 675); ctx.quadraticCurveTo(1500, 590, W, 665); ctx.lineTo(W, GROUND_Y); ctx.lineTo(0, GROUND_Y); ctx.closePath(); ctx.fill();
   }
 
+  function terrainLayout() {
+    const grounds = floorsForLevel().filter(function (floor) { return !floor.special; }).slice().sort(function (a, b) { return a.x - b.x; });
+    const gaps = [];
+    for (let index = 0; index < grounds.length - 1; index += 1) {
+      const left = grounds[index].x + grounds[index].w;
+      const right = grounds[index + 1].x;
+      if (right - left > 20) gaps.push({ left: left, right: right, top: Math.min(grounds[index].y, grounds[index + 1].y) });
+    }
+    return { grounds: grounds, gaps: gaps };
+  }
+
+  function drawDropTerrain() {
+    terrainLayout().gaps.forEach(function (gap) {
+      const shade = ctx.createLinearGradient(0, gap.top, 0, UI_Y + 18);
+      shade.addColorStop(0, 'rgba(23,52,58,.65)');
+      shade.addColorStop(.45, 'rgba(22,39,42,.9)');
+      shade.addColorStop(1, 'rgba(18,25,31,.98)');
+      ctx.save();
+      ctx.fillStyle = shade;
+      ctx.beginPath();
+      ctx.moveTo(gap.left, gap.top + 5);
+      ctx.lineTo(gap.right, gap.top + 5);
+      // 深色区域向两侧岩壁下方延伸，由后绘制的地面遮住，避免露出背景色细缝。
+      ctx.lineTo(gap.right + 22, gap.top + 35);
+      ctx.lineTo(gap.right + 32, UI_Y + 18);
+      ctx.lineTo(gap.left - 32, UI_Y + 18);
+      ctx.lineTo(gap.left - 22, gap.top + 35);
+      ctx.closePath();
+      ctx.fill();
+      ctx.clip();
+      ctx.fillStyle = 'rgba(214,222,191,.1)';
+      ctx.beginPath();
+      ctx.ellipse((gap.left + gap.right) / 2, UI_Y + 6, (gap.right - gap.left) * .42, 22, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    });
+  }
+
   function drawGround(floor) {
-    const fill = floor.special === 'dual' ? '#e7c66d' : floor.special === 'ink' ? '#fff0bd' : '#687a58';
-    const edge = floor.special ? '#f3d273' : '#d2d879';
+    if (floor.special === 'ink') return;
+    if (floor.special) {
+      ctx.save();
+      ctx.fillStyle = '#e7c66d';
+      ctx.strokeStyle = '#17343a';
+      ctx.lineWidth = 5;
+      roundedRect(floor.x, floor.y, floor.w, floor.h, 10, '#e7c66d', '#17343a', 5);
+      ctx.fillStyle = '#f3d273';
+      ctx.fillRect(floor.x + 8, floor.y + 6, floor.w - 16, 10);
+      ctx.restore();
+      return;
+    }
+    const layout = terrainLayout();
+    const leftCliff = layout.gaps.some(function (gap) { return Math.abs(gap.right - floor.x) < 1; });
+    const rightCliff = layout.gaps.some(function (gap) { return Math.abs(gap.left - (floor.x + floor.w)) < 1; });
+    const bottom = UI_Y + 22;
+    const makePath = function () {
+      ctx.beginPath();
+      ctx.moveTo(floor.x, floor.y);
+      ctx.lineTo(floor.x + floor.w, floor.y);
+      if (rightCliff) {
+        ctx.lineTo(floor.x + floor.w, floor.y + 18);
+        ctx.lineTo(floor.x + floor.w - 8, floor.y + 42);
+        ctx.lineTo(floor.x + floor.w + 2, floor.y + 68);
+        ctx.lineTo(floor.x + floor.w - 12, bottom);
+      } else ctx.lineTo(floor.x + floor.w, bottom);
+      if (leftCliff) {
+        ctx.lineTo(floor.x + 12, bottom);
+        ctx.lineTo(floor.x - 2, floor.y + 68);
+        ctx.lineTo(floor.x + 8, floor.y + 42);
+        ctx.lineTo(floor.x, floor.y + 18);
+      } else ctx.lineTo(floor.x, bottom);
+      ctx.closePath();
+    };
+    const fill = ctx.createLinearGradient(0, floor.y, 0, bottom);
+    fill.addColorStop(0, '#6f8060');
+    fill.addColorStop(.35, '#596957');
+    fill.addColorStop(1, '#3e4946');
     ctx.fillStyle = fill;
-    ctx.fillRect(floor.x, floor.y, floor.w, floor.y >= GROUND_Y ? H - floor.y : floor.h);
-    ctx.fillStyle = edge;
-    ctx.fillRect(floor.x, floor.y, floor.w, 16);
+    makePath();
+    ctx.fill();
+    ctx.save();
+    makePath();
+    ctx.clip();
+    ctx.fillStyle = '#83975e';
+    ctx.fillRect(floor.x, floor.y, floor.w, 18);
+    ctx.fillStyle = '#d2d879';
+    ctx.fillRect(floor.x, floor.y, floor.w, 7);
+    ctx.restore();
     ctx.strokeStyle = '#17343a';
     ctx.lineWidth = 5;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
     ctx.beginPath(); ctx.moveTo(floor.x, floor.y); ctx.lineTo(floor.x + floor.w, floor.y); ctx.stroke();
+    if (leftCliff) {
+      ctx.beginPath(); ctx.moveTo(floor.x, floor.y + 16); ctx.lineTo(floor.x + 8, floor.y + 42); ctx.lineTo(floor.x - 2, floor.y + 68); ctx.lineTo(floor.x + 12, bottom); ctx.stroke();
+    }
+    if (rightCliff) {
+      ctx.beginPath(); ctx.moveTo(floor.x + floor.w, floor.y + 16); ctx.lineTo(floor.x + floor.w - 8, floor.y + 42); ctx.lineTo(floor.x + floor.w + 2, floor.y + 68); ctx.lineTo(floor.x + floor.w - 12, bottom); ctx.stroke();
+    }
   }
 
   function drawDoor(x, platformY, open) {
@@ -671,11 +627,10 @@
 
   function drawPlayer() {
     const moving = Math.abs(player.vx) > 1;
-    const bob = moving ? Math.sin(frame * .32) * (level && level.mechanic === 'fake_loading' ? 2 : 4) : 0;
-    const scale = level && level.mechanic === 'fake_loading' ? .72 : 1;
+    const bob = moving ? Math.sin(frame * .32) * 4 : 0;
     ctx.save();
-    ctx.translate(player.x, player.y + bob + (level && level.mechanic === 'fake_loading' ? 9 : 0));
-    ctx.scale(player.facing * scale, scale);
+    ctx.translate(player.x, player.y + bob);
+    ctx.scale(player.facing, 1);
     ctx.strokeStyle = '#17343a'; ctx.lineWidth = 8; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     ctx.fillStyle = '#d94b54';
     ctx.beginPath(); ctx.moveTo(-18, -25); ctx.quadraticCurveTo(-68 - (moving ? 18 : 0), 12, -48, 55); ctx.quadraticCurveTo(-24, 43, 2, 25); ctx.closePath(); ctx.fill(); ctx.stroke();
@@ -692,16 +647,16 @@
     drawDoor(1580, GROUND_Y, state.bridgeBuilt);
     if (!state.bridgeBuilt) {
       const progress = state.dualHold;
-      ctx.save();
-      ctx.strokeStyle = '#f3d273'; ctx.lineWidth = 16; ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(720, GROUND_Y + 4);
-      ctx.quadraticCurveTo(800, 720, 720 + 240 * progress, GROUND_Y - 12);
-      ctx.moveTo(1200, GROUND_Y + 4);
-      ctx.quadraticCurveTo(1120, 720, 1200 - 240 * progress, GROUND_Y - 12);
-      ctx.stroke();
-      ctx.restore();
       if (progress > 0) {
+        ctx.save();
+        ctx.strokeStyle = '#f3d273'; ctx.lineWidth = 16; ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(720, GROUND_Y + 4);
+        ctx.quadraticCurveTo(800, 720, 720 + 240 * progress, GROUND_Y - 12);
+        ctx.moveTo(1200, GROUND_Y + 4);
+        ctx.quadraticCurveTo(1120, 720, 1200 - 240 * progress, GROUND_Y - 12);
+        ctx.stroke();
+        ctx.restore();
         ctx.fillStyle = '#fff0bd'; ctx.font = '800 34px sans-serif'; ctx.textAlign = 'center';
         ctx.fillText(Math.round(progress * 100) + '%', 960, 700);
       }
@@ -713,78 +668,44 @@
     }
   }
 
-  function drawCrackMechanic() {
-    const leftEdge = state.crackLeft;
-    const rightEdge = state.crackRight;
-    const wallTop = 250;
-    const wallBottom = GROUND_Y;
-    ctx.save();
-    ctx.fillStyle = '#435654'; ctx.strokeStyle = '#17343a'; ctx.lineWidth = 8;
-    ctx.beginPath(); ctx.moveTo(805, wallBottom); ctx.lineTo(805, 310); ctx.lineTo(850, wallTop); ctx.lineTo(leftEdge, wallTop); ctx.lineTo(leftEdge, wallBottom); ctx.closePath(); ctx.fill(); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(rightEdge, wallBottom); ctx.lineTo(rightEdge, wallTop); ctx.lineTo(1070, wallTop); ctx.lineTo(1115, 310); ctx.lineTo(1115, wallBottom); ctx.closePath(); ctx.fill(); ctx.stroke();
-    const glow = ctx.createLinearGradient(leftEdge, 0, rightEdge, 0);
-    glow.addColorStop(0, 'rgba(243,210,115,.08)'); glow.addColorStop(.5, 'rgba(255,240,189,.95)'); glow.addColorStop(1, 'rgba(243,210,115,.08)');
-    ctx.fillStyle = glow; ctx.fillRect(leftEdge, wallTop + 12, Math.max(1, rightEdge - leftEdge), wallBottom - wallTop - 12);
-    ctx.strokeStyle = '#f3d273'; ctx.lineWidth = 5; ctx.setLineDash([16, 12]);
-    ctx.beginPath(); ctx.moveTo(leftEdge, 330); ctx.lineTo(leftEdge, 700); ctx.moveTo(rightEdge, 330); ctx.lineTo(rightEdge, 700); ctx.stroke();
-    ctx.restore();
-    if (!state.crackOpen) {
-      ctx.fillStyle = '#fff0bd'; ctx.font = '700 28px "PingFang SC", sans-serif'; ctx.textAlign = 'center';
-      ctx.fillText('‹  ›', 960, 520);
-    }
-    drawDoor(1580, GROUND_Y, state.crackOpen);
-  }
-
   function drawInkMechanic() {
     drawDoor(1580, GROUND_Y, state.inkBridge);
-    ctx.save();
-    ctx.setLineDash([18, 14]); ctx.strokeStyle = 'rgba(255,240,189,.7)'; ctx.lineWidth = 5;
-    ctx.beginPath(); ctx.moveTo(610, 760); ctx.lineTo(720, 760); ctx.moveTo(1200, 760); ctx.lineTo(1310, 760); ctx.stroke();
-    ctx.restore();
     let livePath = null;
     pointerModes.forEach(function (mode) { if (mode.type === 'ink') livePath = mode.points; });
-    const path = livePath || state.inkPath;
+    const path = livePath || (!state.inkBridge && performance.now() < state.inkErrorUntil ? state.inkPath : null);
     if (path && path.length > 1) {
       ctx.save();
       ctx.strokeStyle = livePath && logic.strokeLength(path) > 860 ? '#d94b54' : '#17343a';
-      ctx.lineWidth = 15; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.lineWidth = 12; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
       ctx.beginPath(); ctx.moveTo(path[0].x, path[0].y);
       for (let index = 1; index < path.length; index += 1) ctx.lineTo(path[index].x, path[index].y);
       ctx.stroke(); ctx.restore();
     }
     if (state.inkBridge) {
-      ctx.save(); ctx.strokeStyle = '#17343a'; ctx.lineWidth = 11; ctx.lineCap = 'round';
-      ctx.beginPath(); ctx.moveTo(650, GROUND_Y - 5); ctx.quadraticCurveTo(960, GROUND_Y - 24, 1270, GROUND_Y - 5); ctx.stroke(); ctx.restore();
+      // 成功后的手势沉到统一实体面：顶边与碰撞共用 INK_SURFACE_Y，人物脚底不会再陷进原始轨迹。
+      ctx.save();
+      ctx.fillStyle = '#17343a';
+      ctx.strokeStyle = '#0e2529';
+      ctx.lineWidth = 5;
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(650, INK_SURFACE_Y);
+      ctx.lineTo(1270, INK_SURFACE_Y);
+      ctx.lineTo(1262, INK_SURFACE_Y + 22);
+      ctx.bezierCurveTo(1090, INK_SURFACE_Y + 17, 825, INK_SURFACE_Y + 28, 658, INK_SURFACE_Y + 21);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,240,189,.24)';
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(674, INK_SURFACE_Y + 9); ctx.bezierCurveTo(860, INK_SURFACE_Y + 4, 1070, INK_SURFACE_Y + 12, 1244, INK_SURFACE_Y + 8); ctx.stroke();
+      ctx.restore();
     }
     if (state.inkError && performance.now() < state.inkErrorUntil) {
       roundedRect(700, 620, 520, 76, 18, 'rgba(217,75,84,.92)', '#17343a', 5);
       ctx.fillStyle = '#fff0bd'; ctx.font = '700 30px "PingFang SC", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(state.inkError, 960, 658);
     }
-  }
-
-  function drawFakeLoadingScene() {
-    const gradient = ctx.createLinearGradient(0, 0, 0, H);
-    gradient.addColorStop(0, '#dfe8df'); gradient.addColorStop(1, '#9fb0a2');
-    ctx.fillStyle = gradient; ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = 'rgba(23,52,58,.08)';
-    for (let y = 170; y < 780; y += 80) ctx.fillRect(0, y, W, 2);
-    ctx.fillStyle = '#17343a'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = '800 48px "PingFang SC", sans-serif'; ctx.fillText('正在载入旅途', W / 2, 300);
-    ctx.font = '600 30px "PingFang SC", sans-serif';
-    const dots = '.'.repeat(1 + Math.floor(state.loadingPulse * 1.5) % 3);
-    ctx.fillText('请稍候' + dots, W / 2, 360);
-    roundedRect(400, 430, 1120, 285, 32, '#eef2e8', '#17343a', 8);
-    roundedRect(450, 535, 1020, 135, 26, '#435654', '#17343a', 7);
-    const fillWidth = logic.clamp((state.loadingProgress / 100) * 1020, 0, 1020);
-    roundedRect(450, 535, fillWidth, 135, 24, '#e5bd66', null, 0);
-    ctx.fillStyle = '#17343a'; ctx.font = '900 46px sans-serif'; ctx.textAlign = 'center';
-    ctx.fillText(state.loadingProgress + '%', W / 2, 485);
-    ctx.fillStyle = '#392f46'; ctx.fillRect(980, 640, 100, 82);
-    ctx.strokeStyle = '#17343a'; ctx.lineWidth = 6;
-    ctx.beginPath(); ctx.moveTo(980, 650); ctx.lineTo(980, 700); ctx.moveTo(1080, 650); ctx.lineTo(1080, 700); ctx.stroke();
-    ctx.fillStyle = 'rgba(23,52,58,.65)'; ctx.font = '600 24px "PingFang SC", sans-serif';
-    ctx.fillText('网络：未请求　资源：就在这里', W / 2, 755);
   }
 
   function drawTopUI() {
@@ -810,7 +731,7 @@
     ctx.fillStyle = '#17343a'; ctx.font = '800 58px "PingFang SC", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
     ctx.fillText(level.title, W / 2, 120);
     roundedRect(1735, 40, 135, 48, 14, 'rgba(23,52,58,.88)', '#e5bd66', 3);
-    ctx.fillStyle = '#fff0bd'; ctx.font = '700 19px sans-serif'; ctx.textBaseline = 'middle'; ctx.fillText('试玩 v1', 1802, 64);
+    ctx.fillStyle = '#fff0bd'; ctx.font = '700 19px sans-serif'; ctx.textBaseline = 'middle'; ctx.fillText('试玩 v2', 1802, 64);
   }
 
   function drawControls() {
@@ -882,7 +803,7 @@
     roundedRect(500, 45, 920, 140, 40, 'rgba(255,240,189,.82)', '#17343a', 7);
     ctx.fillStyle = '#17343a'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.font = '900 58px "PingFang SC", sans-serif'; ctx.fillText('新关卡试玩 · 第二轮', W / 2, 94);
-    ctx.font = '600 27px "PingFang SC", sans-serif'; ctx.fillText('第 13–16 关独立体验，不改动当前主线', W / 2, 148);
+    ctx.font = '600 27px "PingFang SC", sans-serif'; ctx.fillText('第 13、15 关独立体验，不改动当前主线', W / 2, 148);
     selectCards().forEach(function (card) {
       roundedRect(card.x, card.y, card.w, card.h, 28, 'rgba(255,240,189,.94)', '#17343a', 7);
       roundedRect(card.x + 30, card.y + 30, 105, 105, 24, card.index % 2 ? '#e7c66d' : '#79c8d1', '#17343a', 5);
@@ -895,18 +816,15 @@
     roundedRect(HIT.selectBack.x, HIT.selectBack.y, HIT.selectBack.w, HIT.selectBack.h, 22, '#fff0bd', '#17343a', 6);
     ctx.fillStyle = '#17343a'; ctx.font = '800 30px "PingFang SC", sans-serif'; ctx.textAlign = 'center'; ctx.fillText('返回主线选关', W / 2, HIT.selectBack.y + HIT.selectBack.h / 2);
     roundedRect(1735, 40, 135, 48, 14, 'rgba(23,52,58,.88)', '#e5bd66', 3);
-    ctx.fillStyle = '#fff0bd'; ctx.font = '700 19px sans-serif'; ctx.fillText('试玩 v1', 1802, 64);
+    ctx.fillStyle = '#fff0bd'; ctx.font = '700 19px sans-serif'; ctx.fillText('试玩 v2', 1802, 64);
   }
 
   function renderLevel() {
-    if (level.mechanic === 'fake_loading') drawFakeLoadingScene();
-    else {
-      drawBackdrop();
-      floorsForLevel().forEach(drawGround);
-      if (level.mechanic === 'dual_bridge') drawDualMechanic();
-      else if (level.mechanic === 'spread_crack') drawCrackMechanic();
-      else if (level.mechanic === 'ink_path') drawInkMechanic();
-    }
+    drawBackdrop();
+    drawDropTerrain();
+    floorsForLevel().forEach(drawGround);
+    if (level.mechanic === 'dual_bridge') drawDualMechanic();
+    else if (level.mechanic === 'ink_path') drawInkMechanic();
     drawPlayer();
     drawTopUI();
     drawControls();
@@ -972,7 +890,8 @@
 
   resize();
   window.addEventListener('resize', resize);
-  const requestedLevel = Number(new URLSearchParams(location.search).get('level'));
+  const startupParams = new URLSearchParams(location.search);
+  const requestedLevel = Number(startupParams.get('level'));
   const requestedIndex = LEVELS.findIndex(function (item) { return item.id === requestedLevel; });
   log('runtime', 'boot', {
     version: VERSION,
@@ -982,6 +901,9 @@
     backend: { mode: 'offline-prototype', requests: 'none', persistence: 'none' },
     logging: { max_entries: logger.maxEntries, physics_default_enabled: false, export_available: true }
   });
+  if (startupParams.has('level') && requestedIndex < 0) {
+    log('state', 'invalid-level-request', { requested_level: requestedLevel, supported_levels: LEVELS.map(function (item) { return item.id; }), fallback: 'selection' }, 'warn');
+  }
   if (requestedIndex >= 0) enterLevel(requestedIndex, 'startup-query');
   else enterSelection('boot');
   requestAnimationFrame(tick);

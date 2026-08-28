@@ -1,4 +1,4 @@
-# 《怪奇之原》第 13–16 关独立试玩
+# 《怪奇之原》第 13、15 关独立试玩
 
 这是完全独立于 `web_preview` 主线的第二轮脑洞关卡体验页。它不会读取或改写主线存档、创造模式关卡或进度，也不会发起网络请求。
 
@@ -13,7 +13,7 @@ python3 -m http.server 8765
 访问：
 
 - 选关页：`http://localhost:8765/brainstorm_levels_13_16_demo/`
-- 单关入口：在地址后加 `?level=13`、`?level=14`、`?level=15` 或 `?level=16`
+- 单关入口：在地址后加 `?level=13` 或 `?level=15`
 
 ## 操作
 
@@ -23,7 +23,7 @@ python3 -m http.server 8765
 - 暂停：`P`、`Esc` 或顶部暂停按钮
 - 提示：顶部问号；每次进关和重来都默认关闭
 
-四关的具体做法只写在各关提示按钮中：第 13 关支持键盘双键和触屏双指，第 14 关支持手机双指以及电脑依次拖开两侧，第 15 关使用一条连续指针轨迹，第 16 关把移动和跳跃输入复用到加载条内人物。
+两关的具体做法只写在各关提示按钮中：第 13 关支持键盘双键和触屏双指；第 15 关支持一条连续指针轨迹。第 15 关不会在场景中显示起点、终点或画笔引导，失败反馈也只描述结果，不直接揭示完整解法。
 
 ## 日志与独立调试
 
@@ -34,8 +34,8 @@ python3 -m http.server 8765
 - `runtime`：启动、未捕获异常、运行环境
 - `state`：进关、提示、暂停、重来、通关、返回
 - `input`：键盘、触点、虚拟按键与输入清理
-- `gesture`：裂缝手势、画线起止与拒绝原因
-- `mechanic:level13` 至 `mechanic:level16`：每关专属状态变化
+- `gesture`：连续轨迹起止与拒绝原因
+- `mechanic:level13`、`mechanic:level15`：每关专属状态变化
 - `physics`：坠落等物理诊断，默认关闭以避免噪声
 - `render`：画布尺寸及绘制异常
 - `export`：日志导出动作
@@ -44,7 +44,7 @@ python3 -m http.server 8765
 
 ```js
 __brainstormRound2.getState()
-__brainstormRound2.enterLevelById(14)
+__brainstormRound2.enterLevelById(15)
 __brainstormRound2.restart()
 __brainstormRound2.showSelection()
 __brainstormRound2.setLogModule('physics', true)

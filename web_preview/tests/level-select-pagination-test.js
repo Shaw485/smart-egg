@@ -41,7 +41,7 @@ assert.strictEqual(classifyGesture(20, 10), 'tap', '轻触必须继续打开关�
 assert.strictEqual(classifyGesture(150, 0, 'cancel'), 'cancelled', '触摸取消不能翻页');
 assert.strictEqual(classifyGesture(0, 0, 'canvas-mouseleave'), 'cancelled', '鼠标移出不能误点关卡');
 
-assert.match(game, /const GAME_CODE_VERSION = 171/);
+assert.match(game, /const GAME_CODE_VERSION = 172/);
 assert.match(game, /const LEVEL_SELECT_COLS = 4/);
 assert.match(game, /const LEVEL_SELECT_ROWS = 2/);
 assert.match(game, /const LEVEL_SELECT_PAGE_SIZE = LEVEL_SELECT_COLS \* LEVEL_SELECT_ROWS/);

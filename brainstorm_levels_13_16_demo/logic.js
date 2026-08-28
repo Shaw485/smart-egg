@@ -8,10 +8,6 @@
     return leftHeld && rightHeld ? clamp(current + dt, 0, target) : 0;
   }
 
-  function spreadWidth(leftX, rightX, minWidth, maxWidth) {
-    return clamp(rightX - leftX, minWidth, maxWidth);
-  }
-
   function strokeLength(points) {
     let length = 0;
     for (let index = 1; index < points.length; index += 1) {
@@ -51,12 +47,7 @@
     return { valid: true, reason: 'connected', length: length };
   }
 
-  function loadingProgress(x, minX, maxX) {
-    const ratio = clamp((x - minX) / Math.max(1, maxX - minX), 0, 1);
-    return Math.round(43 + ratio * 57);
-  }
-
-  const api = { clamp, nextDualHold, spreadWidth, strokeLength, validateStroke, loadingProgress };
+  const api = { clamp, nextDualHold, strokeLength, validateStroke };
   root.GuaiqiRoundTwoLogic = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
