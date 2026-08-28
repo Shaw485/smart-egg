@@ -6,6 +6,7 @@ const path = require('path');
 
 const root = path.resolve(__dirname, '../..');
 const game = fs.readFileSync(path.join(root, 'web_preview/game.js'), 'utf8');
+const style = fs.readFileSync(path.join(root, 'web_preview/style.css'), 'utf8');
 
 const COLS = 4;
 const ROWS = 2;
@@ -41,7 +42,7 @@ assert.strictEqual(classifyGesture(20, 10), 'tap', '轻触必须继续打开关�
 assert.strictEqual(classifyGesture(150, 0, 'cancel'), 'cancelled', '触摸取消不能翻页');
 assert.strictEqual(classifyGesture(0, 0, 'canvas-mouseleave'), 'cancelled', '鼠标移出不能误点关卡');
 
-assert.match(game, /const GAME_CODE_VERSION = 175/);
+assert.match(game, /const GAME_CODE_VERSION = 176/);
 assert.match(game, /const LEVEL_SELECT_COLS = 4/);
 assert.match(game, /const LEVEL_SELECT_ROWS = 2/);
 assert.match(game, /const LEVEL_SELECT_PAGE_SIZE = LEVEL_SELECT_COLS \* LEVEL_SELECT_ROWS/);
@@ -56,6 +57,13 @@ assert.match(game, /_moveLevelSelectGesture\(p, 'mouse'\)/, '鼠标移动必须�
 assert.match(game, /_beginLevelSelectGesture\(p,touch\.identifier\)/, '触摸按下必须先进入选关手势');
 assert.match(game, /_moveLevelSelectGesture\(p,touch\.identifier\)/, '触摸移动必须驱动横滑');
 assert.match(game, /_endLevelSelectGesture\(p,touch\.identifier,reason\)/, '触摸松开后才可判定点击或翻页');
+assert.match(game, /canvas\.addEventListener\('pointerdown'/, '现代浏览器必须用 Pointer Events 启动横滑');
+assert.match(game, /canvas\.setPointerCapture\(e\.pointerId\)/, '选关横滑必须捕获指针，避免滑出卡片后丢失松手');
+assert.match(game, /pointer-capture-failed/, '指针捕获失败必须写入可操作的独立诊断日志');
+assert.match(game, /canvas\.addEventListener\('pointermove'/, 'Pointer Events 必须持续更新横滑位置');
+assert.match(game, /canvas\.addEventListener\('pointerup'/, 'Pointer Events 松手必须完成翻页');
+assert.match(game, /reason === 'pointerup'/, 'pointerup 必须被识别为有效释放');
+assert.match(style, /#game-canvas[\s\S]*touch-action:\s*none/, '画布必须禁止浏览器抢占触摸横滑');
 assert.match(game, /startPage: _levelSelectPage/, '手势必须记录起始页，避免按住期间换页后误点');
 assert.match(game, /outcome = canComplete \? 'cancelled' : 'state-or-page-changed'/, '页面或页码变化后必须取消旧手势');
 assert.match(game, /uiBTN\.levelSelect_btns = \[\];\n\s+logStep\('level-select', 'page-change'/, '翻页后必须立即清理旧页热区');

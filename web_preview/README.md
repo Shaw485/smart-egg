@@ -2,11 +2,11 @@
 
 ## 关卡与版本
 
-- 网页主线当前为代码版本 `v175`，共 12 个已合入的正式关卡。
+- 网页主线当前为代码版本 `v176`，共 12 个已合入的正式关卡。
 - 第 13–42 关仍在独立连续评审池中；它们要等试玩时选择“加入主关”并完成统一合并后，才会进入正式主线计数，不是丢失或被删除。
 - 第 8–12 关依次为影子机关、静止追门、标题拖字成桥、重来保留箱子、拖动世界。
 - 正式关卡数据位于 `../godot_project/levels/level_0.json` 至 `level_11.json`，离线包位于 `../godot_project/levels/levels_bundle.js`。
-- `index.html` 的脚本与样式缓存参数已同步为 `v175`。
+- `index.html` 的脚本与样式缓存参数已同步为 `v176`。
 - `?screen=levelSelect` 可从独立试玩页安全返回完整主线选关页；不带该参数时仍从首页启动。
 - 首页正式标题与浏览器窗口标题统一为“怪奇之原”；运行时诊断导出中的 `branding.title` 可核对当前品牌标题。
 - 主线选关页每页固定最多 `4 列 × 2 排`，第 1 页为 1–8 关，第 2 页为 9–12 关。手机左右滑动、电脑按住鼠标横向拖动，或使用键盘左右方向键均可翻页；轻触/单击仍进入对应关卡。进入第 9–12 关后再从暂停页返回选关，会保留在第 2 页。
@@ -38,6 +38,8 @@
 `tests/level-2-crate-collision-test.js` 使用第二关真实地面和台阶尺寸复现“箱子旁下沉 1px 后从 x≈750 瞬移至 x=-40”，并同时验证修复后不会瞬移、真正的平台侧墙仍可阻挡、平台顶面接触不会误判。
 
 选关分页使用独立的 `level-select` 日志模块，记录 `gesture-start`、`gesture-end`、`page-change`、`page-boundary` 和多指忽略状态。它不会逐帧记录移动过程，避免拖动时产生大量日志。可独立查看或关闭：
+
+选关画布同时使用 Pointer Events 指针捕获与旧 mouse/touch 后备监听，并设置 `touch-action: none`，避免手机、内置浏览器或触控板把横滑抢成页面手势。日志里的 `pointer: pointer:<id>` 表示统一指针路径；`gesture-end.outcome` 应为 `page-change`，若为 `cancelled` 可结合 `dx/dy/reason` 独立排查。
 
 ```js
 _findLogs('', 'level-select')

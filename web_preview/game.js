@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 175;   // 跟 index.html 的 ?v=175 保持一致
+    const GAME_CODE_VERSION = 176;   // 跟 index.html 的 ?v=176 保持一致
     const GAME_TITLE = '怪奇之原';
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
@@ -1621,13 +1621,13 @@
         const dx = end.x - gesture.startX;
         const dy = end.y - gesture.startY;
         const distance = Math.hypot(dx, dy);
-        const isRelease = reason === 'end' || reason === 'canvas-mouseup' || reason === 'window-mouseup';
+        const isRelease = reason === 'end' || reason === 'pointerup' || reason === 'canvas-mouseup' || reason === 'window-mouseup';
         // 手势期间若页面状态或页码已被键盘/Esc 改变，则释放只负责清理，
         // 不再把旧按下位置解释成新页面上的点击或翻页。
         const canComplete = gameState === 'levelSelect' && _levelSelectPage === gesture.startPage;
         const isHorizontalSwipe = canComplete && isRelease && Math.abs(dx) >= LEVEL_SELECT_SWIPE_THRESHOLD
             && Math.abs(dx) > Math.abs(dy) * 1.15;
-        const isTapRelease = canComplete && (reason === 'end' || reason === 'canvas-mouseup')
+        const isTapRelease = canComplete && (reason === 'end' || reason === 'pointerup' || reason === 'canvas-mouseup')
             && distance <= LEVEL_SELECT_TAP_SLOP;
         _levelSelectSwipe = null;
 
@@ -3836,6 +3836,48 @@
         }
         _mouseMovingTarget = null;
     }
+    // 现代浏览器统一走 Pointer Events，并捕获指针以保证滑出卡片/画布后仍能收到松手。
+    // 旧 mouse/touch 监听继续保留作后备；pointer 手势活跃时它们只会被记录为重复指针并忽略。
+    function _levelSelectPointerKey(e) { return 'pointer:' + e.pointerId; }
+    canvas.addEventListener('pointerdown', e => {
+        if (gameState !== 'levelSelect') return;
+        const pointer = _levelSelectPointerKey(e);
+        if (_beginLevelSelectGesture(getMousePos(e), pointer)) {
+            try {
+                canvas.setPointerCapture(e.pointerId);
+            } catch (error) {
+                logStep('level-select', 'pointer-capture-failed', {
+                    pointer,
+                    pointerType: e.pointerType || 'unknown',
+                    message: String(error && error.message || error)
+                });
+            }
+            e.preventDefault();
+        }
+    }, { passive: false });
+    canvas.addEventListener('pointermove', e => {
+        const pointer = _levelSelectPointerKey(e);
+        if (_moveLevelSelectGesture(getMousePos(e), pointer)) e.preventDefault();
+    }, { passive: false });
+    function _finishLevelSelectPointer(e, reason) {
+        const pointer = _levelSelectPointerKey(e);
+        if (_endLevelSelectGesture(getMousePos(e), pointer, reason)) {
+            try {
+                if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
+            } catch (error) {
+                logStep('level-select', 'pointer-release-failed', {
+                    pointer,
+                    pointerType: e.pointerType || 'unknown',
+                    reason,
+                    message: String(error && error.message || error)
+                });
+            }
+            e.preventDefault();
+        }
+    }
+    canvas.addEventListener('pointerup', e => _finishLevelSelectPointer(e, 'pointerup'), { passive: false });
+    canvas.addEventListener('pointercancel', e => _finishLevelSelectPointer(e, 'pointercancel'), { passive: false });
+
     canvas.addEventListener('mousedown', e => {
         handleUp('mouse-new-down');
         const p = getMousePos(e), t = gameState === 'playing' ? _movingTargetAt(p) : null;
