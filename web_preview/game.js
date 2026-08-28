@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 176;   // 跟 index.html 的 ?v=176 保持一致
+    const GAME_CODE_VERSION = 177;   // 跟 index.html 的 ?v=177 保持一致
     const GAME_TITLE = '怪奇之原';
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
@@ -117,6 +117,7 @@
     let _wordPlaced = false, _wordDragPos = {x:0,y:0};
     let _persistentCrateCount = 1;
     let _persistentLevelActive = false;
+    let _lastStaticCrateLandingId = null;
     let _dragWorldOffset = 0;
     function _mechanicsOf(lv) {
         if(!lv)return [];
@@ -149,6 +150,7 @@
         _stillDoorReadyLogged = false;
         _wordPlaced = false;
         _wordDragPos = {x:0,y:0};
+        _lastStaticCrateLandingId = null;
         _dragWorldOffset = 0;
         logStep('mechanic', 'level-mechanic-reset', {
             levelIndex: currentLevelIndex,
@@ -156,8 +158,20 @@
             persistentCrates: _persistentCrateCount
         });
     }
+    function _wordTitleLayout() {
+        const y = currentLevelIndex === 3 ? 190 : 74;
+        const size = 58;
+        const step = 64;
+        const firstX = W / 2 - step * 1.5;
+        return {
+            y, size, step,
+            chars: ['纸','上','有','路'].map((char,index)=>({char,x:firstX+index*step})),
+            roadX: firstX + step * 3
+        };
+    }
     function _wordHomeRect() {
-        return {x:W/2+60,y:20,w:105,h:105};
+        const layout = _wordTitleLayout();
+        return {x:layout.roadX-layout.step/2,y:layout.y-layout.step/2,w:layout.step,h:layout.step};
     }
     function _wordBridgeGeometry() {
         const grounds = (levelData && levelData.platforms || [])
@@ -1327,9 +1341,14 @@
         // 所有关卡标题水平居中；第四关仍单独下移一行，避免与顶部按钮挤在一起。
         const titleIsLower = currentLevelIndex === 3;
         if (!_playingCustom && _hasMechanic('word_bridge')) {
-            sketchBold('纸上有', W / 2 - 42, titleIsLower ? 190 : 74, 58);
+            const wordTitle = _wordTitleLayout();
+            for (let index = 0; index < 3; index++) {
+                const item = wordTitle.chars[index];
+                sketchBold(item.char, item.x, wordTitle.y, wordTitle.size);
+            }
             if (!_wordPlaced && !(_sceneDrag && _sceneDrag.type === 'word')) {
-                sketchBold('路', W / 2 + 112, titleIsLower ? 190 : 74, 58);
+                const road = wordTitle.chars[3];
+                sketchBold(road.char, road.x, wordTitle.y, wordTitle.size);
             }
         } else {
             sketchBold(_playingCustom ? ((levelData && levelData.name) || '无名秘境') : (FANTASY_TITLES[currentLevelIndex] || (levelData && levelData.name) || '风在门后等待'),
@@ -2116,6 +2135,41 @@
                 }
             }
         }
+        // 第11关楼梯箱与普通平台使用同一横向碰撞层：侧面不可穿过，
+        // 但人物脚在箱顶时仍交给 Y 方向处理，因此可以自然站立和行走。
+        for (const c of crates) {
+            if (!c.static_platform || player.vx === 0) continue;
+            const attemptedPlayerX = player.x;
+            const collision = PHYSICS_COLLISION.resolveHorizontalPlatformCollision({
+                previousX: previousPlayerX,
+                nextX: attemptedPlayerX,
+                playerY: player.y,
+                halfW: HALF_W,
+                halfH: HALF_H,
+                vx: player.vx,
+                platform: c,
+                edgeTolerance: 2,
+                topTolerance: 4
+            });
+            if (!collision.blocked) continue;
+            player.x = collision.x;
+            player.vx = 0;
+            const guardKey = `static-crate:${currentLevelIndex}:${c.id}`;
+            const now = performance.now();
+            if (!_horizontalSnapGuardLastAt.has(guardKey) || now - _horizontalSnapGuardLastAt.get(guardKey) > 500) {
+                _horizontalSnapGuardLastAt.set(guardKey, now);
+                logStep('collide', 'static-crate-horizontal-block', {
+                    levelIndex: currentLevelIndex,
+                    crateId: c.id,
+                    side: collision.side,
+                    previousX: Math.round(previousPlayerX),
+                    attemptedX: Math.round(attemptedPlayerX),
+                    resolvedX: Math.round(collision.x),
+                    playerY: Math.round(player.y)
+                });
+            }
+            break;
+        }
         // 玩家左右接触木箱时推动它；平台或另一只木箱挡住时停止。
         for (const c of crates) {
             if(c.static_platform)continue;
@@ -2152,6 +2206,7 @@
         }
         // Y 方向
         const previousPlayerBottom = player.y + HALF_H;
+        const previousPlayerTop = player.y - HALF_H;
         player.y += player.vy * dt;
         const landingSpeed = player.vy;
         if (player.vy < 0 && _questionBlocks.length) {
@@ -2190,9 +2245,16 @@
         for (const c of crates) {
             if(c.static_platform){
                 const top=c.y-c.h/2;
+                const bottom=c.y+c.h/2;
                 const overlapsX=player.x+HALF_W>c.x-c.w/2&&player.x-HALF_W<c.x+c.w/2;
                 const crossedTop=player.vy>=0&&previousPlayerBottom<=top+10&&player.y+HALF_H>=top;
                 if(overlapsX&&crossedTop)staticLandingCandidates.push(c);
+                const crossedBottom=player.vy<0&&previousPlayerTop>=bottom-10&&player.y-HALF_H<=bottom;
+                if(overlapsX&&crossedBottom){
+                    player.y=bottom+HALF_H;
+                    player.vy=0;
+                    logStep('collide','static-crate-ceiling-block',{crate:c.id,bottom:Math.round(bottom),px:Math.round(player.x)});
+                }
                 continue;
             }
             if (!rectVsRect(player.x - HALF_W, player.y - HALF_H, HALF_W * 2, HALF_H * 2,
@@ -2213,7 +2275,12 @@
             player.y=landing.y-landing.h/2-HALF_H;
             player.vy=0;player.onGround=true;player.jumpsLeft=levelData.double_jump?2:1;
             if(landingSpeed>260)playSfx('land');
-            logStep('collide','persistent-crate-land',{crate:landing.id,top:Math.round(landing.y-landing.h/2),candidates:staticLandingCandidates.map(c=>c.id),px:Math.round(player.x)});
+            if(_lastStaticCrateLandingId!==landing.id){
+                _lastStaticCrateLandingId=landing.id;
+                logStep('collide','persistent-crate-land',{crate:landing.id,top:Math.round(landing.y-landing.h/2),candidates:staticLandingCandidates.map(c=>c.id),px:Math.round(player.x)});
+            }
+        }else{
+            _lastStaticCrateLandingId=null;
         }
 
         // 门判定（已移到顶部，这里不再重复）
