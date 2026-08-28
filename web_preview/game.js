@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 172;   // 跟 index.html 的 ?v=172 保持一致
+    const GAME_CODE_VERSION = 173;   // 跟 index.html 的 ?v=173 保持一致
     const GAME_TITLE = '怪奇之原';
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
@@ -4048,7 +4048,7 @@
         gameState = 'playing';
         const dropTerrain = _fantasyGroundLayout(levelData);
         logStep('render', 'drop-terrain-layout', {
-            style: 'high-cliff-v2',
+            style: 'vertical-shaft-v1',
             levelIndex: idx,
             groundCount: dropTerrain.grounds.length,
             gapCount: dropTerrain.gaps.length,
@@ -4058,7 +4058,9 @@
                 width: Math.round(gap.right - gap.left),
                 top: Math.round(gap.top)
             })),
-            collisionGeometryChanged: false
+            collisionGeometryChanged: false,
+            visualSidewalls: 'vertical',
+            extendsBelowViewport: true
         });
         logStep('state', 'enter-playing', {
             levelIndex: idx,
@@ -4186,11 +4188,8 @@
             ctx.beginPath();
             ctx.moveTo(gap.left,gap.leftTop+5);
             ctx.lineTo(gap.right,gap.rightTop+5);
-            // 深渊向断崖背后扩展，由后绘制的岩壁覆盖，避免侧壁折角漏出天空/谷底色。
-            ctx.lineTo(gap.right+18,gap.rightTop+38);
-            ctx.lineTo(gap.right+34,bottom);
-            ctx.lineTo(gap.left-34,bottom);
-            ctx.lineTo(gap.left-18,gap.leftTop+38);
+            ctx.lineTo(gap.right,bottom);
+            ctx.lineTo(gap.left,bottom);
             ctx.closePath();
             ctx.fill();
             ctx.clip();
@@ -4214,15 +4213,13 @@
         for(let i=0;i<(levelData&&levelData.platforms||[]).length;i++){
             const p=levelData.platforms[i],kind=p.kind||'ground';let x=p.x-p.w/2,w=p.w,y=p.y-p.h/2,h=p.h;if(levelData.infinite_horizontal&&kind==='ground'){x=_cameraX-200;w=W+400;}
             if(kind==='ground'){
-                // 顶边与碰撞严格齐平；断口侧壁从顶边下方才轻微折入，形成高处悬崖而非规则方洞。
+                // 顶边与碰撞严格齐平；断口左右侧壁按用户标注垂直延伸到底部。
                 const leftCliff=layout.gaps.some(g=>Math.abs(g.right-x)<1);
                 const rightCliff=layout.gaps.some(g=>Math.abs(g.left-(x+w))<1);
                 const groundPath=()=>{
                     ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+w,y);
-                    if(rightCliff){ctx.lineTo(x+w,y+20);ctx.lineTo(x+w-8,y+58);ctx.lineTo(x+w+2,y+104);ctx.lineTo(x+w-12,y+166);ctx.lineTo(x+w-7,y+h);}
-                    else ctx.lineTo(x+w,y+h);
-                    if(leftCliff){ctx.lineTo(x+7,y+h);ctx.lineTo(x+12,y+166);ctx.lineTo(x-2,y+104);ctx.lineTo(x+8,y+58);ctx.lineTo(x,y+20);}
-                    else ctx.lineTo(x,y+h);
+                    ctx.lineTo(x+w,y+h);
+                    ctx.lineTo(x,y+h);
                     ctx.closePath();
                 };
                 const cliff=ctx.createLinearGradient(0,y,0,y+h);cliff.addColorStop(0,'#777b63');cliff.addColorStop(.25,'#655f54');cliff.addColorStop(1,'#3e4442');ctx.fillStyle=cliff;groundPath();ctx.fill();
@@ -4232,8 +4229,8 @@
                 ctx.fillStyle='rgba(228,205,142,.18)';for(let sx=x+60; sx<x+w; sx+=210){ctx.beginPath();ctx.ellipse(sx,y+75,42,9,-.08,0,Math.PI*2);ctx.fill();}
                 ctx.restore();
                 _fantasyLine([[x,y],[x+w,y]],'#17343a',6);
-                if(leftCliff)_fantasyLine([[x,y+18],[x+8,y+58],[x-2,y+104],[x+12,y+166],[x+7,y+h]],'#17343a',6);
-                if(rightCliff)_fantasyLine([[x+w,y+18],[x+w-8,y+58],[x+w+2,y+104],[x+w-12,y+166],[x+w-7,y+h]],'#17343a',6);
+                if(leftCliff)_fantasyLine([[x,y],[x,y+h]],'#17343a',7);
+                if(rightCliff)_fantasyLine([[x+w,y],[x+w,y+h]],'#17343a',7);
             }else{
                 ctx.save();ctx.fillStyle='#d9bd71';ctx.strokeStyle='#17343a';ctx.lineWidth=5;_roundPath(x,y,w,h,Math.min(15,h*.25));ctx.fill();ctx.stroke();ctx.fillStyle='#f3dc96';ctx.fillRect(x+12,y+9,w-24,Math.max(7,h*.22));ctx.strokeStyle='#9b7e42';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(x+w*.2,y+h*.67);ctx.lineTo(x+w*.42,y+h*.64);ctx.moveTo(x+w*.65,y+h*.7);ctx.lineTo(x+w*.8,y+h*.66);ctx.stroke();ctx.restore();
             }

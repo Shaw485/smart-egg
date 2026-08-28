@@ -51,8 +51,13 @@ const dropTerrainCall = game.indexOf('drawFantasyDropTerrain();');
 const platformCallAfterDropTerrain = game.indexOf('drawFantasyPlatforms();', dropTerrainCall);
 assert.ok(dropTerrainCall >= 0 && platformCallAfterDropTerrain > dropTerrainCall,
   '断崖深度必须先于平台绘制，避免覆盖平台顶面和碰撞落脚线');
-assert.match(game, /high-cliff-v2/, '共享断崖视觉必须标记 high-cliff-v2 样式版本');
 assert.match(game, /drop-terrain-layout/, '断崖布局必须提供 render 模块诊断事件');
+assert.match(game, /style: 'vertical-shaft-v1'/, '主线断崖必须使用垂直深坑样式');
+assert.match(game, /ctx\.lineTo\(gap\.right,bottom\)[\s\S]*ctx\.lineTo\(gap\.left,bottom\)/, '坑体左右边界必须垂直延伸到底部');
+assert.match(game, /\[\[x,y\],\[x,y\+h\]\]/, '左侧断崖必须使用垂直黑色轮廓');
+assert.match(game, /\[\[x\+w,y\],\[x\+w,y\+h\]\]/, '右侧断崖必须使用垂直黑色轮廓');
 assert.match(game, /collisionGeometryChanged:\s*false/, '视觉升级必须明确声明没有修改碰撞几何');
+assert.match(game, /visualSidewalls:\s*'vertical'/, '日志必须记录断崖侧壁为垂直样式');
+assert.match(game, /extendsBelowViewport:\s*true/, '日志必须记录坑体延伸到视口外');
 
 console.log('主线功能守恒测试通过：首页、选关、暂停返回、创造模式、编辑器、控制与日志均保留。');

@@ -22,8 +22,8 @@ function functionBody(source, functionName, nextFunctionName) {
 
 assert.match(html, /第13–42关连续评审/);
 assert.match(html, /aria-label="怪奇之原第13关至第42关连续试玩评审"/);
-assert.match(html, /style\.css\?v=5/);
-assert.match(html, /logger\.js\?v=5[\s\S]*logic\.js\?v=5[\s\S]*levels\.js\?v=5[\s\S]*game\.js\?v=5/);
+assert.match(html, /style\.css\?v=6/);
+assert.match(html, /logger\.js\?v=6[\s\S]*logic\.js\?v=6[\s\S]*levels\.js\?v=6[\s\S]*game\.js\?v=6/);
 assert.doesNotMatch(html, /src="\.\.\//);
 
 assert.strictEqual(levels.length, 30);
@@ -78,8 +78,17 @@ assert.match(game, /hint-auto-open-debug/);
 
 const renderLevel = functionBody(game, 'renderLevel', 'drawSummary');
 assert.match(renderLevel, /drawDropTerrain\(\)[\s\S]*floorsForLevel\(\)\.forEach\(drawGround\)[\s\S]*drawMechanic\(\)[\s\S]*drawPlayer\(\)/);
-assert.match(game, /style: 'high-cliff-v3'/);
+assert.match(game, /style: 'vertical-shaft-v1'/);
 assert.match(game, /collision_geometry_changed: false/);
+assert.match(game, /visual_sidewalls: 'vertical'/);
+assert.match(game, /extends_below_canvas: true/);
+assert.match(game, /controls_cutout_preserved: true/);
+const dropTerrain = functionBody(game, 'drawDropTerrain', 'drawDropTerrainControlCutout');
+assert.match(dropTerrain, /moveTo\(gap\.left, gap\.top \+ 3\)[\s\S]*lineTo\(gap\.right, bottom\)[\s\S]*lineTo\(gap\.left, bottom\)/);
+const controlCutout = functionBody(game, 'drawDropTerrainControlCutout', 'drawGround');
+assert.match(controlCutout, /fillRect\(gap\.left, UI_Y, gap\.right - gap\.left/);
+assert.match(controlCutout, /moveTo\(gap\.left, gap\.top\)[\s\S]*lineTo\(gap\.left, bottom\)[\s\S]*moveTo\(gap\.right, gap\.top\)[\s\S]*lineTo\(gap\.right, bottom\)/);
+assert.match(renderLevel, /drawControls\(\)[\s\S]*drawDropTerrainControlCutout\(\)/);
 
 ['runtime', 'state', 'ui', 'input', 'gesture', 'render', 'review', 'storage', 'export', 'audio', 'mechanic:bridge', 'mechanic:door', 'mechanic:password', 'mechanic:erase'].forEach(moduleName => {
   assert(game.includes("'" + moduleName + "'"), '缺少日志模块：' + moduleName);

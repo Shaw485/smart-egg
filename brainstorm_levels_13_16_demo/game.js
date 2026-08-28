@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const VERSION = 'review-13-42-v2';
+  const VERSION = 'review-13-42-v3';
   const W = 1920;
   const H = 1080;
   const GROUND_Y = 790;
@@ -272,9 +272,12 @@
       creator_mechanics: level.creator
     });
     log('render', 'drop-terrain-layout', {
-      style: 'high-cliff-v3',
+      style: 'vertical-shaft-v1',
       gaps: terrainLayout().gaps,
-      collision_geometry_changed: false
+      collision_geometry_changed: false,
+      visual_sidewalls: 'vertical',
+      extends_below_canvas: true,
+      controls_cutout_preserved: true
     });
   }
 
@@ -1063,19 +1066,43 @@
 
   function drawDropTerrain() {
     terrainLayout().gaps.forEach(function (gap) {
-      const shade = ctx.createLinearGradient(0, gap.top, 0, UI_Y + 20);
+      const bottom = H + 28;
+      const shade = ctx.createLinearGradient(0, gap.top, 0, bottom);
       shade.addColorStop(0, 'rgba(23,52,58,.75)');
       shade.addColorStop(.5, 'rgba(20,35,40,.95)');
       shade.addColorStop(1, '#111a20');
       ctx.save();
       ctx.fillStyle = shade;
       ctx.beginPath();
-      ctx.moveTo(gap.left - 24, gap.top + 3);
-      ctx.lineTo(gap.right + 24, gap.top + 3);
-      ctx.lineTo(gap.right + 36, UI_Y + 28);
-      ctx.lineTo(gap.left - 36, UI_Y + 28);
+      ctx.moveTo(gap.left, gap.top + 3);
+      ctx.lineTo(gap.right, gap.top + 3);
+      ctx.lineTo(gap.right, bottom);
+      ctx.lineTo(gap.left, bottom);
       ctx.closePath();
       ctx.fill();
+      ctx.restore();
+    });
+  }
+
+  // 控制区绘制在世界之后，因此把坑柱在控制区内补画一次；只覆盖坑宽，不改变按钮热区或碰撞。
+  function drawDropTerrainControlCutout() {
+    terrainLayout().gaps.forEach(function (gap) {
+      const bottom = H + 28;
+      const shade = ctx.createLinearGradient(0, UI_Y, 0, bottom);
+      shade.addColorStop(0, 'rgba(20,35,40,.95)');
+      shade.addColorStop(1, '#111a20');
+      ctx.save();
+      ctx.fillStyle = shade;
+      ctx.fillRect(gap.left, UI_Y, gap.right - gap.left, bottom - UI_Y);
+      ctx.strokeStyle = '#17343a';
+      ctx.lineWidth = 8;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(gap.left, gap.top);
+      ctx.lineTo(gap.left, bottom);
+      ctx.moveTo(gap.right, gap.top);
+      ctx.lineTo(gap.right, bottom);
+      ctx.stroke();
       ctx.restore();
     });
   }
@@ -1090,21 +1117,13 @@
     const layout = terrainLayout();
     const leftCliff = layout.gaps.some(function (gap) { return Math.abs(gap.right - floor.x) < 1; });
     const rightCliff = layout.gaps.some(function (gap) { return Math.abs(gap.left - (floor.x + floor.w)) < 1; });
-    const bottom = UI_Y + 24;
+    const bottom = H + 24;
     const path = function () {
       ctx.beginPath();
       ctx.moveTo(floor.x, floor.y);
       ctx.lineTo(floor.x + floor.w, floor.y);
-      if (rightCliff) {
-        ctx.lineTo(floor.x + floor.w - 4, floor.y + 24);
-        ctx.lineTo(floor.x + floor.w + 8, floor.y + 51);
-        ctx.lineTo(floor.x + floor.w - 12, bottom);
-      } else ctx.lineTo(floor.x + floor.w, bottom);
-      if (leftCliff) {
-        ctx.lineTo(floor.x + 12, bottom);
-        ctx.lineTo(floor.x - 8, floor.y + 51);
-        ctx.lineTo(floor.x + 4, floor.y + 24);
-      } else ctx.lineTo(floor.x, bottom);
+      ctx.lineTo(floor.x + floor.w, bottom);
+      ctx.lineTo(floor.x, bottom);
       ctx.closePath();
     };
     const fill = ctx.createLinearGradient(0, floor.y, 0, bottom);
@@ -1116,8 +1135,8 @@
     ctx.restore();
     ctx.strokeStyle = '#17343a'; ctx.lineWidth = 5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     ctx.beginPath(); ctx.moveTo(floor.x, floor.y); ctx.lineTo(floor.x + floor.w, floor.y); ctx.stroke();
-    if (leftCliff) { ctx.beginPath(); ctx.moveTo(floor.x + 4, floor.y + 21); ctx.lineTo(floor.x - 8, floor.y + 51); ctx.lineTo(floor.x + 12, bottom); ctx.stroke(); }
-    if (rightCliff) { ctx.beginPath(); ctx.moveTo(floor.x + floor.w - 4, floor.y + 21); ctx.lineTo(floor.x + floor.w + 8, floor.y + 51); ctx.lineTo(floor.x + floor.w - 12, bottom); ctx.stroke(); }
+    if (leftCliff) { ctx.beginPath(); ctx.moveTo(floor.x, floor.y); ctx.lineTo(floor.x, bottom); ctx.stroke(); }
+    if (rightCliff) { ctx.beginPath(); ctx.moveTo(floor.x + floor.w, floor.y); ctx.lineTo(floor.x + floor.w, bottom); ctx.stroke(); }
   }
 
   function drawDoor(x, platformY, open, options) {
@@ -1435,6 +1454,7 @@
     drawPlayer();
     drawTopUI();
     drawControls();
+    drawDropTerrainControlCutout();
     drawHint();
     drawToast();
     drawSuccessRibbon();
