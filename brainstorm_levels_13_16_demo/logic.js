@@ -47,7 +47,43 @@
     return { valid: true, reason: 'connected', length: length };
   }
 
-  const api = { clamp, nextDualHold, strokeLength, validateStroke };
+  function nextUndecidedIndex(levels, decisions) {
+    const catalog = Array.isArray(levels) ? levels : [];
+    const resolved = decisions && typeof decisions === 'object' ? decisions : {};
+    return catalog.findIndex(function (level) { return !resolved[level.id]; });
+  }
+
+  function summarizeReview(levels, decisions) {
+    const accepted = [];
+    const discarded = [];
+    (Array.isArray(levels) ? levels : []).forEach(function (level) {
+      const entry = decisions && decisions[level.id];
+      if (!entry) return;
+      if (entry.decision === 'accept') accepted.push(level.id);
+      else if (entry.decision === 'discard') discarded.push(level.id);
+    });
+    return { total: Array.isArray(levels) ? levels.length : 0, decided: accepted.length + discarded.length, accepted: accepted, discarded: discarded };
+  }
+
+  function nextHold(current, active, dt, target, decay) {
+    const limit = Math.max(0, Number(target) || 0);
+    const step = Math.max(0, Number(dt) || 0);
+    return active ? clamp(current + step, 0, limit) : clamp(current - step * (decay == null ? 1 : decay), 0, limit);
+  }
+
+  function isSunAligned(x, y) {
+    return x > 720 && x < 1040 && y < 330;
+  }
+
+  function advanceSequence(current, input, target) {
+    const prefix = Array.isArray(current) ? current.slice() : [];
+    const goal = Array.isArray(target) ? target : [];
+    const expected = goal[prefix.length];
+    if (input === expected) return prefix.concat(input);
+    return input === goal[0] ? [input] : [];
+  }
+
+  const api = { clamp, nextDualHold, strokeLength, validateStroke, nextUndecidedIndex, summarizeReview, nextHold, isSunAligned, advanceSequence };
   root.GuaiqiRoundTwoLogic = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

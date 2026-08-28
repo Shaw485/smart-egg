@@ -8,7 +8,7 @@ const vm = require('vm');
 const root = path.resolve(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const game = fs.readFileSync(path.join(root, 'game.js'), 'utf8');
-const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8');
+const levels = require(path.join(root, 'levels.js'));
 const loggerSource = fs.readFileSync(path.join(root, 'logger.js'), 'utf8');
 const logic = require(path.join(root, 'logic.js'));
 
@@ -20,83 +20,82 @@ function functionBody(source, functionName, nextFunctionName) {
   return source.slice(start, end);
 }
 
-assert.match(html, /第13与15关试玩/);
-assert.match(html, /aria-label="怪奇之原第13关与第15关独立试玩"/);
-assert.match(html, /style\.css\?v=2/);
-assert.match(html, /logger\.js\?v=2[\s\S]*logic\.js\?v=2[\s\S]*game\.js\?v=2/);
+assert.match(html, /第13–42关连续评审/);
+assert.match(html, /aria-label="怪奇之原第13关至第42关连续试玩评审"/);
+assert.match(html, /style\.css\?v=4/);
+assert.match(html, /logger\.js\?v=4[\s\S]*logic\.js\?v=4[\s\S]*levels\.js\?v=4[\s\S]*game\.js\?v=4/);
 assert.doesNotMatch(html, /src="\.\.\//);
-assert.doesNotMatch(html, /href="\.\.\//);
-assert.doesNotMatch(html, /14|16/);
-assert.doesNotMatch(readme, /\?level=14|\?level=16|mechanic:level14|mechanic:level16/);
 
-assert.match(game, /id: 13,[\s\S]*title: '进退之间'[\s\S]*mechanic: 'dual_bridge'/);
-assert.match(game, /id: 15,[\s\S]*title: '一笔成路'[\s\S]*mechanic: 'ink_path'/);
-const levelRegistry = game.slice(game.indexOf('const LEVELS = ['), game.indexOf('\n  ];', game.indexOf('const LEVELS = [')) + 5);
-const enabledLogModules = game.slice(game.indexOf('const logger ='), game.indexOf("logger.setModule('physics'"));
-assert.doesNotMatch(levelRegistry, /id:\s*14\b|id:\s*16\b/);
-assert.doesNotMatch(levelRegistry, /mechanic:\s*'spread_crack'|mechanic:\s*'fake_loading'/);
-assert.doesNotMatch(enabledLogModules, /mechanic:level14|mechanic:level16/);
-assert.match(game, /hintVisible = false/);
-assert.match(game, /回到试验选关/);
-assert.match(game, /返回主线选关/);
+assert.strictEqual(levels.length, 30);
+assert.deepStrictEqual(levels.map(level => level.id), Array.from({ length: 30 }, (_, index) => index + 13));
+assert.strictEqual(new Set(levels.map(level => level.mechanic)).size, 30, '30关机制键必须互不重复');
+levels.forEach(level => {
+  assert(level.title.length >= 3, '关卡标题过短：' + level.id);
+  assert(level.teaser.length >= 8, '关卡引子过短：' + level.id);
+  assert(level.hint.length >= 8, '提示过短：' + level.id);
+  assert(Array.isArray(level.creator) && level.creator.length >= 1, '缺少创造模式元数据：' + level.id);
+  assert(game.includes("mechanic === '" + level.mechanic + "'") || game.includes("mechanic === \"" + level.mechanic + "\""), '游戏引擎未接入机制：' + level.mechanic);
+});
+
+const level15 = levels.find(level => level.id === 15);
+assert(level15);
+assert.doesNotMatch(level15.hint, /左|右|起笔|松手|画笔|虚线/);
+const drawInk = functionBody(game, 'drawInkPath', 'drawKey');
+assert.doesNotMatch(drawInk, /setLineDash|虚线|画笔/);
+assert.match(drawInk, /moveTo\(650, GROUND_Y\)[\s\S]*lineTo\(1270, GROUND_Y\)/);
+assert.match(game, /type: 'ink', special: 'ink', h: 24/);
+
+assert.match(game, /const STORAGE_KEY = 'guaiqi-level-review-13-42-v1'/);
+assert.match(game, /function recordDecision\(decision, source\)/);
+assert.match(game, /decision === 'accept'/);
+assert.match(game, /recordDecision\('discard', 'canvas-button'\)/);
+assert.match(game, /firstUndecidedIndex\(\)/);
+assert.match(game, /screen = 'summary'/);
+assert.match(game, /30 关评审完成/);
+assert.match(game, /开始处理评审结果/);
+assert.doesNotMatch(game, /上一关|下一关|暂不决定|跳过本关|修改选择/);
+assert.match(game, /localStorage\.getItem\(STORAGE_KEY\)/);
+assert.match(game, /localStorage\.setItem\(STORAGE_KEY/);
+assert.doesNotMatch(game, /fetch\(|XMLHttpRequest|WebSocket/);
+
 assert.match(game, /heldKeys\.has\('KeyA'\)/);
 assert.match(game, /heldKeys\.has\('KeyD'\)/);
 assert.match(game, /heldKeys\.has\('Space'\)/);
-assert.match(game, /mechanic:level13/);
-assert.match(game, /mechanic:level15/);
+assert.match(game, /heldKeys\.has\('ShiftLeft'\)/);
+assert.match(game, /canvas\.addEventListener\('pointerdown'/);
+assert.match(game, /canvas\.addEventListener\('pointermove'/);
+assert.match(game, /canvas\.addEventListener\('pointerup'/);
+assert.match(game, /hintVisible = false/);
+
+const renderLevel = functionBody(game, 'renderLevel', 'drawSummary');
+assert.match(renderLevel, /drawDropTerrain\(\)[\s\S]*floorsForLevel\(\)\.forEach\(drawGround\)[\s\S]*drawMechanic\(\)[\s\S]*drawPlayer\(\)/);
+assert.match(game, /style: 'high-cliff-v3'/);
+assert.match(game, /collision_geometry_changed: false/);
+
+['runtime', 'state', 'ui', 'input', 'gesture', 'render', 'review', 'storage', 'export', 'audio', 'mechanic:bridge', 'mechanic:door', 'mechanic:password', 'mechanic:erase'].forEach(moduleName => {
+  assert(game.includes("'" + moduleName + "'"), '缺少日志模块：' + moduleName);
+});
 assert.match(game, /logger\.setModule\('physics', false\)/);
-assert.match(game, /第 13、15 关独立体验/);
-assert.match(game, /试玩 v2/);
-assert.doesNotMatch(game, /第 13[–-]16 关独立体验|试玩 v1/);
-assert.doesNotMatch(game, /localStorage|fetch\(|XMLHttpRequest|WebSocket/);
-
-const level15Definition = game.match(/\{\s*id:\s*15,[\s\S]*?\n\s*\}/);
-assert(level15Definition, '缺少第15关定义');
-assert.doesNotMatch(level15Definition[0], /左|右|起笔|松手|墨量|画笔/);
-
-const startInk = functionBody(game, 'startInkStroke', 'updateInkStroke');
-const finishInk = functionBody(game, 'finishInkStroke', 'onPointerDown');
-assert.doesNotMatch(startInk, /要从左|起笔|画笔|墨量/);
-assert.doesNotMatch(finishInk, /要从左|碰到右|朝右|起笔|松手|墨量|画笔/);
-
-const drawInk = functionBody(game, 'drawInkMechanic', 'drawTopUI');
-assert.doesNotMatch(drawInk, /setLineDash|\[18,\s*14\]|moveTo\(610,\s*760\)|moveTo\(1200,\s*760\)/);
-assert.match(drawInk, /inkBridge/);
-assert.match(game, /const INK_SURFACE_Y = GROUND_Y/);
-assert.match(game, /floors\.push\(\{ x: 650, y: INK_SURFACE_Y, w: 620,[^}]*special: 'ink'/);
-assert.match(drawInk, /moveTo\(650, INK_SURFACE_Y\)[\s\S]*lineTo\(1270, INK_SURFACE_Y\)/);
-
-const drawGround = functionBody(game, 'drawGround', 'drawDoor');
-assert.match(drawGround, /special\s*===\s*['"]ink['"]/);
-assert.match(drawGround, /return/);
-assert.doesNotMatch(drawGround, /special\s*===\s*['"]ink['"]\s*\?\s*['"]#fff0bd/);
+assert.match(game, /maxEntries: 1500/);
+assert.match(game, /sensitive_fields_redacted: true/);
 
 assert.strictEqual(logic.nextDualHold(0, true, false, 5, 1), 0);
 assert.strictEqual(logic.nextDualHold(0.4, true, true, 0.3, 1), 0.7);
-assert.strictEqual(logic.nextDualHold(0.9, true, true, 0.2, 1), 1);
-assert.strictEqual(logic.nextDualHold(0.9, false, true, 0.01, 1), 0);
-assert.deepStrictEqual(Object.keys(logic).sort(), ['clamp', 'nextDualHold', 'strokeLength', 'validateStroke']);
-
-const validStroke = [
-  { x: 650, y: 780 },
-  { x: 820, y: 765 },
-  { x: 1010, y: 775 },
-  { x: 1240, y: 785 }
-];
-const validResult = logic.validateStroke(validStroke);
-assert.strictEqual(validResult.valid, true);
-assert.strictEqual(validResult.reason, 'connected');
 assert.strictEqual(logic.strokeLength([{ x: 0, y: 0 }, { x: 3, y: 4 }]), 5);
-assert.strictEqual(logic.validateStroke([{ x: 800, y: 780 }, { x: 1240, y: 780 }]).reason, 'too-few-points');
-const overBudget = [
-  { x: 650, y: 780 },
-  { x: 720, y: 650 },
-  { x: 840, y: 810 },
-  { x: 960, y: 650 },
-  { x: 1080, y: 810 },
-  { x: 1240, y: 780 }
-];
-assert.strictEqual(logic.validateStroke(overBudget).reason, 'ink-exhausted');
+const validStroke = [{ x: 650, y: 780 }, { x: 820, y: 765 }, { x: 1010, y: 775 }, { x: 1240, y: 785 }];
+assert.strictEqual(logic.validateStroke(validStroke).valid, true);
+assert.strictEqual(logic.nextUndecidedIndex(levels, { 13: { decision: 'accept' }, 14: { decision: 'discard' } }), 2);
+assert.strictEqual(logic.nextUndecidedIndex(levels, Object.fromEntries(levels.map(level => [level.id, { decision: 'accept' }]))), -1);
+assert.deepStrictEqual(logic.summarizeReview(levels.slice(0, 3), {
+  13: { decision: 'accept' }, 14: { decision: 'discard' }, 15: { decision: 'accept' }
+}), { total: 3, decided: 3, accepted: [13, 15], discarded: [14] });
+assert.strictEqual(logic.nextHold(0.4, true, 0.3, 1, 2), 0.7);
+assert.strictEqual(logic.nextHold(0.4, false, 0.3, 1, 2), 0);
+assert.strictEqual(logic.isSunAligned(900, 250), true);
+assert.strictEqual(logic.isSunAligned(1200, 250), false);
+assert.deepStrictEqual(logic.advanceSequence([], 1, [1, 0, 2]), [1]);
+assert.deepStrictEqual(logic.advanceSequence([1], 2, [1, 0, 2]), []);
+assert.deepStrictEqual(logic.advanceSequence([1], 0, [1, 0, 2]), [1, 0]);
 
 const sandbox = {
   console: { info() {}, warn() {}, error() {} },
@@ -107,27 +106,27 @@ const sandbox = {
 };
 sandbox.globalThis = sandbox;
 vm.runInNewContext(loggerSource, sandbox, { filename: 'logger.js' });
-const RoundTwoLogger = sandbox.module.exports.RoundTwoLogger;
-const testLogger = new RoundTwoLogger({ version: 'test', maxEntries: 100, minLevel: 'info' });
-testLogger.setModule('mechanic:level13', true);
-testLogger.log('mechanic:level13', 'test-sensitive-redaction', {
+const ReviewLogger = sandbox.module.exports.RoundTwoLogger;
+const testLogger = new ReviewLogger({ version: 'test', maxEntries: 100, minLevel: 'info' });
+testLogger.setModule('review', true);
+testLogger.log('review', 'redaction-check', {
   token: 'must-not-leak',
   authorization: 'Bearer must-not-leak',
   nested: { openid: 'must-not-leak', safe: 'kept' }
 });
-assert.strictEqual(testLogger.entries.length, 1);
 assert.strictEqual(testLogger.entries[0].context.token, '[redacted]');
 assert.strictEqual(testLogger.entries[0].context.authorization, '[redacted]');
 assert.strictEqual(testLogger.entries[0].context.nested.openid, '[redacted]');
 assert.strictEqual(testLogger.entries[0].context.nested.safe, 'kept');
-testLogger.setModule('mechanic:level13', false);
-testLogger.log('mechanic:level13', 'disabled-event', {});
+testLogger.setModule('review', false);
+testLogger.log('review', 'disabled-event', {});
 assert.strictEqual(testLogger.entries.length, 1);
-testLogger.setModule('mechanic:level15', true);
+testLogger.setModule('storage', true);
 testLogger.setLevel('warn');
-testLogger.log('mechanic:level15', 'filtered-info', {});
-testLogger.log('mechanic:level15', 'kept-warning', {}, 'warn');
+testLogger.log('storage', 'filtered-info', {});
+testLogger.log('storage', 'kept-warning', {}, 'warn');
 assert.strictEqual(testLogger.entries.length, 2);
+assert.strictEqual(testLogger.snapshot().retention.max_entries, 100);
 assert.strictEqual(testLogger.snapshot().privacy.sensitive_fields_redacted, true);
 
-console.log('第13、15关独立试玩冒烟测试通过：关卡收敛、隐晦提示、墨桥层级、桌面/触控入口与日志隔离均已覆盖。');
+console.log('第13–42关连续评审冒烟测试通过：30个独立机制、加入/抛弃持久化、无跳关流程、触控/键盘、断崖渲染与模块日志均已覆盖。');

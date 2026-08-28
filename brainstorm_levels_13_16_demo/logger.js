@@ -27,7 +27,7 @@
       this.minLevel = opts.minLevel || 'info';
       this.modules = new Map();
       this.entries = [];
-      this.sessionId = 'round2-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+      this.sessionId = 'review-13-42-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
       this.startedAt = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
     }
     setModule(name, enabled) { this.modules.set(name, enabled !== false); }
@@ -53,12 +53,12 @@
       this.entries.push(entry);
       if (this.entries.length > this.maxEntries) this.entries.splice(0, this.entries.length - this.maxEntries);
       const method = resolvedLevel === 'error' ? 'error' : resolvedLevel === 'warn' ? 'warn' : 'info';
-      if (typeof console !== 'undefined' && console[method]) console[method]('[ROUND2 ' + module + '/' + event + ']', entry.context);
+      if (typeof console !== 'undefined' && console[method]) console[method]('[REVIEW ' + module + '/' + event + ']', entry.context);
       return entry;
     }
     snapshot() {
       return {
-        schema: 'guaiqi-round2-log-v1',
+        schema: 'guaiqi-review-log-v1',
         version: this.version,
         session_id: this.sessionId,
         generated_at: new Date().toISOString(),
@@ -73,7 +73,7 @@
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = filename || ('guaiqi-round2-' + Date.now() + '.json');
+      link.download = filename || ('guaiqi-review-' + Date.now() + '.json');
       document.body.appendChild(link);
       link.click();
       link.remove();

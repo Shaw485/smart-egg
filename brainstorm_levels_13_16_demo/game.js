@@ -1,85 +1,164 @@
 (function () {
   'use strict';
 
-  const VERSION = 'round2-v2';
+  const VERSION = 'review-13-42-v1';
   const W = 1920;
   const H = 1080;
   const GROUND_Y = 790;
-  const INK_SURFACE_Y = GROUND_Y;
   const UI_Y = 870;
+  const STORAGE_KEY = 'guaiqi-level-review-13-42-v1';
+  const LEVELS = window.GuaiqiReviewLevels || [];
   const logic = window.GuaiqiRoundTwoLogic;
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d', { alpha: false });
-  const logger = new window.GuaiqiRoundTwoLogger({ version: VERSION, maxEntries: 1000, minLevel: 'info' });
-  ['runtime', 'state', 'input', 'gesture', 'render', 'export', 'mechanic:level13', 'mechanic:level15'].forEach(function (name) { logger.setModule(name, true); });
+  const logger = new window.GuaiqiRoundTwoLogger({ version: VERSION, maxEntries: 1500, minLevel: 'info' });
+
+  [
+    'runtime', 'state', 'ui', 'input', 'gesture', 'render', 'review', 'storage', 'export', 'audio',
+    'mechanic:bridge', 'mechanic:door', 'mechanic:timing', 'mechanic:direction',
+    'mechanic:drag', 'mechanic:password', 'mechanic:platform', 'mechanic:transform',
+    'mechanic:sound', 'mechanic:erase'
+  ].forEach(function (name) { logger.setModule(name, true); });
   logger.setModule('physics', false);
 
-  const LEVELS = [
-    {
-      id: 13,
-      title: '进退之间',
-      mechanic: 'dual_bridge',
-      teaser: '相反的方向，也会在中间相遇。',
-      hint: '同时按住左、右按钮约一秒，让两股力量在断口中间相遇。'
-    },
-    {
-      id: 15,
-      title: '一笔成路',
-      mechanic: 'ink_path',
-      teaser: '空白处，也许并不是真的空。',
-      hint: '空白并不一定无路。'
-    }
-  ];
-
   const HIT = {
-    hint: { x: 285, y: 40, w: 92, h: 92 },
-    reset: { x: 395, y: 40, w: 92, h: 92 },
-    pause: { x: 505, y: 40, w: 92, h: 92 },
+    hint: { x: 260, y: 38, w: 86, h: 86 },
+    reset: { x: 360, y: 38, w: 86, h: 86 },
+    pause: { x: 460, y: 38, w: 86, h: 86 },
+    accept: { x: 1510, y: 42, w: 174, h: 70 },
+    discard: { x: 1698, y: 42, w: 174, h: 70 },
     left: { x: 120, y: 895, w: 180, h: 135 },
     right: { x: 330, y: 895, w: 180, h: 135 },
     jump: { x: 1615, y: 895, w: 185, h: 135 },
-    pauseBack: { x: 570, y: 575, w: 350, h: 96 },
-    pauseResume: { x: 1000, y: 575, w: 350, h: 96 },
-    successSelect: { x: 525, y: 650, w: 280, h: 92 },
-    successReplay: { x: 820, y: 650, w: 280, h: 92 },
-    successNext: { x: 1115, y: 650, w: 280, h: 92 },
-    selectBack: { x: 710, y: 920, w: 500, h: 92 }
+    pauseResume: { x: 785, y: 580, w: 350, h: 96 }
   };
 
   const heldKeys = new Set();
   const heldControls = new Map();
   const pointerModes = new Map();
   const activePointers = new Map();
-  let screen = 'select';
-  let status = 'select';
+  let screen = 'level';
+  let status = 'playing';
   let currentIndex = 0;
   let level = null;
   let frame = 0;
   let lastTime = performance.now();
   let levelStartedAt = lastTime;
   let hintVisible = false;
-  let successAt = 0;
   let audioContext = null;
+  let review = loadReview();
 
-  const player = { x: 350, y: GROUND_Y - 72, w: 70, h: 144, vx: 0, vy: 0, onGround: true, facing: 1 };
-  const state = createMechanicState();
+  const player = {
+    x: 350, y: GROUND_Y - 72, w: 70, h: 144,
+    vx: 0, vy: 0, onGround: true, onFloorType: 'ground', facing: 1, jumpCount: 0
+  };
+  const state = {};
 
   function createMechanicState() {
     return {
+      bridgeBuilt: false,
       dualHold: 0,
       dualStarted: false,
-      dualMilestone: 0,
-      bridgeBuilt: false,
       inkPath: [],
       inkBridge: false,
-      inkError: '',
-      inkErrorUntil: 0
+      inkErrorUntil: 0,
+      doorX: 1580,
+      doorY: GROUND_Y,
+      doorOpen: false,
+      doorHeld: false,
+      doorVY: 0,
+      doorMoving: false,
+      waitTime: 0,
+      sunX: 1535,
+      sunY: 180,
+      wordX: 950,
+      wordY: 330,
+      knocks: 0,
+      knockFlashUntil: 0,
+      flowerRemaining: [3, 1, 2, 5],
+      flowerFlashUntil: [0, 0, 0, 0],
+      blockHitLock: -1,
+      passwordInput: '',
+      keyCollected: false,
+      keyX: 1080,
+      keyHeld: false,
+      platformX: 650,
+      platformDX: 0,
+      cloudY: 575,
+      cloudHold: false,
+      cloudHoldTime: 0,
+      decoyTouched: false,
+      titleX: W / 2,
+      titleY: 95,
+      freeze: false,
+      faceTime: 0,
+      groundPhase: 0,
+      boxX: 980,
+      gravityFlipped: false,
+      soundSequence: [],
+      soundFlash: -1,
+      soundFlashUntil: 0,
+      wallErase: 0,
+      startVisited: false,
+      movingDoorLocked: false,
+      lastMechanicMilestone: -1,
+      toast: '',
+      toastUntil: 0
     };
   }
 
   function resetMechanicState() {
     const fresh = createMechanicState();
-    Object.keys(fresh).forEach(function (key) { state[key] = fresh[key]; });
+    Object.keys(state).forEach(function (key) { delete state[key]; });
+    Object.assign(state, fresh);
+    if (level && level.mechanic === 'runaway_door') state.doorX = 1430;
+    if (level && level.mechanic === 'drag_door') state.doorX = 1660;
+    if (level && level.mechanic === 'flee_key') state.keyX = 1260;
+  }
+
+  function safeReviewShape(value) {
+    const raw = value && typeof value === 'object' ? value : {};
+    const decisions = raw.decisions && typeof raw.decisions === 'object' ? raw.decisions : {};
+    const clean = {};
+    LEVELS.forEach(function (item) {
+      const entry = decisions[item.id];
+      if (!entry || (entry.decision !== 'accept' && entry.decision !== 'discard')) return;
+      clean[item.id] = {
+        id: item.id,
+        decision: entry.decision,
+        mechanic: item.mechanic,
+        creator: item.creator.slice(),
+        completed: Boolean(entry.completed),
+        elapsed_ms: Math.max(0, Number(entry.elapsed_ms) || 0),
+        decided_at: String(entry.decided_at || '')
+      };
+    });
+    return { schema: 'guaiqi-level-review-v1', version: VERSION, decisions: clean };
+  }
+
+  function loadReview() {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      return safeReviewShape(stored ? JSON.parse(stored) : null);
+    } catch (error) {
+      logger.log('storage', 'review-load-failed', {
+        operation: 'localStorage.getItem/JSON.parse',
+        message: error && error.message,
+        fallback: 'empty-review'
+      }, 'warn');
+      return safeReviewShape(null);
+    }
+  }
+
+  function saveReview() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(review));
+      log('storage', 'review-save-success', { decided_count: Object.keys(review.decisions).length });
+      return true;
+    } catch (error) {
+      log('storage', 'review-save-failed', { operation: 'localStorage.setItem', message: error && error.message }, 'error');
+      return false;
+    }
   }
 
   function log(module, event, context, levelName) {
@@ -92,21 +171,6 @@
     }, context || {}), levelName);
   }
 
-  function resize() {
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    canvas.width = Math.round(W * dpr);
-    canvas.height = Math.round(H * dpr);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    log('render', 'resize', { dpr: dpr, backing_w: canvas.width, backing_h: canvas.height }, 'debug');
-  }
-
-  function pointFromEvent(event) {
-    const rect = canvas.getBoundingClientRect();
-    return { x: (event.clientX - rect.left) * W / rect.width, y: (event.clientY - rect.top) * H / rect.height };
-  }
-  function inside(point, rect) {
-    return point.x >= rect.x && point.x <= rect.x + rect.w && point.y >= rect.y && point.y <= rect.y + rect.h;
-  }
   function roundedRect(x, y, w, h, radius, fill, stroke, lineWidth) {
     const r = Math.min(radius, w / 2, h / 2);
     ctx.beginPath();
@@ -116,7 +180,32 @@
     ctx.arcTo(x, y + h, x, y, r);
     ctx.arcTo(x, y, x + w, y, r);
     if (fill) { ctx.fillStyle = fill; ctx.fill(); }
-    if (stroke) { ctx.lineWidth = lineWidth || 4; ctx.strokeStyle = stroke; ctx.stroke(); }
+    if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lineWidth || 4; ctx.stroke(); }
+  }
+
+  function clamp(value, min, max) {
+    return logic && logic.clamp ? logic.clamp(value, min, max) : Math.max(min, Math.min(max, value));
+  }
+
+  function inside(point, rect) {
+    return point.x >= rect.x && point.x <= rect.x + rect.w && point.y >= rect.y && point.y <= rect.y + rect.h;
+  }
+
+  function near(point, x, y, rx, ry) {
+    return Math.abs(point.x - x) <= (rx || 70) && Math.abs(point.y - y) <= (ry || rx || 70);
+  }
+
+  function pointFromEvent(event) {
+    const rect = canvas.getBoundingClientRect();
+    return { x: (event.clientX - rect.left) * W / rect.width, y: (event.clientY - rect.top) * H / rect.height };
+  }
+
+  function resize() {
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    log('render', 'resize', { dpr: dpr, backing_w: canvas.width, backing_h: canvas.height }, 'debug');
   }
 
   function tone(frequency, duration, volume) {
@@ -126,13 +215,14 @@
       const gain = audioContext.createGain();
       oscillator.frequency.value = frequency;
       oscillator.type = 'sine';
-      gain.gain.setValueAtTime(volume || .05, audioContext.currentTime);
+      gain.gain.setValueAtTime(volume || .055, audioContext.currentTime);
       gain.gain.exponentialRampToValueAtTime(.001, audioContext.currentTime + duration);
       oscillator.connect(gain).connect(audioContext.destination);
       oscillator.start();
       oscillator.stop(audioContext.currentTime + duration);
+      log('audio', 'tone-play', { frequency: frequency, duration_ms: Math.round(duration * 1000) }, 'debug');
     } catch (error) {
-      log('runtime', 'audio-failed', { message: error && error.message }, 'warn');
+      log('audio', 'tone-failed', { operation: 'WebAudio tone', message: error && error.message }, 'warn');
     }
   }
 
@@ -141,53 +231,49 @@
     heldControls.clear();
     pointerModes.clear();
     activePointers.clear();
+    state.doorHeld = false;
+    state.keyHeld = false;
+    state.cloudHold = false;
+    state.freeze = false;
     log('input', 'all-input-reset', { reason: reason });
   }
 
   function resetPlayer() {
     player.w = 70;
     player.h = 144;
-    player.x = 350;
+    player.x = level && level.mechanic === 'start_backward' ? 430 : 350;
     player.y = GROUND_Y - player.h / 2;
     player.vx = 0;
     player.vy = 0;
     player.onGround = true;
+    player.onFloorType = 'ground';
     player.facing = 1;
-    heldControls.clear();
+    player.jumpCount = 0;
   }
 
-  function selectCards() {
-    return LEVELS.map(function (item, index) {
-      const column = index % 2;
-      return { level: item, index: index, x: 335 + column * 650, y: 365, w: 600, h: 235 };
-    });
-  }
-
-  function enterSelection(reason) {
-    clearLiveInput('enter-selection');
-    screen = 'select';
-    status = 'select';
-    level = null;
-    hintVisible = false;
-    log('state', 'selection-enter', { reason: reason || 'direct', available_levels: LEVELS.map(function (item) { return item.id; }) });
+  function firstUndecidedIndex() {
+    return logic.nextUndecidedIndex(LEVELS, review.decisions);
   }
 
   function enterLevel(index, reason) {
-    currentIndex = logic.clamp(index, 0, LEVELS.length - 1);
+    currentIndex = clamp(index, 0, LEVELS.length - 1);
     level = LEVELS[currentIndex];
     screen = 'level';
     status = 'playing';
     hintVisible = false;
-    successAt = 0;
     levelStartedAt = performance.now();
     clearLiveInput('level-enter');
     resetMechanicState();
     resetPlayer();
-    const terrain = terrainLayout();
-    log('state', 'level-enter', { reason: reason || 'direct', title: level.title });
+    log('state', 'level-enter', {
+      reason: reason || 'review-sequence',
+      review_index: currentIndex,
+      remaining: LEVELS.length - Object.keys(review.decisions).length,
+      creator_mechanics: level.creator
+    });
     log('render', 'drop-terrain-layout', {
-      style: 'high-cliff-v2',
-      gaps: terrain.gaps.map(function (gap) { return { left: gap.left, right: gap.right, width: gap.right - gap.left }; }),
+      style: 'high-cliff-v3',
+      gaps: terrainLayout().gaps,
       collision_geometry_changed: false
     });
   }
@@ -212,16 +298,52 @@
   function complete(reason) {
     if (status !== 'playing') return;
     status = 'success';
-    successAt = performance.now();
     clearLiveInput('level-complete');
-    log('state', 'level-complete', { reason: reason, elapsed_ms: Math.round(successAt - levelStartedAt) });
+    log('state', 'level-complete', { reason: reason, elapsed_ms: Math.round(performance.now() - levelStartedAt) });
     tone(660, .11);
     setTimeout(function () { tone(880, .14); }, 120);
   }
 
-  function returnToMainline() {
-    log('state', 'return-mainline-selection', { target: '../web_preview/index.html?mainline=v172&screen=levelSelect' });
-    window.location.href = '../web_preview/index.html?mainline=v172&screen=levelSelect';
+  function recordDecision(decision, source) {
+    if (!level || screen !== 'level' || review.decisions[level.id]) return;
+    const entry = {
+      id: level.id,
+      decision: decision,
+      mechanic: level.mechanic,
+      creator: level.creator.slice(),
+      completed: status === 'success',
+      elapsed_ms: Math.round(performance.now() - levelStartedAt),
+      decided_at: new Date().toISOString()
+    };
+    review.decisions[level.id] = entry;
+    log('review', 'level-decision', {
+      decision: decision,
+      source: source,
+      completed: entry.completed,
+      elapsed_ms: entry.elapsed_ms,
+      creator_mechanics: entry.creator
+    });
+    saveReview();
+    tone(decision === 'accept' ? 720 : 170, .11);
+    const next = firstUndecidedIndex();
+    if (next < 0) {
+      screen = 'summary';
+      status = 'summary';
+      level = null;
+      clearLiveInput('review-complete');
+      log('review', 'review-batch-complete', reviewSummary());
+    } else {
+      enterLevel(next, 'decision-' + decision);
+    }
+  }
+
+  function reviewSummary() {
+    return logic.summarizeReview(LEVELS, review.decisions);
+  }
+
+  function toast(message, duration) {
+    state.toast = message;
+    state.toastUntil = performance.now() + (duration || 1200);
   }
 
   function controlForPoint(point) {
@@ -230,38 +352,65 @@
     if (inside(point, HIT.jump)) return 'jump';
     return '';
   }
+
   function controlHeld(name) {
     for (const value of heldControls.values()) if (value === name) return true;
     return false;
   }
+
   function leftHeld() { return heldKeys.has('KeyA') || heldKeys.has('ArrowLeft') || controlHeld('left'); }
   function rightHeld() { return heldKeys.has('KeyD') || heldKeys.has('ArrowRight') || controlHeld('right'); }
   function jumpHeld() { return heldKeys.has('Space') || heldKeys.has('KeyW') || heldKeys.has('ArrowUp') || controlHeld('jump'); }
+  function freezeHeld() { return heldKeys.has('ShiftLeft') || heldKeys.has('ShiftRight') || state.freeze; }
+
+  function movementDirection() {
+    let direction = (rightHeld() ? 1 : 0) - (leftHeld() ? 1 : 0);
+    if (level && level.mechanic === 'reverse_controls') direction *= -1;
+    return direction;
+  }
 
   function tryJump(source) {
-    if (status !== 'playing' || !player.onGround) return false;
-    player.vy = -900;
+    if (!level || screen !== 'level' || status !== 'playing') return false;
+    const maxJumps = level.mechanic === 'double_jump' ? 2 : 1;
+    if (!player.onGround && player.jumpCount >= maxJumps) return false;
+    const gravityUp = level.mechanic === 'gravity_flip' && state.gravityFlipped;
+    player.vy = gravityUp ? 900 : -900;
     player.onGround = false;
-    log('input', 'jump', { source: source, x: Math.round(player.x), y: Math.round(player.y) });
+    player.jumpCount += 1;
+    if (level.mechanic === 'door_jumps' && !state.movingDoorLocked) state.doorVY = -880;
+    log('input', 'jump', { source: source, jump_count: player.jumpCount, gravity_up: gravityUp });
     tone(360, .06);
     return true;
   }
 
-  function closeHintForGesture(gesture) {
-    if (!hintVisible) return;
-    hintVisible = false;
-    log('state', 'hint-auto-close-for-gesture', { gesture: gesture });
+  function doorRect() {
+    const x = state.doorX;
+    const platformY = state.doorY;
+    return { x: x - 78, y: platformY - 230, w: 156, h: 230 };
+  }
+
+  function keypadRects() {
+    const rects = [];
+    for (let digit = 1; digit <= 9; digit += 1) {
+      const index = digit - 1;
+      rects.push({ digit: String(digit), x: 760 + (index % 3) * 135, y: 315 + Math.floor(index / 3) * 100, w: 115, h: 82 });
+    }
+    rects.push({ digit: '0', x: 760, y: 615, w: 250, h: 82 });
+    rects.push({ digit: 'back', x: 1030, y: 615, w: 250, h: 82 });
+    return rects;
+  }
+
+  function flowerBlocks() {
+    return [600, 840, 1080, 1320].map(function (x, index) { return { x: x, y: 545, w: 120, h: 95, index: index }; });
   }
 
   function startInkStroke(event, point) {
-    const allowedStart = point.x >= 585 && point.x <= 740 && point.y >= 640 && point.y <= 820;
-    if (!allowedStart) {
-      log('gesture', 'ink-start-rejected', { x: Math.round(point.x), y: Math.round(point.y), reason: 'outside-start-zone' }, 'warn');
+    if (!(point.x >= 570 && point.x <= 730 && point.y >= 625 && point.y <= 825)) {
+      log('gesture', 'ink-start-rejected', { x: Math.round(point.x), y: Math.round(point.y), reason: 'outside-left-bank' }, 'warn');
       return false;
     }
-    closeHintForGesture('ink-stroke');
-    const mode = { type: 'ink', points: [point], length: 0, overBudgetLogged: false };
-    pointerModes.set(event.pointerId, mode);
+    hintVisible = false;
+    pointerModes.set(event.pointerId, { type: 'ink', points: [point], length: 0, overBudgetLogged: false });
     log('gesture', 'ink-stroke-start', { x: Math.round(point.x), y: Math.round(point.y), max_length: 860 });
     return true;
   }
@@ -277,7 +426,6 @@
     if (mode.length > 860 && !mode.overBudgetLogged) {
       mode.overBudgetLogged = true;
       log('gesture', 'ink-budget-exceeded', { length: Math.round(mode.length), max_length: 860 }, 'warn');
-      tone(135, .07);
     }
   }
 
@@ -285,27 +433,163 @@
     const mode = pointerModes.get(event.pointerId);
     if (!mode || mode.type !== 'ink') return;
     const result = logic.validateStroke(mode.points);
-    log('gesture', 'ink-stroke-end', {
-      accepted: result.valid,
-      reason: result.reason,
-      length: Math.round(result.length),
-      point_count: mode.points.length,
-      start: mode.points[0],
-      end: mode.points[mode.points.length - 1]
-    }, result.valid ? 'info' : 'warn');
+    log('gesture', 'ink-stroke-end', { accepted: result.valid, reason: result.reason, length: Math.round(result.length), point_count: mode.points.length }, result.valid ? 'info' : 'warn');
+    state.inkPath = mode.points.slice();
     if (result.valid) {
-      state.inkPath = mode.points.slice();
       state.inkBridge = true;
-      state.inkError = '';
-      log('mechanic:level15', 'ink-bridge-created', { x: 650, y: GROUND_Y, width: 620, settled_from_length: Math.round(result.length) });
+      log('mechanic:bridge', 'ink-bridge-created', { x: 650, y: GROUND_Y, width: 620 });
       tone(620, .1);
     } else {
-      state.inkPath = mode.points.slice();
       state.inkBridge = false;
-      state.inkError = '这道痕迹还站不住。';
-      state.inkErrorUntil = performance.now() + 1600;
-      tone(150, .1);
+      state.inkErrorUntil = performance.now() + 1400;
+      toast('这道痕迹还站不住。', 1400);
+      tone(145, .09);
     }
+  }
+
+  function registerMechanicPointerDown(event, point) {
+    const mechanic = level.mechanic;
+    if (mechanic === 'ink_path') return startInkStroke(event, point);
+    if (mechanic === 'runaway_door' && inside(point, doorRect())) {
+      state.doorHeld = true;
+      pointerModes.set(event.pointerId, { type: 'hold-door' });
+      log('mechanic:door', 'runaway-door-held', { door_x: Math.round(state.doorX) });
+      return true;
+    }
+    if (mechanic === 'shadow_sun' && near(point, state.sunX, state.sunY, 90, 90)) {
+      pointerModes.set(event.pointerId, { type: 'drag-sun', offsetX: state.sunX - point.x, offsetY: state.sunY - point.y });
+      log('mechanic:drag', 'sun-drag-start', { x: Math.round(state.sunX), y: Math.round(state.sunY) });
+      return true;
+    }
+    if (mechanic === 'word_bridge' && near(point, state.wordX, state.wordY, 95, 70)) {
+      pointerModes.set(event.pointerId, { type: 'drag-word', offsetX: state.wordX - point.x, offsetY: state.wordY - point.y });
+      log('mechanic:drag', 'word-drag-start', { x: Math.round(state.wordX), y: Math.round(state.wordY) });
+      return true;
+    }
+    if (mechanic === 'knock_twice' && inside(point, doorRect())) {
+      const closeEnough = Math.abs(player.x - state.doorX) < 230;
+      state.knockFlashUntil = performance.now() + 420;
+      tone(105, .13, .09);
+      if (closeEnough) state.knocks = Math.min(2, state.knocks + 1);
+      log('mechanic:door', 'door-knock', { close_enough: closeEnough, counted_knocks: state.knocks, distance: Math.round(Math.abs(player.x - state.doorX)) });
+      if (state.knocks >= 2) state.doorOpen = true;
+      return true;
+    }
+    if (mechanic === 'flower_password' && state.flowerRemaining.every(function (count) { return count === 0; }) && Math.abs(player.x - state.doorX) < 330) {
+      const key = keypadRects().find(function (item) { return inside(point, item); });
+      if (key) {
+        if (key.digit === 'back') state.passwordInput = state.passwordInput.slice(0, -1);
+        else if (state.passwordInput.length < 4) state.passwordInput += key.digit;
+        log('mechanic:password', 'keypad-input', { action: key.digit === 'back' ? 'backspace' : 'digit', input_length: state.passwordInput.length });
+        tone(key.digit === 'back' ? 170 : 450 + Number(key.digit || 0) * 15, .045);
+        if (state.passwordInput.length === 4) {
+          if (state.passwordInput === '3125') {
+            state.doorOpen = true;
+            log('mechanic:password', 'password-accepted', { digits: 4 });
+            tone(760, .12);
+          } else {
+            log('mechanic:password', 'password-rejected', { digits: 4 }, 'warn');
+            state.passwordInput = '';
+            toast('顺序不对。', 900);
+          }
+        }
+        return true;
+      }
+    }
+    if (mechanic === 'shrink_tunnel' && near(point, player.x, player.y, 75, 95)) {
+      const feet = player.y + player.h / 2;
+      const becomingSmall = player.h > 100;
+      player.h = becomingSmall ? 84 : 144;
+      player.w = becomingSmall ? 48 : 70;
+      player.y = feet - player.h / 2;
+      log('mechanic:transform', 'player-size-toggle', { small: becomingSmall, width: player.w, height: player.h });
+      tone(becomingSmall ? 620 : 300, .07);
+      return true;
+    }
+    if (mechanic === 'cloud_hold' && near(point, 960, state.cloudY, 160, 55)) {
+      state.cloudHold = true;
+      pointerModes.set(event.pointerId, { type: 'hold-cloud' });
+      log('mechanic:platform', 'cloud-hold-start', { y: Math.round(state.cloudY) });
+      return true;
+    }
+    if (mechanic === 'decoy_door') {
+      const leftDoor = { x: 1160, y: GROUND_Y - 220, w: 150, h: 220 };
+      if (inside(point, leftDoor)) {
+        state.decoyTouched = true;
+        state.doorOpen = true;
+        state.doorX = 1580;
+        log('mechanic:door', 'decoy-mark-touched', { real_door_x: state.doorX });
+        tone(540, .09);
+        return true;
+      }
+    }
+    if (mechanic === 'title_platform' && near(point, state.titleX, state.titleY, 220, 65)) {
+      pointerModes.set(event.pointerId, { type: 'drag-title', offsetX: state.titleX - point.x, offsetY: state.titleY - point.y });
+      log('mechanic:drag', 'title-drag-start', { x: Math.round(state.titleX), y: Math.round(state.titleY) });
+      return true;
+    }
+    if (mechanic === 'freeze_spikes' && point.y < UI_Y) {
+      state.freeze = true;
+      pointerModes.set(event.pointerId, { type: 'freeze-world' });
+      log('mechanic:timing', 'hazards-freeze-start', { input: event.pointerType });
+      return true;
+    }
+    if (mechanic === 'drag_door' && inside(point, doorRect())) {
+      pointerModes.set(event.pointerId, { type: 'drag-door', offsetX: state.doorX - point.x });
+      log('mechanic:drag', 'door-drag-start', { door_x: Math.round(state.doorX) });
+      return true;
+    }
+    if (mechanic === 'door_jumps' && inside(point, doorRect()) && state.doorY < GROUND_Y - 45) {
+      state.movingDoorLocked = true;
+      state.doorOpen = true;
+      state.doorVY = 0;
+      log('mechanic:door', 'airborne-door-locked', { door_y: Math.round(state.doorY) });
+      tone(700, .1);
+      return true;
+    }
+    if (mechanic === 'ground_swap' && point.y > 700 && point.y < UI_Y) {
+      if (point.x > 560 && point.x < 760) state.groundPhase = 0;
+      else if (point.x > 1160 && point.x < 1380) state.groundPhase = 1;
+      else return false;
+      log('mechanic:platform', 'ground-phase-change', { phase: state.groundPhase, source_x: Math.round(point.x) });
+      tone(state.groundPhase ? 540 : 380, .07);
+      return true;
+    }
+    if (mechanic === 'flee_key' && near(point, state.keyX, GROUND_Y - 95, 70, 90)) {
+      state.keyHeld = true;
+      pointerModes.set(event.pointerId, { type: 'hold-key' });
+      log('mechanic:drag', 'flee-key-held', { key_x: Math.round(state.keyX) });
+      return true;
+    }
+    if (mechanic === 'gravity_flip' && near(point, 1450, 190, 80, 80)) {
+      state.gravityFlipped = !state.gravityFlipped;
+      player.onGround = false;
+      player.vy = state.gravityFlipped ? -120 : 120;
+      log('mechanic:transform', 'gravity-flipped', { direction: state.gravityFlipped ? 'up' : 'down' });
+      tone(state.gravityFlipped ? 660 : 260, .12);
+      return true;
+    }
+    if (mechanic === 'sound_order') {
+      const stones = [700, 960, 1220];
+      const index = stones.findIndex(function (x) { return near(point, x, GROUND_Y - 35, 90, 70); });
+      if (index >= 0) {
+        const frequencies = [330, 220, 440];
+        tone(frequencies[index], .18, .08);
+        state.soundFlash = index;
+        state.soundFlashUntil = performance.now() + 330;
+        const target = [1, 0, 2];
+        state.soundSequence = logic.advanceSequence(state.soundSequence, index, target);
+        log('mechanic:sound', 'tone-stone', { stone: index, frequency: frequencies[index], correct_prefix_length: state.soundSequence.length });
+        if (state.soundSequence.length === 3) state.doorOpen = true;
+        return true;
+      }
+    }
+    if (mechanic === 'erase_wall' && point.x >= 870 && point.x <= 1050 && point.y >= 430 && point.y <= GROUND_Y) {
+      pointerModes.set(event.pointerId, { type: 'erase-wall', last: point });
+      log('mechanic:erase', 'wall-erase-start', { progress: Number(state.wallErase.toFixed(2)) });
+      return true;
+    }
+    return false;
   }
 
   function onPointerDown(event) {
@@ -313,39 +597,22 @@
     activePointers.set(event.pointerId, point);
     try { canvas.setPointerCapture(event.pointerId); } catch (error) { log('input', 'pointer-capture-failed', { message: error.message }, 'warn'); }
 
-    if (screen === 'select') {
-      const card = selectCards().find(function (item) { return inside(point, item); });
-      if (card) {
-        pointerModes.set(event.pointerId, { type: 'select-card', index: card.index, start: point });
-        log('input', 'selection-card-down', { level_id: card.level.id, pointer_type: event.pointerType });
-      } else if (inside(point, HIT.selectBack)) {
-        pointerModes.set(event.pointerId, { type: 'mainline-back' });
-      }
-      return;
-    }
-
-    if (status === 'success') {
-      if (inside(point, HIT.successSelect)) enterSelection('success-select');
-      else if (inside(point, HIT.successReplay)) enterLevel(currentIndex, 'success-replay');
-      else if (inside(point, HIT.successNext)) {
-        if (currentIndex < LEVELS.length - 1) enterLevel(currentIndex + 1, 'success-next');
-        else enterSelection('success-finished-all');
-      }
-      return;
-    }
+    if (screen === 'summary') return;
+    if (inside(point, HIT.accept)) { recordDecision('accept', 'canvas-button'); return; }
+    if (inside(point, HIT.discard)) { recordDecision('discard', 'canvas-button'); return; }
     if (status === 'paused') {
-      if (inside(point, HIT.pauseBack)) enterSelection('pause-back');
-      else if (inside(point, HIT.pauseResume) || inside(point, HIT.pause)) setPaused(false, 'pause-resume-button');
+      if (inside(point, HIT.pauseResume) || inside(point, HIT.pause)) setPaused(false, 'pause-resume-button');
       return;
     }
     if (inside(point, HIT.hint)) {
       hintVisible = !hintVisible;
-      log('state', 'hint-toggle', { visible: hintVisible });
+      log('ui', 'hint-toggle', { visible: hintVisible });
       tone(520, .05);
       return;
     }
     if (inside(point, HIT.reset)) { restart('top-button'); return; }
     if (inside(point, HIT.pause)) { setPaused(true, 'top-button'); return; }
+    if (status !== 'playing') return;
 
     const control = controlForPoint(point);
     if (control) {
@@ -355,8 +622,7 @@
       log('input', 'control-down', { pointer_id: event.pointerId, pointer_type: event.pointerType, control: control });
       return;
     }
-
-    if (level.mechanic === 'ink_path' && point.y < UI_Y) startInkStroke(event, point);
+    registerMechanicPointerDown(event, point);
   }
 
   function onPointerMove(event) {
@@ -365,31 +631,62 @@
     const mode = pointerModes.get(event.pointerId);
     if (!mode || status !== 'playing') return;
     if (mode.type === 'ink') updateInkStroke(event, point);
+    else if (mode.type === 'drag-sun') {
+      state.sunX = clamp(point.x + mode.offsetX, 250, 1680);
+      state.sunY = clamp(point.y + mode.offsetY, 145, 420);
+    } else if (mode.type === 'drag-word') {
+      state.wordX = clamp(point.x + mode.offsetX, 120, 1800);
+      state.wordY = clamp(point.y + mode.offsetY, 170, 825);
+      if (state.wordX > 690 && state.wordX < 1230 && state.wordY > 670) state.bridgeBuilt = true;
+    } else if (mode.type === 'drag-title') {
+      state.titleX = clamp(point.x + mode.offsetX, 260, 1660);
+      state.titleY = clamp(point.y + mode.offsetY, 90, 820);
+      if (state.titleX > 690 && state.titleX < 1230 && state.titleY > 675) state.bridgeBuilt = true;
+    } else if (mode.type === 'drag-door') {
+      state.doorX = clamp(point.x + mode.offsetX, 230, 1740);
+      state.doorOpen = Math.abs(state.doorX - player.x) < 260;
+    } else if (mode.type === 'erase-wall') {
+      const distance = Math.hypot(point.x - mode.last.x, point.y - mode.last.y);
+      mode.last = point;
+      state.wallErase = clamp(state.wallErase + distance / 950, 0, 1);
+      if (state.wallErase >= 1) state.doorOpen = true;
+    }
   }
 
   function onPointerUp(event) {
-    const point = pointFromEvent(event);
     const mode = pointerModes.get(event.pointerId);
     const releasedControl = heldControls.get(event.pointerId);
     heldControls.delete(event.pointerId);
     activePointers.delete(event.pointerId);
     if (releasedControl) log('input', 'control-up', { pointer_id: event.pointerId, control: releasedControl });
-    if (mode && mode.type === 'select-card' && screen === 'select') {
-      const card = selectCards()[mode.index];
-      const drift = Math.hypot(point.x - mode.start.x, point.y - mode.start.y);
-      if (inside(point, card) && drift < 35) enterLevel(mode.index, 'selection-card');
-      else log('input', 'selection-card-cancelled', { level_id: card.level.id, drift: Math.round(drift) });
-    } else if (mode && mode.type === 'mainline-back' && screen === 'select' && inside(point, HIT.selectBack)) {
-      returnToMainline();
-    } else if (mode && mode.type === 'ink') {
-      finishInkStroke(event);
+    if (mode && mode.type === 'ink') finishInkStroke(event);
+    if (mode && mode.type === 'hold-door') {
+      state.doorHeld = false;
+      log('mechanic:door', 'runaway-door-released', { door_x: Math.round(state.doorX) });
     }
+    if (mode && mode.type === 'hold-key') {
+      state.keyHeld = false;
+      log('mechanic:drag', 'flee-key-released', { key_x: Math.round(state.keyX) });
+    }
+    if (mode && mode.type === 'hold-cloud') {
+      state.cloudHold = false;
+      log('mechanic:platform', 'cloud-hold-end', { held_seconds: Number(state.cloudHoldTime.toFixed(2)), y: Math.round(state.cloudY) });
+    }
+    if (mode && mode.type === 'freeze-world') {
+      state.freeze = false;
+      log('mechanic:timing', 'hazards-freeze-end', {});
+    }
+    if (mode && mode.type === 'drag-sun') log('mechanic:drag', 'sun-drag-end', { x: Math.round(state.sunX), y: Math.round(state.sunY), door_open: state.doorOpen });
+    if (mode && mode.type === 'drag-word') log('mechanic:drag', 'word-drag-end', { x: Math.round(state.wordX), y: Math.round(state.wordY), bridge: state.bridgeBuilt });
+    if (mode && mode.type === 'drag-title') log('mechanic:drag', 'title-drag-end', { x: Math.round(state.titleX), y: Math.round(state.titleY), bridge: state.bridgeBuilt });
+    if (mode && mode.type === 'drag-door') log('mechanic:drag', 'door-drag-end', { x: Math.round(state.doorX), door_open: state.doorOpen });
+    if (mode && mode.type === 'erase-wall') log('mechanic:erase', 'wall-erase-end', { progress: Number(state.wallErase.toFixed(2)), erased: state.wallErase >= 1 });
     pointerModes.delete(event.pointerId);
   }
 
   window.addEventListener('keydown', function (event) {
     const code = event.code || '';
-    if (['KeyA', 'KeyD', 'KeyW', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'Space', 'KeyR', 'KeyP', 'Escape'].includes(code)) event.preventDefault();
+    if (['KeyA', 'KeyD', 'KeyW', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'Space', 'KeyR', 'KeyP', 'Escape', 'ShiftLeft', 'ShiftRight'].includes(code)) event.preventDefault();
     if (event.repeat) return;
     if ((code === 'KeyP' || code === 'Escape') && screen === 'level' && (status === 'playing' || status === 'paused')) {
       setPaused(status !== 'paused', 'keyboard:' + code);
@@ -400,7 +697,21 @@
     log('input', 'key-down', { code: code });
     if (code === 'Space' || code === 'KeyW' || code === 'ArrowUp') tryJump('keyboard:' + code);
     if (code === 'KeyR') restart('keyboard');
+    if (level.mechanic === 'flower_password' && /^Digit[0-9]$/.test(code) && state.flowerRemaining.every(function (count) { return count === 0; })) {
+      const digit = code.slice(-1);
+      if (state.passwordInput.length < 4) state.passwordInput += digit;
+      log('mechanic:password', 'keyboard-digit', { input_length: state.passwordInput.length });
+      if (state.passwordInput.length === 4) {
+        if (state.passwordInput === '3125') state.doorOpen = true;
+        else { state.passwordInput = ''; toast('顺序不对。', 900); }
+      }
+    }
+    if (level.mechanic === 'sound_order' && /^Digit[1-3]$/.test(code)) {
+      const stones = [700, 960, 1220];
+      registerMechanicPointerDown({ pointerId: -1, pointerType: 'keyboard' }, { x: stones[Number(code.slice(-1)) - 1], y: GROUND_Y - 35 });
+    }
   });
+
   window.addEventListener('keyup', function (event) {
     const code = event.code || '';
     heldKeys.delete(code);
@@ -413,82 +724,319 @@
   canvas.addEventListener('pointerup', onPointerUp);
   canvas.addEventListener('pointercancel', onPointerUp);
 
+  function gapFloors(leftEdge, rightEdge, bridge) {
+    const floors = [
+      { x: 0, y: GROUND_Y, w: leftEdge, h: UI_Y - GROUND_Y + 24, type: 'ground' },
+      { x: rightEdge, y: GROUND_Y, w: W - rightEdge, h: UI_Y - GROUND_Y + 24, type: 'ground' }
+    ];
+    if (bridge) floors.push(Object.assign({ x: leftEdge, y: GROUND_Y, w: rightEdge - leftEdge, h: 28, type: 'bridge', special: 'bridge' }, bridge === true ? {} : bridge));
+    return floors;
+  }
+
   function floorsForLevel() {
     if (!level) return [];
-    if (level.mechanic === 'dual_bridge') {
-      const floors = [{ x: 0, y: GROUND_Y, w: 720, h: 80 }, { x: 1200, y: GROUND_Y, w: 720, h: 80 }];
-      if (state.bridgeBuilt) floors.push({ x: 720, y: GROUND_Y, w: 480, h: 55, special: 'dual' });
-      return floors;
+    const mechanic = level.mechanic;
+    if (mechanic === 'dual_bridge') return gapFloors(720, 1200, state.bridgeBuilt);
+    if (mechanic === 'ink_path') return gapFloors(650, 1270, state.inkBridge ? { type: 'ink', special: 'ink', h: 24 } : false);
+    if (mechanic === 'word_bridge' || mechanic === 'title_platform') return gapFloors(650, 1270, state.bridgeBuilt);
+    if (mechanic === 'jump_bridge') return gapFloors(650, 1270, jumpHeld() ? { type: 'jump-bridge', special: 'bridge' } : false);
+    if (mechanic === 'invisible_bridge') return gapFloors(650, 1270, { type: 'invisible', special: 'invisible', h: 20 });
+    if (mechanic === 'passenger_platform') return gapFloors(650, 1270, { x: state.platformX, w: 260, y: 748, h: 28, type: 'passenger', special: 'platform' }).filter(function (floor, index) { return index < 2 || true; });
+    if (mechanic === 'double_jump') {
+      return gapFloors(650, 1270, false);
     }
-    if (level.mechanic === 'ink_path') {
-      const floors = [{ x: 0, y: GROUND_Y, w: 650, h: 80 }, { x: 1270, y: GROUND_Y, w: 650, h: 80 }];
-      if (state.inkBridge) floors.push({ x: 650, y: INK_SURFACE_Y, w: 620, h: 24, special: 'ink' });
-      return floors;
+    if (mechanic === 'ground_swap') {
+      return gapFloors(620, 1300, false).concat(state.groundPhase === 0 ? [{ x: 620, y: GROUND_Y, w: 350, h: 24, type: 'phase-a', special: 'platform' }] : [{ x: 950, y: GROUND_Y, w: 350, h: 24, type: 'phase-b', special: 'platform' }]);
     }
-    return [{ x: 0, y: GROUND_Y, w: W, h: 80 }];
+    if (mechanic === 'cloud_hold') {
+      return [{ x: 0, y: GROUND_Y, w: W, h: 104, type: 'ground' }, { x: 835, y: state.cloudY, w: 250, h: 26, type: 'cloud', special: 'cloud' }, { x: 1350, y: 525, w: 420, h: 28, type: 'high', special: 'platform' }];
+    }
+    if (mechanic === 'push_box') {
+      return [{ x: 0, y: GROUND_Y, w: W, h: 104, type: 'ground' }, { x: state.boxX - 65, y: GROUND_Y - 100, w: 130, h: 100, type: 'box', special: 'box' }, { x: 1450, y: 620, w: 350, h: 28, type: 'high', special: 'platform' }];
+    }
+    return [{ x: 0, y: GROUND_Y, w: W, h: 104, type: 'ground' }];
+  }
+
+  function terrainLayout() {
+    const solids = floorsForLevel().filter(function (floor) { return floor.type === 'ground'; }).slice().sort(function (a, b) { return a.x - b.x; });
+    const gaps = [];
+    for (let index = 0; index < solids.length - 1; index += 1) {
+      const left = solids[index].x + solids[index].w;
+      const right = solids[index + 1].x;
+      if (right - left > 20) gaps.push({ left: left, right: right, top: Math.min(solids[index].y, solids[index + 1].y), width: right - left });
+    }
+    return { grounds: solids, gaps: gaps };
+  }
+
+  function hitFlowerBlock(previousTop, nextTop) {
+    if (level.mechanic !== 'flower_password' || player.vy >= 0) return;
+    const block = flowerBlocks().find(function (item) {
+      const bottom = item.y + item.h;
+      const overlapX = player.x + player.w / 2 > item.x && player.x - player.w / 2 < item.x + item.w;
+      return overlapX && previousTop >= bottom - 6 && nextTop <= bottom;
+    });
+    if (!block || state.blockHitLock === block.index) return;
+    state.blockHitLock = block.index;
+    player.y = block.y + block.h + player.h / 2;
+    player.vy = 120;
+    if (state.flowerRemaining[block.index] > 0) {
+      state.flowerRemaining[block.index] -= 1;
+      state.flowerFlashUntil[block.index] = performance.now() + 560;
+      log('mechanic:password', 'flower-revealed', { block: block.index, remaining_hidden_hits: state.flowerRemaining[block.index] });
+      tone(580 + block.index * 45, .07);
+    } else {
+      log('mechanic:password', 'empty-block-hit', { block: block.index });
+      tone(150, .05);
+    }
+  }
+
+  function resolveHorizontalObstacles(previousX) {
+    if (level.mechanic === 'shrink_tunnel' && player.h > 100) {
+      const leftWall = 710;
+      const rightWall = 1320;
+      if (previousX < leftWall && player.x + player.w / 2 > leftWall) player.x = leftWall - player.w / 2;
+      if (previousX > rightWall && player.x - player.w / 2 < rightWall) player.x = rightWall + player.w / 2;
+    }
+    if (level.mechanic === 'erase_wall' && state.wallErase < 1) {
+      const wallLeft = 900;
+      const wallRight = 1020;
+      if (previousX < wallLeft && player.x + player.w / 2 > wallLeft) player.x = wallLeft - player.w / 2;
+      if (previousX > wallRight && player.x - player.w / 2 < wallRight) player.x = wallRight + player.w / 2;
+    }
+    if (level.mechanic === 'push_box') {
+      const boxLeft = state.boxX - 65;
+      const boxRight = state.boxX + 65;
+      const playerBottom = player.y + player.h / 2;
+      if (playerBottom > GROUND_Y - 100) {
+        if (player.vx > 0 && previousX + player.w / 2 <= boxLeft + 12 && player.x + player.w / 2 > boxLeft) {
+          const pushed = clamp(state.boxX + (player.x + player.w / 2 - boxLeft), 760, 1540);
+          state.boxX = pushed;
+          player.x = state.boxX - 65 - player.w / 2;
+        } else if (player.vx < 0 && previousX - player.w / 2 >= boxRight - 12 && player.x - player.w / 2 < boxRight) {
+          const pushed = clamp(state.boxX - (boxRight - (player.x - player.w / 2)), 760, 1540);
+          state.boxX = pushed;
+          player.x = state.boxX + 65 + player.w / 2;
+        }
+      }
+    }
   }
 
   function updatePlayer(dt) {
     if (!level || status !== 'playing') return;
-    const direction = (rightHeld() ? 1 : 0) - (leftHeld() ? 1 : 0);
-    player.vx = direction * 310;
+    const previousX = player.x;
+    const direction = movementDirection();
+    player.vx = direction * 315;
     if (direction) player.facing = direction;
-    player.x += player.vx * dt;
-    player.x = logic.clamp(player.x, 55, W - 55);
-    player.vy = Math.min(1200, player.vy + 1900 * dt);
+    let carry = 0;
+    if (level.mechanic === 'passenger_platform' && player.onFloorType === 'passenger') carry = state.platformDX;
+    player.x += player.vx * dt + carry;
+    player.x = clamp(player.x, 48, W - 48);
+    resolveHorizontalObstacles(previousX);
+
+    const gravityUp = level.mechanic === 'gravity_flip' && state.gravityFlipped;
+    const gravity = gravityUp ? -1900 : 1900;
+    player.vy = clamp(player.vy + gravity * dt, -1250, 1250);
     const previousBottom = player.y + player.h / 2;
+    const previousTop = player.y - player.h / 2;
     player.y += player.vy * dt;
-    player.onGround = false;
     const nextBottom = player.y + player.h / 2;
-    const landingCandidates = [];
-    floorsForLevel().forEach(function (floor) {
-      const overlapX = player.x + player.w / 2 > floor.x && player.x - player.w / 2 < floor.x + floor.w;
-      if (overlapX && player.vy >= 0 && previousBottom <= floor.y + 8 && nextBottom >= floor.y) landingCandidates.push(floor);
-    });
-    if (landingCandidates.length) {
-      const landing = landingCandidates.reduce(function (best, floor) { return floor.y < best.y ? floor : best; });
-      player.y = landing.y - player.h / 2;
-      player.vy = 0;
-      player.onGround = true;
+    const nextTop = player.y - player.h / 2;
+    player.onGround = false;
+    player.onFloorType = '';
+
+    if (gravityUp) {
+      const ceilingY = 250;
+      if (player.vy <= 0 && previousTop >= ceilingY - 8 && nextTop <= ceilingY) {
+        player.y = ceilingY + player.h / 2;
+        player.vy = 0;
+        player.onGround = true;
+        player.onFloorType = 'ceiling';
+        player.jumpCount = 0;
+      }
+    } else {
+      hitFlowerBlock(previousTop, nextTop);
+      const landingCandidates = [];
+      floorsForLevel().forEach(function (floor) {
+        const overlapX = player.x + player.w / 2 > floor.x && player.x - player.w / 2 < floor.x + floor.w;
+        if (overlapX && player.vy >= 0 && previousBottom <= floor.y + 9 && nextBottom >= floor.y) landingCandidates.push(floor);
+      });
+      if (landingCandidates.length) {
+        const landing = landingCandidates.reduce(function (best, floor) { return floor.y < best.y ? floor : best; });
+        player.y = landing.y - player.h / 2;
+        player.vy = 0;
+        player.onGround = true;
+        player.onFloorType = landing.type || 'ground';
+        player.jumpCount = 0;
+        state.blockHitLock = -1;
+      }
     }
-    if (player.y > H + 140) {
-      log('physics', 'player-fell', { x: Math.round(player.x), y: Math.round(player.y), mechanic_preserved: true }, 'warn');
+
+    if (level.mechanic === 'shadow_key' && !state.keyCollected && Math.abs(player.x - 930) < 55) {
+      state.keyCollected = true;
+      state.doorOpen = true;
+      log('mechanic:door', 'shadow-key-collected', { x: Math.round(player.x) });
+      tone(720, .1);
+    }
+    if (level.mechanic === 'flee_key' && !state.keyCollected && Math.abs(player.x - state.keyX) < 58 && state.keyHeld) {
+      state.keyCollected = true;
+      state.doorOpen = true;
+      log('mechanic:door', 'flee-key-collected', { x: Math.round(state.keyX) });
+      tone(720, .1);
+    }
+    if (level.mechanic === 'freeze_spikes' && !freezeHeld() && player.x > 760 && player.x < 1300) {
+      const dangerous = Math.sin(frame * .15) > -.25;
+      if (dangerous) {
+        log('physics', 'spike-contact-reset', { x: Math.round(player.x), frozen: false }, 'warn');
+        resetPlayer();
+        tone(110, .1);
+      }
+    }
+    if (player.y > H + 150 || player.y < -170) {
+      log('physics', 'player-out-of-bounds', { x: Math.round(player.x), y: Math.round(player.y), gravity_up: gravityUp }, 'warn');
       resetPlayer();
       tone(120, .12);
     }
   }
 
+  function markMilestone(module, name, value, total) {
+    const percent = Math.floor(clamp(value / total, 0, 1) * 4) * 25;
+    if (percent <= state.lastMechanicMilestone || percent >= 100) return;
+    state.lastMechanicMilestone = percent;
+    log(module, name, { percent: percent, value: Number(value.toFixed(2)), target: total });
+  }
+
   function updateMechanic(dt) {
     if (!level || status !== 'playing') return;
-    if (level.mechanic === 'dual_bridge') {
+    const mechanic = level.mechanic;
+    const direction = movementDirection();
+
+    if (mechanic === 'dual_bridge') {
       const both = leftHeld() && rightHeld();
-      const before = state.dualHold;
-      state.dualHold = logic.nextDualHold(state.dualHold, leftHeld(), rightHeld(), dt, 1);
-      if (both && !state.dualStarted && !state.bridgeBuilt) {
+      state.dualHold = logic.nextHold(state.dualHold, both, dt, 1, 1.8);
+      if (both && !state.dualStarted) {
         state.dualStarted = true;
-        log('mechanic:level13', 'dual-hold-start', { required_seconds: 1, input_sources: { keyboard: Array.from(heldKeys), touch_count: heldControls.size } });
+        log('mechanic:bridge', 'dual-hold-start', { required_seconds: 1 });
       }
       if (!both && state.dualStarted && !state.bridgeBuilt) {
-        log('mechanic:level13', 'dual-hold-cancelled', { held_seconds: Number(before.toFixed(2)) });
         state.dualStarted = false;
-        state.dualMilestone = 0;
+        state.lastMechanicMilestone = -1;
+        log('mechanic:bridge', 'dual-hold-cancel', { held_seconds: Number(state.dualHold.toFixed(2)) });
       }
-      const milestone = Math.floor(state.dualHold * 4) * 25;
-      if (milestone > state.dualMilestone && milestone < 100) {
-        state.dualMilestone = milestone;
-        log('mechanic:level13', 'dual-hold-progress', { percent: milestone, held_seconds: Number(state.dualHold.toFixed(2)) });
-      }
+      markMilestone('mechanic:bridge', 'dual-hold-progress', state.dualHold, 1);
       if (!state.bridgeBuilt && state.dualHold >= 1) {
         state.bridgeBuilt = true;
-        state.dualStarted = false;
-        state.dualMilestone = 100;
-        log('mechanic:level13', 'dual-bridge-created', { x: 720, y: GROUND_Y, width: 480, hold_seconds: 1 });
+        log('mechanic:bridge', 'dual-bridge-created', { x: 720, width: 480 });
         tone(620, .12);
       }
-      if (state.bridgeBuilt && player.x > 1540) complete('crossed-dual-bridge');
-    } else if (level.mechanic === 'ink_path') {
-      if (state.inkBridge && player.x > 1540) complete('crossed-drawn-path');
+      state.doorOpen = state.bridgeBuilt;
+    } else if (mechanic === 'runaway_door') {
+      const distance = state.doorX - player.x;
+      state.doorMoving = false;
+      if (!state.doorHeld && Math.abs(distance) < 480 && direction !== 0) {
+        const desired = direction * 315;
+        state.doorX = clamp(state.doorX + desired * dt, 150, 1885);
+        state.doorMoving = true;
+      }
+      state.doorOpen = state.doorHeld && Math.abs(state.doorX - player.x) < 170;
+    } else if (mechanic === 'ink_path') {
+      state.doorOpen = state.inkBridge;
+    } else if (mechanic === 'silent_wait') {
+      const nearDoor = Math.abs(player.x - state.doorX) < 250;
+      const still = direction === 0 && player.onGround && Math.abs(player.vx) < 1;
+      state.waitTime = logic.nextHold(state.waitTime, nearDoor && still, dt, 2.1, 2.5);
+      markMilestone('mechanic:timing', 'silence-progress', state.waitTime, 2.1);
+      if (state.waitTime >= 2.1) state.doorOpen = true;
+    } else if (mechanic === 'reverse_controls') {
+      state.doorOpen = true;
+    } else if (mechanic === 'shadow_sun') {
+      const aligned = logic.isSunAligned(state.sunX, state.sunY);
+      if (aligned !== state.doorOpen) log('mechanic:drag', 'shadow-alignment-change', { aligned: aligned, sun_x: Math.round(state.sunX), sun_y: Math.round(state.sunY) });
+      state.doorOpen = aligned;
+    } else if (mechanic === 'word_bridge' || mechanic === 'title_platform') {
+      state.doorOpen = state.bridgeBuilt;
+    } else if (mechanic === 'knock_twice') {
+      state.doorOpen = state.knocks >= 2;
+    } else if (mechanic === 'flower_password') {
+      // 开门由密码输入处理。
+    } else if (mechanic === 'shadow_key') {
+      state.doorOpen = state.keyCollected;
+    } else if (mechanic === 'passenger_platform') {
+      const before = state.platformX;
+      const playerOnPlatform = player.onFloorType === 'passenger';
+      if (playerOnPlatform && direction === 0) state.platformX = clamp(state.platformX + 140 * dt, 650, 1010);
+      else if (!playerOnPlatform) state.platformX = clamp(state.platformX - 80 * dt, 650, 1010);
+      state.platformDX = state.platformX - before;
+      state.doorOpen = state.platformX > 980;
+    } else if (mechanic === 'shrink_tunnel') {
+      state.doorOpen = player.h < 100;
+    } else if (mechanic === 'cloud_hold') {
+      const before = state.cloudY;
+      if (state.cloudHold) {
+        state.cloudHoldTime += dt;
+        state.cloudY = clamp(state.cloudY + 185 * dt, 575, 735);
+      } else {
+        state.cloudY = clamp(state.cloudY - 150 * dt, 525, 735);
+      }
+      const dy = state.cloudY - before;
+      if (player.onFloorType === 'cloud') player.y += dy;
+      state.doorOpen = true;
+    } else if (mechanic === 'decoy_door') {
+      state.doorOpen = state.decoyTouched;
+    } else if (mechanic === 'freeze_spikes') {
+      state.doorOpen = true;
+    } else if (mechanic === 'double_jump') {
+      state.doorOpen = true;
+    } else if (mechanic === 'face_away') {
+      const close = Math.abs(player.x - state.doorX) < 235;
+      if (close && player.facing < 0 && direction === 0) state.faceTime = clamp(state.faceTime + dt, 0, 1.2);
+      else state.faceTime = Math.max(0, state.faceTime - dt * 2);
+      markMilestone('mechanic:direction', 'face-away-progress', state.faceTime, 1.2);
+      if (state.faceTime >= 1.2) state.doorOpen = true;
+    } else if (mechanic === 'drag_door') {
+      state.doorOpen = Math.abs(state.doorX - player.x) < 260;
+    } else if (mechanic === 'invisible_bridge') {
+      state.doorOpen = true;
+    } else if (mechanic === 'mirror_world') {
+      state.doorOpen = true;
+    } else if (mechanic === 'jump_bridge') {
+      state.doorOpen = jumpHeld();
+    } else if (mechanic === 'door_jumps') {
+      if (!state.movingDoorLocked) {
+        state.doorVY = Math.min(1100, state.doorVY + 1850 * dt);
+        state.doorY += state.doorVY * dt;
+        if (state.doorY >= GROUND_Y) { state.doorY = GROUND_Y; state.doorVY = 0; }
+      }
+    } else if (mechanic === 'ground_swap') {
+      state.doorOpen = state.groundPhase === 1;
+    } else if (mechanic === 'flee_key') {
+      if (!state.keyCollected && !state.keyHeld && Math.abs(state.keyX - player.x) < 420 && direction !== 0) {
+        state.keyX = clamp(state.keyX + direction * 315 * dt, 720, 1650);
+      }
+      state.doorOpen = state.keyCollected;
+    } else if (mechanic === 'push_box') {
+      state.doorOpen = state.boxX > 1350;
+    } else if (mechanic === 'gravity_flip') {
+      state.doorOpen = state.gravityFlipped;
+    } else if (mechanic === 'sound_order') {
+      state.doorOpen = state.soundSequence.length === 3;
+    } else if (mechanic === 'erase_wall') {
+      state.doorOpen = state.wallErase >= 1;
+    } else if (mechanic === 'start_backward') {
+      if (!state.startVisited && player.x < 85) {
+        state.startVisited = true;
+        state.doorOpen = true;
+        log('mechanic:direction', 'start-edge-visited', { x: Math.round(player.x) });
+        tone(700, .1);
+      }
     }
+
+    let reached = false;
+    if (mechanic === 'runaway_door' || mechanic === 'drag_door') reached = state.doorOpen && Math.abs(player.x - state.doorX) < 115;
+    else if (mechanic === 'mirror_world') reached = state.doorOpen && player.x > 1510;
+    else if (mechanic === 'cloud_hold' || mechanic === 'push_box') reached = state.doorOpen && player.x > 1510 && player.y < 680;
+    else if (mechanic === 'gravity_flip') reached = state.doorOpen && player.x > 1510 && player.y < 380;
+    else reached = state.doorOpen && player.x > 1510;
+    if (reached) complete('door-reached:' + mechanic);
   }
 
   function drawBackdrop() {
@@ -498,8 +1046,10 @@
     gradient.addColorStop(1, '#d27d70');
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = 'rgba(255,240,189,.9)';
-    ctx.beginPath(); ctx.arc(1550, 175, 72, 0, Math.PI * 2); ctx.fill();
+    if (!level || (level.mechanic !== 'shadow_sun' && level.mechanic !== 'gravity_flip')) {
+      ctx.fillStyle = 'rgba(255,240,189,.9)';
+      ctx.beginPath(); ctx.arc(1550, 175, 72, 0, Math.PI * 2); ctx.fill();
+    }
     [[330,160,120],[690,225,80],[1250,120,110]].forEach(function (cloud) {
       roundedRect(cloud[0], cloud[1], cloud[2], 28, 20, 'rgba(255,255,255,.55)');
     });
@@ -511,227 +1061,314 @@
     ctx.moveTo(0, 650); ctx.quadraticCurveTo(260, 585, 520, 660); ctx.quadraticCurveTo(830, 590, 1120, 675); ctx.quadraticCurveTo(1500, 590, W, 665); ctx.lineTo(W, GROUND_Y); ctx.lineTo(0, GROUND_Y); ctx.closePath(); ctx.fill();
   }
 
-  function terrainLayout() {
-    const grounds = floorsForLevel().filter(function (floor) { return !floor.special; }).slice().sort(function (a, b) { return a.x - b.x; });
-    const gaps = [];
-    for (let index = 0; index < grounds.length - 1; index += 1) {
-      const left = grounds[index].x + grounds[index].w;
-      const right = grounds[index + 1].x;
-      if (right - left > 20) gaps.push({ left: left, right: right, top: Math.min(grounds[index].y, grounds[index + 1].y) });
-    }
-    return { grounds: grounds, gaps: gaps };
-  }
-
   function drawDropTerrain() {
     terrainLayout().gaps.forEach(function (gap) {
-      const shade = ctx.createLinearGradient(0, gap.top, 0, UI_Y + 18);
-      shade.addColorStop(0, 'rgba(23,52,58,.65)');
-      shade.addColorStop(.45, 'rgba(22,39,42,.9)');
-      shade.addColorStop(1, 'rgba(18,25,31,.98)');
+      const shade = ctx.createLinearGradient(0, gap.top, 0, UI_Y + 20);
+      shade.addColorStop(0, 'rgba(23,52,58,.75)');
+      shade.addColorStop(.5, 'rgba(20,35,40,.95)');
+      shade.addColorStop(1, '#111a20');
       ctx.save();
       ctx.fillStyle = shade;
       ctx.beginPath();
-      ctx.moveTo(gap.left, gap.top + 5);
-      ctx.lineTo(gap.right, gap.top + 5);
-      // 深色区域向两侧岩壁下方延伸，由后绘制的地面遮住，避免露出背景色细缝。
-      ctx.lineTo(gap.right + 22, gap.top + 35);
-      ctx.lineTo(gap.right + 32, UI_Y + 18);
-      ctx.lineTo(gap.left - 32, UI_Y + 18);
-      ctx.lineTo(gap.left - 22, gap.top + 35);
+      ctx.moveTo(gap.left - 24, gap.top + 3);
+      ctx.lineTo(gap.right + 24, gap.top + 3);
+      ctx.lineTo(gap.right + 36, UI_Y + 28);
+      ctx.lineTo(gap.left - 36, UI_Y + 28);
       ctx.closePath();
-      ctx.fill();
-      ctx.clip();
-      ctx.fillStyle = 'rgba(214,222,191,.1)';
-      ctx.beginPath();
-      ctx.ellipse((gap.left + gap.right) / 2, UI_Y + 6, (gap.right - gap.left) * .42, 22, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     });
   }
 
   function drawGround(floor) {
-    if (floor.special === 'ink') return;
+    if (floor.special === 'invisible' || floor.special === 'ink' || floor.special === 'box') return;
     if (floor.special) {
-      ctx.save();
-      ctx.fillStyle = '#e7c66d';
-      ctx.strokeStyle = '#17343a';
-      ctx.lineWidth = 5;
-      roundedRect(floor.x, floor.y, floor.w, floor.h, 10, '#e7c66d', '#17343a', 5);
-      ctx.fillStyle = '#f3d273';
-      ctx.fillRect(floor.x + 8, floor.y + 6, floor.w - 16, 10);
-      ctx.restore();
+      const color = floor.special === 'cloud' ? 'rgba(241,246,222,.9)' : floor.type === 'jump-bridge' ? '#79c8d1' : '#e7c66d';
+      roundedRect(floor.x, floor.y, floor.w, floor.h, 12, color, '#17343a', 5);
       return;
     }
     const layout = terrainLayout();
     const leftCliff = layout.gaps.some(function (gap) { return Math.abs(gap.right - floor.x) < 1; });
     const rightCliff = layout.gaps.some(function (gap) { return Math.abs(gap.left - (floor.x + floor.w)) < 1; });
-    const bottom = UI_Y + 22;
-    const makePath = function () {
+    const bottom = UI_Y + 24;
+    const path = function () {
       ctx.beginPath();
       ctx.moveTo(floor.x, floor.y);
       ctx.lineTo(floor.x + floor.w, floor.y);
       if (rightCliff) {
-        ctx.lineTo(floor.x + floor.w, floor.y + 18);
-        ctx.lineTo(floor.x + floor.w - 8, floor.y + 42);
-        ctx.lineTo(floor.x + floor.w + 2, floor.y + 68);
+        ctx.lineTo(floor.x + floor.w - 4, floor.y + 24);
+        ctx.lineTo(floor.x + floor.w + 8, floor.y + 51);
         ctx.lineTo(floor.x + floor.w - 12, bottom);
       } else ctx.lineTo(floor.x + floor.w, bottom);
       if (leftCliff) {
         ctx.lineTo(floor.x + 12, bottom);
-        ctx.lineTo(floor.x - 2, floor.y + 68);
-        ctx.lineTo(floor.x + 8, floor.y + 42);
-        ctx.lineTo(floor.x, floor.y + 18);
+        ctx.lineTo(floor.x - 8, floor.y + 51);
+        ctx.lineTo(floor.x + 4, floor.y + 24);
       } else ctx.lineTo(floor.x, bottom);
       ctx.closePath();
     };
     const fill = ctx.createLinearGradient(0, floor.y, 0, bottom);
-    fill.addColorStop(0, '#6f8060');
-    fill.addColorStop(.35, '#596957');
-    fill.addColorStop(1, '#3e4946');
-    ctx.fillStyle = fill;
-    makePath();
-    ctx.fill();
-    ctx.save();
-    makePath();
-    ctx.clip();
-    ctx.fillStyle = '#83975e';
-    ctx.fillRect(floor.x, floor.y, floor.w, 18);
-    ctx.fillStyle = '#d2d879';
-    ctx.fillRect(floor.x, floor.y, floor.w, 7);
+    fill.addColorStop(0, '#71815f'); fill.addColorStop(.36, '#566756'); fill.addColorStop(1, '#3e4946');
+    ctx.fillStyle = fill; path(); ctx.fill();
+    ctx.save(); path(); ctx.clip();
+    ctx.fillStyle = '#83975e'; ctx.fillRect(floor.x, floor.y, floor.w, 18);
+    ctx.fillStyle = '#d2d879'; ctx.fillRect(floor.x, floor.y, floor.w, 7);
     ctx.restore();
-    ctx.strokeStyle = '#17343a';
-    ctx.lineWidth = 5;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#17343a'; ctx.lineWidth = 5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     ctx.beginPath(); ctx.moveTo(floor.x, floor.y); ctx.lineTo(floor.x + floor.w, floor.y); ctx.stroke();
-    if (leftCliff) {
-      ctx.beginPath(); ctx.moveTo(floor.x, floor.y + 16); ctx.lineTo(floor.x + 8, floor.y + 42); ctx.lineTo(floor.x - 2, floor.y + 68); ctx.lineTo(floor.x + 12, bottom); ctx.stroke();
-    }
-    if (rightCliff) {
-      ctx.beginPath(); ctx.moveTo(floor.x + floor.w, floor.y + 16); ctx.lineTo(floor.x + floor.w - 8, floor.y + 42); ctx.lineTo(floor.x + floor.w + 2, floor.y + 68); ctx.lineTo(floor.x + floor.w - 12, bottom); ctx.stroke();
-    }
+    if (leftCliff) { ctx.beginPath(); ctx.moveTo(floor.x + 4, floor.y + 21); ctx.lineTo(floor.x - 8, floor.y + 51); ctx.lineTo(floor.x + 12, bottom); ctx.stroke(); }
+    if (rightCliff) { ctx.beginPath(); ctx.moveTo(floor.x + floor.w - 4, floor.y + 21); ctx.lineTo(floor.x + floor.w + 8, floor.y + 51); ctx.lineTo(floor.x + floor.w - 12, bottom); ctx.stroke(); }
   }
 
-  function drawDoor(x, platformY, open) {
+  function drawDoor(x, platformY, open, options) {
+    const opts = options || {};
     const y = platformY - 220;
     ctx.save();
     ctx.translate(x, y);
+    if (opts.mirror) ctx.scale(-1, 1);
+    if (opts.upsideDown) { ctx.translate(0, 220); ctx.scale(1, -1); }
     ctx.strokeStyle = '#17343a'; ctx.lineWidth = 9; ctx.lineJoin = 'round';
     ctx.fillStyle = open ? '#f3d273' : '#2f7775';
     ctx.beginPath(); ctx.moveTo(-70, 210); ctx.lineTo(-70, 80); ctx.quadraticCurveTo(0, -25, 70, 80); ctx.lineTo(70, 210); ctx.closePath(); ctx.fill(); ctx.stroke();
     ctx.strokeStyle = '#e5bd66'; ctx.lineWidth = 7;
     ctx.beginPath(); ctx.arc(0, 95, 27, 0, Math.PI * 2); ctx.moveTo(-40, 95); ctx.lineTo(40, 95); ctx.moveTo(0, 55); ctx.lineTo(0, 135); ctx.stroke();
-    if (open) { ctx.fillStyle = 'rgba(255,240,189,.72)'; ctx.fillRect(-50, 145, 100, 62); }
+    if (open) { ctx.fillStyle = 'rgba(255,240,189,.75)'; ctx.fillRect(-50, 145, 100, 62); }
+    if (opts.feet) {
+      ctx.strokeStyle = '#17343a'; ctx.lineWidth = 8;
+      const stride = Math.sin(frame * .35) * 18;
+      ctx.beginPath(); ctx.moveTo(-28, 210); ctx.lineTo(-30 + stride, 229); ctx.moveTo(28, 210); ctx.lineTo(30 - stride, 229); ctx.stroke();
+    }
     ctx.restore();
   }
 
   function drawPlayer() {
     const moving = Math.abs(player.vx) > 1;
     const bob = moving ? Math.sin(frame * .32) * 4 : 0;
+    const scale = player.h < 100 ? .6 : 1;
+    const visualX = level && level.mechanic === 'mirror_world' ? W - player.x : player.x;
+    const visualFacing = level && level.mechanic === 'mirror_world' ? -player.facing : player.facing;
     ctx.save();
-    ctx.translate(player.x, player.y + bob);
-    ctx.scale(player.facing, 1);
+    ctx.translate(visualX, player.y + bob);
+    if (level && level.mechanic === 'gravity_flip' && state.gravityFlipped) ctx.scale(1, -1);
+    ctx.scale(visualFacing * scale, scale);
     ctx.strokeStyle = '#17343a'; ctx.lineWidth = 8; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     ctx.fillStyle = '#d94b54';
     ctx.beginPath(); ctx.moveTo(-18, -25); ctx.quadraticCurveTo(-68 - (moving ? 18 : 0), 12, -48, 55); ctx.quadraticCurveTo(-24, 43, 2, 25); ctx.closePath(); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = '#fff0bd';
-    ctx.beginPath(); ctx.arc(0, -34, 32, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = '#6b3c2f';
-    ctx.beginPath(); ctx.moveTo(-34, -42); ctx.quadraticCurveTo(-16, -87, 25, -66); ctx.lineTo(34, -38); ctx.quadraticCurveTo(8, -56, -34, -42); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#fff0bd'; ctx.beginPath(); ctx.arc(0, -34, 32, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#6b3c2f'; ctx.beginPath(); ctx.moveTo(-34, -42); ctx.quadraticCurveTo(-16, -87, 25, -66); ctx.lineTo(34, -38); ctx.quadraticCurveTo(8, -56, -34, -42); ctx.fill(); ctx.stroke();
     roundedRect(-32, -8, 64, 58, 8, '#278a88', '#17343a', 7);
     ctx.beginPath(); ctx.moveTo(-14, 48); ctx.lineTo(-18 + (moving ? Math.sin(frame * .32) * 12 : 0), 72); ctx.moveTo(14, 48); ctx.lineTo(18 - (moving ? Math.sin(frame * .32) * 12 : 0), 72); ctx.stroke();
     ctx.restore();
   }
 
-  function drawDualMechanic() {
-    drawDoor(1580, GROUND_Y, state.bridgeBuilt);
-    if (!state.bridgeBuilt) {
-      const progress = state.dualHold;
-      if (progress > 0) {
-        ctx.save();
-        ctx.strokeStyle = '#f3d273'; ctx.lineWidth = 16; ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(720, GROUND_Y + 4);
-        ctx.quadraticCurveTo(800, 720, 720 + 240 * progress, GROUND_Y - 12);
-        ctx.moveTo(1200, GROUND_Y + 4);
-        ctx.quadraticCurveTo(1120, 720, 1200 - 240 * progress, GROUND_Y - 12);
-        ctx.stroke();
-        ctx.restore();
-        ctx.fillStyle = '#fff0bd'; ctx.font = '800 34px sans-serif'; ctx.textAlign = 'center';
-        ctx.fillText(Math.round(progress * 100) + '%', 960, 700);
-      }
-    } else {
-      ctx.strokeStyle = '#17343a'; ctx.lineWidth = 4;
-      for (let x = 760; x < 1180; x += 70) {
-        ctx.beginPath(); ctx.moveTo(x, GROUND_Y + 14); ctx.lineTo(x + 28, GROUND_Y + 36); ctx.stroke();
-      }
-    }
-  }
-
-  function drawInkMechanic() {
-    drawDoor(1580, GROUND_Y, state.inkBridge);
+  function drawInkPath() {
     let livePath = null;
     pointerModes.forEach(function (mode) { if (mode.type === 'ink') livePath = mode.points; });
     const path = livePath || (!state.inkBridge && performance.now() < state.inkErrorUntil ? state.inkPath : null);
     if (path && path.length > 1) {
-      ctx.save();
-      ctx.strokeStyle = livePath && logic.strokeLength(path) > 860 ? '#d94b54' : '#17343a';
-      ctx.lineWidth = 12; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.save(); ctx.strokeStyle = '#17343a'; ctx.lineWidth = 12; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
       ctx.beginPath(); ctx.moveTo(path[0].x, path[0].y);
       for (let index = 1; index < path.length; index += 1) ctx.lineTo(path[index].x, path[index].y);
       ctx.stroke(); ctx.restore();
     }
     if (state.inkBridge) {
-      // 成功后的手势沉到统一实体面：顶边与碰撞共用 INK_SURFACE_Y，人物脚底不会再陷进原始轨迹。
-      ctx.save();
-      ctx.fillStyle = '#17343a';
-      ctx.strokeStyle = '#0e2529';
-      ctx.lineWidth = 5;
-      ctx.lineJoin = 'round';
-      ctx.beginPath();
-      ctx.moveTo(650, INK_SURFACE_Y);
-      ctx.lineTo(1270, INK_SURFACE_Y);
-      ctx.lineTo(1262, INK_SURFACE_Y + 22);
-      ctx.bezierCurveTo(1090, INK_SURFACE_Y + 17, 825, INK_SURFACE_Y + 28, 658, INK_SURFACE_Y + 21);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-      ctx.strokeStyle = 'rgba(255,240,189,.24)';
-      ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.moveTo(674, INK_SURFACE_Y + 9); ctx.bezierCurveTo(860, INK_SURFACE_Y + 4, 1070, INK_SURFACE_Y + 12, 1244, INK_SURFACE_Y + 8); ctx.stroke();
-      ctx.restore();
-    }
-    if (state.inkError && performance.now() < state.inkErrorUntil) {
-      roundedRect(700, 620, 520, 76, 18, 'rgba(217,75,84,.92)', '#17343a', 5);
-      ctx.fillStyle = '#fff0bd'; ctx.font = '700 30px "PingFang SC", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(state.inkError, 960, 658);
+      ctx.save(); ctx.fillStyle = '#17343a'; ctx.strokeStyle = '#0e2529'; ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.moveTo(650, GROUND_Y); ctx.lineTo(1270, GROUND_Y); ctx.lineTo(1262, GROUND_Y + 22); ctx.bezierCurveTo(1090, GROUND_Y + 17, 825, GROUND_Y + 28, 658, GROUND_Y + 21); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
     }
   }
 
-  function drawTopUI() {
-    roundedRect(52, 38, 205, 96, 18, '#fff0bd', '#17343a', 6);
-    ctx.fillStyle = '#17343a'; ctx.font = '800 42px "PingFang SC", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText('第 ' + level.id + ' 关', 154, 86);
-    roundedRect(HIT.hint.x, HIT.hint.y, HIT.hint.w, HIT.hint.h, 18, '#fff0bd', '#17343a', 6);
-    const qx = HIT.hint.x + HIT.hint.w / 2;
-    const qy = HIT.hint.y + HIT.hint.h / 2;
-    ctx.save(); ctx.strokeStyle = '#17343a'; ctx.fillStyle = '#17343a'; ctx.lineWidth = 7; ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.moveTo(qx - 16, qy - 17); ctx.bezierCurveTo(qx - 12, qy - 35, qx + 20, qy - 34, qx + 20, qy - 12); ctx.bezierCurveTo(qx + 20, qy + 1, qx + 1, qy + 2, qx, qy + 15); ctx.stroke();
-    ctx.beginPath(); ctx.arc(qx, qy + 29, 5, 0, Math.PI * 2); ctx.fill(); ctx.restore();
-    roundedRect(HIT.reset.x, HIT.reset.y, HIT.reset.w, HIT.reset.h, 18, '#fff0bd', '#17343a', 6);
-    const rx = HIT.reset.x + HIT.reset.w / 2;
-    const ry = HIT.reset.y + HIT.reset.h / 2;
+  function drawKey(x, y, shadowOnly) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.strokeStyle = shadowOnly ? 'rgba(23,52,58,.72)' : '#e5bd66';
+    ctx.fillStyle = shadowOnly ? 'rgba(23,52,58,.48)' : '#fff0bd';
+    ctx.lineWidth = 8;
+    ctx.beginPath(); ctx.arc(-22, 0, 20, 0, Math.PI * 2); ctx.moveTo(-2, 0); ctx.lineTo(58, 0); ctx.lineTo(58, 22); ctx.moveTo(30, 0); ctx.lineTo(30, 18); ctx.stroke();
+    if (!shadowOnly) { ctx.beginPath(); ctx.arc(-22, 0, 8, 0, Math.PI * 2); ctx.fill(); }
+    ctx.restore();
+  }
+
+  function drawFlower(x, y, alpha) {
+    ctx.save(); ctx.globalAlpha = alpha == null ? 1 : alpha; ctx.translate(x, y);
+    ctx.strokeStyle = '#17343a'; ctx.fillStyle = '#f3d273'; ctx.lineWidth = 4;
+    for (let i = 0; i < 6; i += 1) {
+      ctx.save(); ctx.rotate(i * Math.PI / 3); ctx.beginPath(); ctx.ellipse(0, -13, 7, 14, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.restore();
+    }
+    ctx.fillStyle = '#d94b54'; ctx.beginPath(); ctx.arc(0, 0, 6, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+  }
+
+  function drawMechanic() {
+    const mechanic = level.mechanic;
+    if (mechanic === 'dual_bridge') {
+      drawDoor(1580, GROUND_Y, state.doorOpen);
+      if (!state.bridgeBuilt && state.dualHold > 0) {
+        ctx.save(); ctx.strokeStyle = '#f3d273'; ctx.lineWidth = 16; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(720, GROUND_Y + 4); ctx.quadraticCurveTo(800, 720, 720 + 240 * state.dualHold, GROUND_Y - 12); ctx.moveTo(1200, GROUND_Y + 4); ctx.quadraticCurveTo(1120, 720, 1200 - 240 * state.dualHold, GROUND_Y - 12); ctx.stroke(); ctx.restore();
+      }
+    } else if (mechanic === 'runaway_door') {
+      drawDoor(state.doorX, GROUND_Y, state.doorOpen, { feet: state.doorMoving });
+    } else if (mechanic === 'ink_path') {
+      drawInkPath(); drawDoor(1580, GROUND_Y, state.doorOpen);
+    } else if (mechanic === 'silent_wait') {
+      drawDoor(1580, GROUND_Y, state.doorOpen);
+      if (state.waitTime > 0) {
+        ctx.save(); ctx.strokeStyle = 'rgba(255,240,189,.8)'; ctx.lineWidth = 9; ctx.beginPath(); ctx.arc(1580, 495, 42, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * state.waitTime / 2.1); ctx.stroke(); ctx.restore();
+      }
+    } else if (mechanic === 'shadow_sun') {
+      const shadowX = 1580 - (state.sunX - 960) * .42;
+      ctx.save(); ctx.fillStyle = 'rgba(23,52,58,.36)'; ctx.beginPath(); ctx.ellipse(shadowX, GROUND_Y - 8, 130, 22, 0, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+      ctx.save(); ctx.fillStyle = '#f3d273'; ctx.strokeStyle = '#17343a'; ctx.lineWidth = 7; ctx.beginPath(); ctx.arc(state.sunX, state.sunY, 66, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.restore();
+      drawDoor(1580, GROUND_Y, state.doorOpen);
+    } else if (mechanic === 'word_bridge') {
+      if (!state.bridgeBuilt) {
+        ctx.fillStyle = '#17343a'; ctx.font = '900 110px "PingFang SC", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('路', state.wordX, state.wordY);
+      }
+      drawDoor(1580, GROUND_Y, state.doorOpen);
+    } else if (mechanic === 'knock_twice') {
+      drawDoor(1580, GROUND_Y, state.doorOpen);
+      if (performance.now() < state.knockFlashUntil) {
+        ctx.fillStyle = '#17343a'; ctx.font = '900 70px "PingFang SC", sans-serif'; ctx.textAlign = 'center'; ctx.fillText('咚', 1410, 520);
+      }
+    } else if (mechanic === 'flower_password') {
+      flowerBlocks().forEach(function (block) {
+        roundedRect(block.x, block.y, block.w, block.h, 15, '#fff0bd', '#17343a', 6);
+        ctx.fillStyle = '#17343a'; ctx.font = '800 52px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('?', block.x + block.w / 2, block.y + block.h / 2);
+        if (performance.now() < state.flowerFlashUntil[block.index]) drawFlower(block.x + block.w / 2, block.y - 38, 1);
+      });
+      drawDoor(1580, GROUND_Y, state.doorOpen);
+      if (state.flowerRemaining.every(function (count) { return count === 0; }) && Math.abs(player.x - state.doorX) < 330 && !state.doorOpen) drawKeypad();
+    } else if (mechanic === 'shadow_key') {
+      if (!state.keyCollected) {
+        drawKey(930, 520, false);
+        drawKey(930, GROUND_Y - 22, true);
+      }
+      drawDoor(1580, GROUND_Y, state.doorOpen);
+    } else if (mechanic === 'passenger_platform') {
+      drawDoor(1580, GROUND_Y, state.doorOpen);
+    } else if (mechanic === 'shrink_tunnel') {
+      ctx.save(); ctx.fillStyle = '#596957'; ctx.strokeStyle = '#17343a'; ctx.lineWidth = 7;
+      roundedRect(700, 585, 630, 100, 10, '#596957', '#17343a', 7);
+      ctx.fillStyle = '#fff0bd'; ctx.font = '700 28px "PingFang SC", sans-serif'; ctx.textAlign = 'center'; ctx.fillText('低处无风', 1015, 642); ctx.restore();
+      drawDoor(1580, GROUND_Y, state.doorOpen);
+    } else if (mechanic === 'cloud_hold') {
+      ctx.save(); ctx.fillStyle = 'rgba(245,249,229,.92)'; ctx.strokeStyle = '#17343a'; ctx.lineWidth = 6;
+      ctx.beginPath(); ctx.ellipse(960, state.cloudY, 128, 38, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.restore();
+      drawDoor(1580, 525, state.doorOpen);
+    } else if (mechanic === 'decoy_door') {
+      drawDoor(1235, GROUND_Y, false);
+      drawDoor(1580, GROUND_Y, state.doorOpen);
+      ctx.save(); ctx.strokeStyle = state.decoyTouched ? '#e5bd66' : 'rgba(229,189,102,.55)'; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(1218, 605); ctx.lineTo(1252, 639); ctx.moveTo(1252, 605); ctx.lineTo(1218, 639); ctx.stroke(); ctx.restore();
+    } else if (mechanic === 'title_platform') {
+      if (!state.bridgeBuilt) {
+        ctx.fillStyle = '#17343a'; ctx.font = '900 62px "PingFang SC", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(level.title, state.titleX, state.titleY);
+      }
+      drawDoor(1580, GROUND_Y, state.doorOpen);
+    } else if (mechanic === 'freeze_spikes') {
+      const frozen = freezeHeld();
+      for (let x = 780; x <= 1280; x += 70) {
+        const rise = frozen ? 12 : 30 + (Math.sin(frame * .15 + x) + 1) * 28;
+        ctx.fillStyle = frozen ? '#79c8d1' : '#d94b54'; ctx.strokeStyle = '#17343a'; ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.moveTo(x - 25, GROUND_Y); ctx.lineTo(x, GROUND_Y - rise); ctx.lineTo(x + 25, GROUND_Y); ctx.closePath(); ctx.fill(); ctx.stroke();
+      }
+      drawDoor(1580, GROUND_Y, true);
+    } else if (mechanic === 'double_jump') {
+      drawDoor(1580, GROUND_Y, true);
+    } else if (mechanic === 'face_away') {
+      drawDoor(1580, GROUND_Y, state.doorOpen);
+      if (state.faceTime > 0) {
+        ctx.fillStyle = 'rgba(255,240,189,.75)'; ctx.beginPath(); ctx.arc(1580, 505, 12 + 22 * state.faceTime / 1.2, 0, Math.PI * 2); ctx.fill();
+      }
+    } else if (mechanic === 'drag_door') {
+      drawDoor(state.doorX, GROUND_Y, state.doorOpen);
+    } else if (mechanic === 'invisible_bridge') {
+      drawDoor(1580, GROUND_Y, true);
+    } else if (mechanic === 'mirror_world') {
+      ctx.save(); ctx.globalAlpha = .24; ctx.strokeStyle = '#fff0bd'; ctx.lineWidth = 4; ctx.setLineDash([20, 18]); ctx.beginPath(); ctx.moveTo(W / 2, 175); ctx.lineTo(W / 2, GROUND_Y); ctx.stroke(); ctx.restore();
+      drawDoor(W - 1580, GROUND_Y, true, { mirror: true });
+    } else if (mechanic === 'jump_bridge') {
+      drawDoor(1580, GROUND_Y, state.doorOpen);
+    } else if (mechanic === 'door_jumps') {
+      drawDoor(1580, state.doorY, state.doorOpen);
+    } else if (mechanic === 'ground_swap') {
+      drawDoor(1580, GROUND_Y, state.doorOpen);
+      drawGrassSwitch(665, GROUND_Y - 8, state.groundPhase === 0);
+      drawGrassSwitch(1240, GROUND_Y - 8, state.groundPhase === 1);
+    } else if (mechanic === 'flee_key') {
+      if (!state.keyCollected) drawKey(state.keyX, GROUND_Y - 95, false);
+      drawDoor(1580, GROUND_Y, state.doorOpen);
+    } else if (mechanic === 'push_box') {
+      ctx.save(); ctx.translate(state.boxX, GROUND_Y - 50); roundedRect(-65, -50, 130, 100, 8, '#a3653e', '#17343a', 7); ctx.strokeStyle = '#e5bd66'; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(-50, -40); ctx.lineTo(50, 40); ctx.moveTo(50, -40); ctx.lineTo(-50, 40); ctx.stroke(); ctx.restore();
+      drawDoor(1620, 620, state.doorOpen);
+    } else if (mechanic === 'gravity_flip') {
+      ctx.save(); ctx.fillStyle = '#f5df8d'; ctx.strokeStyle = '#17343a'; ctx.lineWidth = 7; ctx.beginPath(); ctx.arc(1450, 190, 62, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.restore();
+      ctx.fillStyle = '#596957'; ctx.fillRect(0, 220, W, 30); ctx.fillStyle = '#d2d879'; ctx.fillRect(0, 244, W, 6);
+      drawDoor(1580, 470, state.doorOpen, { upsideDown: true });
+    } else if (mechanic === 'sound_order') {
+      [700, 960, 1220].forEach(function (x, index) {
+        const active = state.soundFlash === index && performance.now() < state.soundFlashUntil;
+        roundedRect(x - 70, GROUND_Y - 70, 140, 60, 25, active ? '#f3d273' : '#596957', '#17343a', 6);
+        ctx.strokeStyle = '#e5bd66'; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(x, GROUND_Y - 40, 15 + index * 3, 0, Math.PI * 2); ctx.stroke();
+      });
+      drawDoor(1580, GROUND_Y, state.doorOpen);
+    } else if (mechanic === 'erase_wall') {
+      if (state.wallErase < 1) {
+        ctx.save(); ctx.globalAlpha = Math.max(.12, 1 - state.wallErase); ctx.fillStyle = '#655e76'; ctx.strokeStyle = '#17343a'; ctx.lineWidth = 8; roundedRect(900, 410, 120, 380, 8, '#655e76', '#17343a', 8); ctx.restore();
+      }
+      drawDoor(1580, GROUND_Y, state.doorOpen);
+    } else if (mechanic === 'start_backward') {
+      ctx.save(); ctx.strokeStyle = state.startVisited ? '#e5bd66' : '#17343a'; ctx.lineWidth = 8; ctx.beginPath(); ctx.arc(70, GROUND_Y - 25, 28, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+      drawDoor(1580, GROUND_Y, state.doorOpen);
+    } else {
+      drawDoor(1580, GROUND_Y, state.doorOpen || mechanic === 'reverse_controls');
+    }
+  }
+
+  function drawGrassSwitch(x, y, active) {
+    ctx.save(); ctx.strokeStyle = active ? '#f3d273' : '#17343a'; ctx.lineWidth = 7; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - 24, y - 54); ctx.moveTo(x, y); ctx.lineTo(x, y - 67); ctx.moveTo(x, y); ctx.lineTo(x + 27, y - 48); ctx.stroke(); ctx.restore();
+  }
+
+  function drawKeypad() {
+    roundedRect(700, 235, 640, 505, 28, 'rgba(255,240,189,.98)', '#17343a', 8);
+    ctx.fillStyle = '#17343a'; ctx.font = '800 34px "PingFang SC", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(state.passwordInput.padEnd(4, '·'), 1020, 278);
+    keypadRects().forEach(function (key) {
+      roundedRect(key.x, key.y, key.w, key.h, 16, '#fff0bd', '#17343a', 5);
+      ctx.fillStyle = '#17343a'; ctx.font = '800 38px sans-serif'; ctx.fillText(key.digit === 'back' ? '←' : key.digit, key.x + key.w / 2, key.y + key.h / 2);
+    });
+  }
+
+  function drawIconButton(rect, type) {
+    roundedRect(rect.x, rect.y, rect.w, rect.h, 18, '#fff0bd', '#17343a', 6);
+    const x = rect.x + rect.w / 2;
+    const y = rect.y + rect.h / 2;
     ctx.save(); ctx.strokeStyle = '#17343a'; ctx.fillStyle = '#17343a'; ctx.lineWidth = 7; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    ctx.beginPath(); ctx.arc(rx + 2, ry + 3, 25, -Math.PI * .35, Math.PI * 1.25, false); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(rx - 16, ry - 15); ctx.lineTo(rx - 37, ry - 8); ctx.lineTo(rx - 23, ry + 7); ctx.closePath(); ctx.fill(); ctx.restore();
-    roundedRect(HIT.pause.x, HIT.pause.y, HIT.pause.w, HIT.pause.h, 18, '#fff0bd', '#17343a', 6);
-    const px = HIT.pause.x + HIT.pause.w / 2;
-    const py = HIT.pause.y + HIT.pause.h / 2;
-    roundedRect(px - 19, py - 28, 13, 56, 5, '#17343a'); roundedRect(px + 6, py - 28, 13, 56, 5, '#17343a');
-    ctx.fillStyle = '#17343a'; ctx.font = '800 58px "PingFang SC", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-    ctx.fillText(level.title, W / 2, 120);
-    roundedRect(1735, 40, 135, 48, 14, 'rgba(23,52,58,.88)', '#e5bd66', 3);
-    ctx.fillStyle = '#fff0bd'; ctx.font = '700 19px sans-serif'; ctx.textBaseline = 'middle'; ctx.fillText('试玩 v2', 1802, 64);
+    if (type === 'hint') {
+      ctx.beginPath(); ctx.moveTo(x - 15, y - 16); ctx.bezierCurveTo(x - 10, y - 33, x + 20, y - 31, x + 19, y - 10); ctx.bezierCurveTo(x + 18, y + 2, x + 1, y + 3, x, y + 14); ctx.stroke(); ctx.beginPath(); ctx.arc(x, y + 27, 5, 0, Math.PI * 2); ctx.fill();
+    } else if (type === 'reset') {
+      ctx.beginPath(); ctx.arc(x + 2, y + 2, 24, -Math.PI * .35, Math.PI * 1.25, false); ctx.stroke(); ctx.beginPath(); ctx.moveTo(x - 15, y - 14); ctx.lineTo(x - 35, y - 7); ctx.lineTo(x - 22, y + 7); ctx.closePath(); ctx.fill();
+    } else if (type === 'pause') {
+      roundedRect(x - 18, y - 27, 12, 54, 4, '#17343a'); roundedRect(x + 6, y - 27, 12, 54, 4, '#17343a');
+    }
+    ctx.restore();
+  }
+
+  function drawTopUI() {
+    roundedRect(50, 38, 190, 88, 18, '#fff0bd', '#17343a', 6);
+    ctx.fillStyle = '#17343a'; ctx.font = '800 39px "PingFang SC", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('第 ' + level.id + ' 关', 145, 82);
+    drawIconButton(HIT.hint, 'hint'); drawIconButton(HIT.reset, 'reset'); drawIconButton(HIT.pause, 'pause');
+    if (level.mechanic !== 'title_platform') {
+      ctx.fillStyle = '#17343a'; ctx.font = '900 54px "PingFang SC", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'; ctx.fillText(level.title, 910, 105);
+    }
+    const decided = Object.keys(review.decisions).length;
+    roundedRect(1255, 43, 228, 66, 17, 'rgba(23,52,58,.86)', '#e5bd66', 4);
+    ctx.fillStyle = '#fff0bd'; ctx.font = '700 24px "PingFang SC", sans-serif'; ctx.textBaseline = 'middle'; ctx.fillText('已评审 ' + decided + ' / 30', 1369, 76);
+    drawReviewButton(HIT.accept, '加入主关', '#278a88');
+    drawReviewButton(HIT.discard, '抛弃', '#d94b54');
+  }
+
+  function drawReviewButton(rect, label, fill) {
+    roundedRect(rect.x, rect.y, rect.w, rect.h, 18, fill, '#17343a', 6);
+    ctx.fillStyle = '#fff0bd'; ctx.font = '800 27px "PingFang SC", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
   }
 
   function drawControls() {
@@ -741,13 +1378,12 @@
       const rect = entry[0];
       const held = controlHeld(entry[2]);
       roundedRect(rect.x, rect.y, rect.w, rect.h, 28, held ? '#2f7775' : '#17343a', '#e5bd66', 5);
-      ctx.fillStyle = '#fff0bd'; ctx.font = '900 104px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(entry[1], rect.x + rect.w / 2, rect.y + rect.h / 2 - 6);
+      ctx.fillStyle = '#fff0bd'; ctx.font = '900 104px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(entry[1], rect.x + rect.w / 2, rect.y + rect.h / 2 - 6);
     });
   }
 
   function wrapText(text, centerX, startY, maxWidth, lineHeight) {
-    const chars = Array.from(text);
+    const chars = Array.from(text || '');
     let line = '';
     const lines = [];
     chars.forEach(function (char) {
@@ -762,79 +1398,69 @@
 
   function drawHint() {
     if (!hintVisible) return;
-    roundedRect(470, 190, 980, 210, 28, 'rgba(255,240,189,.97)', '#17343a', 7);
+    roundedRect(470, 165, 980, 205, 28, 'rgba(255,240,189,.97)', '#17343a', 7);
     ctx.fillStyle = '#17343a'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = '900 36px "PingFang SC", sans-serif'; ctx.fillText('提示', W / 2, 240);
-    ctx.font = '700 31px "PingFang SC", sans-serif'; wrapText(level.hint, W / 2, 315, 860, 44);
+    ctx.font = '900 35px "PingFang SC", sans-serif'; ctx.fillText('提示', W / 2, 215);
+    ctx.font = '700 30px "PingFang SC", sans-serif'; wrapText(level.hint, W / 2, 292, 850, 43);
   }
 
   function drawPause() {
     if (status !== 'paused') return;
     ctx.fillStyle = 'rgba(25,23,36,.64)'; ctx.fillRect(0, 0, W, H);
-    roundedRect(475, 265, 970, 500, 36, '#fff0bd', '#17343a', 9);
+    roundedRect(560, 305, 800, 410, 36, '#fff0bd', '#17343a', 9);
     ctx.fillStyle = '#17343a'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = '900 70px "PingFang SC", sans-serif'; ctx.fillText('已暂停', W / 2, 395);
-    ctx.font = '600 30px "PingFang SC", sans-serif'; ctx.fillText('关卡状态会保留', W / 2, 475);
-    roundedRect(HIT.pauseBack.x, HIT.pauseBack.y, HIT.pauseBack.w, HIT.pauseBack.h, 22, '#fff0bd', '#17343a', 6);
+    ctx.font = '900 68px "PingFang SC", sans-serif'; ctx.fillText('已暂停', W / 2, 415);
+    ctx.font = '600 28px "PingFang SC", sans-serif'; ctx.fillText('这一关的状态会保留', W / 2, 505);
     roundedRect(HIT.pauseResume.x, HIT.pauseResume.y, HIT.pauseResume.w, HIT.pauseResume.h, 22, '#e7c66d', '#17343a', 6);
-    ctx.fillStyle = '#17343a'; ctx.font = '800 30px "PingFang SC", sans-serif';
-    ctx.fillText('回到试验选关', HIT.pauseBack.x + HIT.pauseBack.w / 2, HIT.pauseBack.y + HIT.pauseBack.h / 2);
-    ctx.fillText('返回游戏', HIT.pauseResume.x + HIT.pauseResume.w / 2, HIT.pauseResume.y + HIT.pauseResume.h / 2);
+    ctx.font = '800 31px "PingFang SC", sans-serif'; ctx.fillText('继续试玩', W / 2, HIT.pauseResume.y + HIT.pauseResume.h / 2);
   }
 
-  function drawSuccess() {
+  function drawSuccessRibbon() {
     if (status !== 'success') return;
-    ctx.fillStyle = 'rgba(25,23,36,.58)'; ctx.fillRect(0, 0, W, H);
-    roundedRect(420, 300, 1080, 500, 36, '#fff0bd', '#17343a', 9);
-    ctx.fillStyle = '#17343a'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = '900 78px "PingFang SC", sans-serif'; ctx.fillText('脑洞正确', W / 2, 420);
-    ctx.font = '600 32px "PingFang SC", sans-serif'; ctx.fillText('第 ' + level.id + ' 关 · ' + level.title, W / 2, 520);
-    roundedRect(HIT.successSelect.x, HIT.successSelect.y, HIT.successSelect.w, HIT.successSelect.h, 20, '#fff0bd', '#17343a', 6);
-    roundedRect(HIT.successReplay.x, HIT.successReplay.y, HIT.successReplay.w, HIT.successReplay.h, 20, '#e7c66d', '#17343a', 6);
-    roundedRect(HIT.successNext.x, HIT.successNext.y, HIT.successNext.w, HIT.successNext.h, 20, '#278a88', '#17343a', 6);
-    ctx.font = '800 28px "PingFang SC", sans-serif'; ctx.fillStyle = '#17343a';
-    ctx.fillText('试验选关', 665, 696); ctx.fillText('再玩一次', 960, 696);
-    ctx.fillStyle = '#fff0bd'; ctx.fillText(currentIndex === LEVELS.length - 1 ? '完成试玩' : '下一关', 1255, 696);
+    roundedRect(660, 145, 600, 90, 25, 'rgba(255,240,189,.96)', '#17343a', 7);
+    ctx.fillStyle = '#17343a'; ctx.font = '900 37px "PingFang SC", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('脑洞正确 · 请选择加入或抛弃', W / 2, 190);
   }
 
-  function drawSelection() {
-    drawBackdrop();
-    ctx.fillStyle = 'rgba(255,240,189,.86)';
-    roundedRect(500, 45, 920, 140, 40, 'rgba(255,240,189,.82)', '#17343a', 7);
-    ctx.fillStyle = '#17343a'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = '900 58px "PingFang SC", sans-serif'; ctx.fillText('新关卡试玩 · 第二轮', W / 2, 94);
-    ctx.font = '600 27px "PingFang SC", sans-serif'; ctx.fillText('第 13、15 关独立体验，不改动当前主线', W / 2, 148);
-    selectCards().forEach(function (card) {
-      roundedRect(card.x, card.y, card.w, card.h, 28, 'rgba(255,240,189,.94)', '#17343a', 7);
-      roundedRect(card.x + 30, card.y + 30, 105, 105, 24, card.index % 2 ? '#e7c66d' : '#79c8d1', '#17343a', 5);
-      ctx.fillStyle = '#17343a'; ctx.font = '900 43px sans-serif'; ctx.fillText(String(card.level.id), card.x + 82, card.y + 82);
-      ctx.textAlign = 'left'; ctx.font = '900 42px "PingFang SC", sans-serif'; ctx.fillText(card.level.title, card.x + 170, card.y + 70);
-      ctx.font = '600 25px "PingFang SC", sans-serif'; ctx.fillStyle = '#435654'; ctx.fillText(card.level.teaser, card.x + 170, card.y + 125);
-      ctx.font = '700 23px "PingFang SC", sans-serif'; ctx.fillStyle = '#2f7775'; ctx.fillText('点击试玩', card.x + 170, card.y + 172);
-      ctx.textAlign = 'center';
-    });
-    roundedRect(HIT.selectBack.x, HIT.selectBack.y, HIT.selectBack.w, HIT.selectBack.h, 22, '#fff0bd', '#17343a', 6);
-    ctx.fillStyle = '#17343a'; ctx.font = '800 30px "PingFang SC", sans-serif'; ctx.textAlign = 'center'; ctx.fillText('返回主线选关', W / 2, HIT.selectBack.y + HIT.selectBack.h / 2);
-    roundedRect(1735, 40, 135, 48, 14, 'rgba(23,52,58,.88)', '#e5bd66', 3);
-    ctx.fillStyle = '#fff0bd'; ctx.font = '700 19px sans-serif'; ctx.fillText('试玩 v2', 1802, 64);
+  function drawToast() {
+    if (!state.toast || performance.now() >= state.toastUntil) return;
+    roundedRect(700, 660, 520, 76, 18, 'rgba(217,75,84,.93)', '#17343a', 5);
+    ctx.fillStyle = '#fff0bd'; ctx.font = '700 30px "PingFang SC", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(state.toast, 960, 698);
   }
 
   function renderLevel() {
     drawBackdrop();
     drawDropTerrain();
     floorsForLevel().forEach(drawGround);
-    if (level.mechanic === 'dual_bridge') drawDualMechanic();
-    else if (level.mechanic === 'ink_path') drawInkMechanic();
+    drawMechanic();
     drawPlayer();
     drawTopUI();
     drawControls();
     drawHint();
-    drawSuccess();
+    drawToast();
+    drawSuccessRibbon();
     drawPause();
   }
 
+  function drawSummary() {
+    drawBackdrop();
+    const summary = reviewSummary();
+    ctx.fillStyle = 'rgba(57,47,70,.42)'; ctx.fillRect(0, 0, W, H);
+    roundedRect(250, 120, 1420, 790, 42, 'rgba(255,240,189,.97)', '#17343a', 9);
+    ctx.fillStyle = '#17343a'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = '900 70px "PingFang SC", sans-serif'; ctx.fillText('30 关评审完成', W / 2, 225);
+    ctx.font = '700 32px "PingFang SC", sans-serif'; ctx.fillText('告诉 Codex：“开始处理评审结果”', W / 2, 310);
+    roundedRect(355, 380, 560, 370, 30, 'rgba(39,138,136,.14)', '#278a88', 6);
+    roundedRect(1005, 380, 560, 370, 30, 'rgba(217,75,84,.12)', '#d94b54', 6);
+    ctx.fillStyle = '#278a88'; ctx.font = '900 42px "PingFang SC", sans-serif'; ctx.fillText('加入主关 · ' + summary.accepted.length, 635, 440);
+    ctx.fillStyle = '#d94b54'; ctx.fillText('抛弃 · ' + summary.discarded.length, 1285, 440);
+    ctx.fillStyle = '#17343a'; ctx.font = '700 29px "PingFang SC", sans-serif';
+    wrapText(summary.accepted.length ? summary.accepted.join('、') : '无', 635, 575, 470, 42);
+    wrapText(summary.discarded.length ? summary.discarded.join('、') : '无', 1285, 575, 470, 42);
+    ctx.font = '600 24px "PingFang SC", sans-serif'; ctx.fillText('结果已保存在本机；统一处理前不会改动主线关卡。', W / 2, 835);
+  }
+
   function render() {
-    if (screen === 'select') drawSelection();
+    if (screen === 'summary') drawSummary();
     else renderLevel();
   }
 
@@ -847,15 +1473,16 @@
       updateMechanic(dt);
       render();
     } catch (error) {
-      log('render', 'frame-error', { message: error && error.message, stack: error && error.stack }, 'error');
+      log('render', 'frame-error', { operation: 'animation-frame', message: error && error.message, stack: error && error.stack }, 'error');
     }
     requestAnimationFrame(tick);
   }
 
   document.getElementById('download-logs').addEventListener('click', function () {
-    log('export', 'log-export', { entries: logger.entries.length, filename_scope: level ? 'level-' + level.id : 'selection' });
-    logger.download('guaiqi-round2-' + (level ? 'level-' + level.id : 'selection') + '.json');
+    log('export', 'log-export', { entries: logger.entries.length, review: reviewSummary() });
+    logger.download('guaiqi-review-' + (level ? 'level-' + level.id : 'summary') + '.json');
   });
+
   window.addEventListener('error', function (event) {
     log('runtime', 'uncaught-error', { message: event.message, file: event.filename, line: event.lineno }, 'error');
   });
@@ -863,26 +1490,27 @@
     log('runtime', 'unhandled-rejection', { reason: event.reason && (event.reason.message || String(event.reason)) }, 'error');
   });
 
-  window.__brainstormRound2 = {
+  window.__guaiqiReview = {
     VERSION: VERSION,
-    levels: LEVELS.map(function (item) { return Object.assign({}, item); }),
+    levels: LEVELS.map(function (item) { return Object.assign({}, item, { creator: item.creator.slice() }); }),
     getState: function () {
       return {
         screen: screen,
         status: status,
         level: level ? level.id : null,
+        review: reviewSummary(),
         player: Object.assign({}, player),
         mechanic: JSON.parse(JSON.stringify(state)),
         inputs: { keys: Array.from(heldKeys), controls: Array.from(heldControls.values()), pointers: activePointers.size }
       };
     },
+    getReviewResult: function () { return JSON.parse(JSON.stringify(review)); },
     enterLevelById: function (id) {
       const index = LEVELS.findIndex(function (item) { return item.id === Number(id); });
       if (index >= 0) enterLevel(index, 'debug-api');
       return index >= 0;
     },
     restart: function () { restart('debug-api'); },
-    showSelection: function () { enterSelection('debug-api'); },
     setLogModule: function (name, enabled) { logger.setModule(name, enabled); },
     setLogLevel: function (name) { logger.setLevel(name); },
     logs: logger
@@ -893,18 +1521,19 @@
   const startupParams = new URLSearchParams(location.search);
   const requestedLevel = Number(startupParams.get('level'));
   const requestedIndex = LEVELS.findIndex(function (item) { return item.id === requestedLevel; });
+  const nextReviewIndex = firstUndecidedIndex();
   log('runtime', 'boot', {
     version: VERSION,
-    levels: LEVELS.map(function (item) { return item.id; }),
+    level_range: [13, 42],
+    level_count: LEVELS.length,
+    decided_count: Object.keys(review.decisions).length,
     requested_level: Number.isFinite(requestedLevel) ? requestedLevel : null,
-    resolved_screen: requestedIndex >= 0 ? 'level' : 'selection',
-    backend: { mode: 'offline-prototype', requests: 'none', persistence: 'none' },
-    logging: { max_entries: logger.maxEntries, physics_default_enabled: false, export_available: true }
+    backend: { mode: 'offline-review', network_requests: 'none', persistence: 'localStorage-decisions' },
+    logging: { max_entries: logger.maxEntries, min_level: logger.minLevel, physics_default_enabled: false, sensitive_fields_redacted: true }
   });
-  if (startupParams.has('level') && requestedIndex < 0) {
-    log('state', 'invalid-level-request', { requested_level: requestedLevel, supported_levels: LEVELS.map(function (item) { return item.id; }), fallback: 'selection' }, 'warn');
-  }
-  if (requestedIndex >= 0) enterLevel(requestedIndex, 'startup-query');
-  else enterSelection('boot');
+  if (nextReviewIndex < 0 && requestedIndex < 0) {
+    screen = 'summary'; status = 'summary'; level = null;
+  } else if (requestedIndex >= 0) enterLevel(requestedIndex, 'startup-query');
+  else enterLevel(nextReviewIndex, 'resume-first-undecided');
   requestAnimationFrame(tick);
 })();
