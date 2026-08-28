@@ -2,11 +2,12 @@
 
 ## 关卡与版本
 
-- 网页主线当前为代码版本 `v169`，共 12 关。
+- 网页主线当前为代码版本 `v170`，共 12 关。
 - 第 8–12 关依次为影子机关、静止追门、标题拖字成桥、重来保留箱子、拖动世界。
 - 正式关卡数据位于 `../godot_project/levels/level_0.json` 至 `level_11.json`，离线包位于 `../godot_project/levels/levels_bundle.js`。
-- `index.html` 的脚本与样式缓存参数已同步为 `v169`。
+- `index.html` 的脚本与样式缓存参数已同步为 `v170`。
 - `?screen=levelSelect` 可从独立试玩页安全返回完整主线选关页；不带该参数时仍从首页启动。
+- 主线选关页每页固定最多 `4 列 × 2 排`，第 1 页为 1–8 关，第 2 页为 9–12 关。手机左右滑动、电脑按住鼠标横向拖动，或使用键盘左右方向键均可翻页；轻触/单击仍进入对应关卡。进入第 9–12 关后再从暂停页返回选关，会保留在第 2 页。
 
 ## 日志与独立调试
 
@@ -23,6 +24,16 @@
 `tests/mainline-function-parity-test.js` 是 UI 改版的功能守恒检查：固定验证首页、主线选关、暂停返回、创造模式、编辑器撤销与移动、键盘控制、日志导出及提示跨关复位仍然存在。`tests/levels-8-12-smoke-test.js` 会模拟第 9 关静止等待，并校验第 10 关自然落点、桥两端及桥面高度，同时核对全部 12 关 JSON 与离线包一致。
 
 第 12 关的全景拖拽会先调用 `_sceneGestureBlockedByUI(p)`；提示、重来、暂停以及提示/成功/死亡弹层区域会记录 `mechanic/scene-gesture-bypassed-ui` 并交还旧 UI 点击处理，避免新增手势吞掉原按钮。
+
+选关分页使用独立的 `level-select` 日志模块，记录 `gesture-start`、`gesture-end`、`page-change`、`page-boundary` 和多指忽略状态。它不会逐帧记录移动过程，避免拖动时产生大量日志。可独立查看或关闭：
+
+```js
+_findLogs('', 'level-select')
+_setLogModule('level-select', false)
+_setLogModule('level-select', true)
+```
+
+`tests/level-select-pagination-test.js` 固定检查每页 8 关、第二页索引映射、横滑阈值、取消保护、相邻页无点击热区和鼠标/触摸接线。浏览器验收还应真实完成左滑到第 2 页、点击第 9 关、暂停返回第 2 页和右滑回第 1 页。
 
 日志模块可分别启停，默认关闭逐帧 `physics` 噪声日志。需要排查物理过程时，可以在地址后追加 `?verbose=1`，或在控制台单独开启：
 

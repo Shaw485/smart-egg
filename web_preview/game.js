@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 169;   // 跟 index.html 的 ?v=169 保持一致
+    const GAME_CODE_VERSION = 170;   // 跟 index.html 的 ?v=170 保持一致
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
         const last = parseInt(localStorage.getItem(LAST_KNOWN_KEY) || '0', 10);
@@ -435,7 +435,8 @@
         ['runtime',true],['state',true],['input',true],['mechanic',true],['level-load',true],
         ['door',true],['collide',true],['puzzle',true],['progress',true],['audio',true],
         ['creator',true],['export',true],['dead',true],['guard',true],['fatal',true],
-        ['snapshot',true],['debug',true],['physics',location.search.includes('verbose=1')]
+        ['snapshot',true],['debug',true],['level-select',true],
+        ['physics',location.search.includes('verbose=1')]
     ]);
     // v4.9.7a 死亡/坏关卡前 10 帧 player 快照（环形buffer），排查"为什么掉下去/为什么没碰门"直接回溯状态
     const PLAYER_RING_SIZE = 10;
@@ -924,11 +925,22 @@
         }
         // 菜单页快捷键：ENTER/SPACE=进入选关
         if (gameState === 'menu') {
-            if (e.code === 'Enter' || e.code === 'Space') { logStep('input','shortcut',{from_state:gameState,to:'levelSelect',shortcut:'Enter/Space'}); gameState = 'levelSelect'; e.preventDefault(); return; }
+            if (e.code === 'Enter' || e.code === 'Space') {
+                logStep('input','shortcut',{from_state:gameState,to:'levelSelect',shortcut:'Enter/Space'});
+                gameState = 'levelSelect';
+                _setLevelSelectPage(0, 'menu-keyboard-open');
+                e.preventDefault();
+                return;
+            }
         }
-        // 选关页快捷键：ESC回菜单
+        // 选关页快捷键：ESC回菜单，左右方向键翻页。
         if (gameState === 'levelSelect') {
             if (e.code === 'Escape') { logStep('input','shortcut',{from_state:gameState,to:'menu',shortcut:'ESC'}); gameState = 'menu'; e.preventDefault(); return; }
+            if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
+                _setLevelSelectPage(_levelSelectPage + (e.code === 'ArrowRight' ? 1 : -1), 'keyboard-page', { code:e.code });
+                e.preventDefault();
+                return;
+            }
         }
         if (keys[e.code]) {
             if (keys[e.code] === 'jump') {
@@ -1510,6 +1522,143 @@
 
     // ===== v4.9.6 选关 + 通关存档 =====
     const TOTAL_LEVELS = 12;
+    const LEVEL_SELECT_COLS = 4;
+    const LEVEL_SELECT_ROWS = 2;
+    const LEVEL_SELECT_PAGE_SIZE = LEVEL_SELECT_COLS * LEVEL_SELECT_ROWS;
+    const LEVEL_SELECT_SWIPE_THRESHOLD = 120;
+    const LEVEL_SELECT_TAP_SLOP = 28;
+    let _levelSelectPage = 0;
+    let _levelSelectSwipe = null;
+
+    function _levelSelectPageCount() {
+        return Math.max(1, Math.ceil(TOTAL_LEVELS / LEVEL_SELECT_PAGE_SIZE));
+    }
+    function _setLevelSelectPage(nextPage, reason, details = {}) {
+        const before = _levelSelectPage;
+        const requested = Math.round(Number(nextPage) || 0);
+        const pageCount = _levelSelectPageCount();
+        _levelSelectPage = Math.max(0, Math.min(pageCount - 1, requested));
+        if (_levelSelectPage !== before) {
+            // 翻页后立刻清掉上一页命中区，避免下一帧绘制前的极速二次点击
+            // 命中已经离屏的旧卡片。
+            uiBTN.levelSelect_btns = [];
+            logStep('level-select', 'page-change', {
+                from: before,
+                to: _levelSelectPage,
+                requested,
+                pageCount,
+                reason,
+                ...details
+            });
+        } else if (requested !== before) {
+            logStep('level-select', 'page-boundary', {
+                page: before,
+                requested,
+                pageCount,
+                reason,
+                ...details
+            });
+        }
+        return _levelSelectPage;
+    }
+    function _levelSelectDragOffset() {
+        if (!_levelSelectSwipe) return 0;
+        let dx = _levelSelectSwipe.currentX - _levelSelectSwipe.startX;
+        const lastPage = _levelSelectPageCount() - 1;
+        if ((dx > 0 && _levelSelectPage === 0) || (dx < 0 && _levelSelectPage === lastPage)) dx *= 0.28;
+        return Math.max(-W, Math.min(W, dx));
+    }
+    function _beginLevelSelectGesture(p, pointer) {
+        if (gameState !== 'levelSelect') return false;
+        if (_levelSelectSwipe) {
+            logStep('level-select', 'gesture-pointer-ignored', {
+                activePointer: _levelSelectSwipe.pointer,
+                ignoredPointer: pointer,
+                reason: 'single-pointer-navigation'
+            });
+            return true;
+        }
+        _levelSelectSwipe = {
+            pointer,
+            startPage: _levelSelectPage,
+            startX: p.x,
+            startY: p.y,
+            currentX: p.x,
+            currentY: p.y,
+            startedAt: performance.now()
+        };
+        logStep('level-select', 'gesture-start', {
+            pointer,
+            page: _levelSelectPage,
+            x: Math.round(p.x),
+            y: Math.round(p.y)
+        });
+        return true;
+    }
+    function _moveLevelSelectGesture(p, pointer) {
+        if (!_levelSelectSwipe || _levelSelectSwipe.pointer !== pointer) return false;
+        _levelSelectSwipe.currentX = p.x;
+        _levelSelectSwipe.currentY = p.y;
+        return true;
+    }
+    function _endLevelSelectGesture(p, pointer, reason) {
+        if (!_levelSelectSwipe || _levelSelectSwipe.pointer !== pointer) return false;
+        const gesture = _levelSelectSwipe;
+        const end = p || { x: gesture.currentX, y: gesture.currentY };
+        const dx = end.x - gesture.startX;
+        const dy = end.y - gesture.startY;
+        const distance = Math.hypot(dx, dy);
+        const isRelease = reason === 'end' || reason === 'canvas-mouseup' || reason === 'window-mouseup';
+        // 手势期间若页面状态或页码已被键盘/Esc 改变，则释放只负责清理，
+        // 不再把旧按下位置解释成新页面上的点击或翻页。
+        const canComplete = gameState === 'levelSelect' && _levelSelectPage === gesture.startPage;
+        const isHorizontalSwipe = canComplete && isRelease && Math.abs(dx) >= LEVEL_SELECT_SWIPE_THRESHOLD
+            && Math.abs(dx) > Math.abs(dy) * 1.15;
+        const isTapRelease = canComplete && (reason === 'end' || reason === 'canvas-mouseup')
+            && distance <= LEVEL_SELECT_TAP_SLOP;
+        _levelSelectSwipe = null;
+
+        let outcome = canComplete ? 'cancelled' : 'state-or-page-changed';
+        if (isHorizontalSwipe) {
+            const direction = dx < 0 ? 1 : -1;
+            const before = _levelSelectPage;
+            _setLevelSelectPage(before + direction, 'horizontal-swipe', {
+                dx: Math.round(dx),
+                dy: Math.round(dy),
+                pointer
+            });
+            outcome = _levelSelectPage === before ? 'boundary' : 'page-change';
+        } else if (isTapRelease) {
+            outcome = 'tap';
+            handleDown({ x: gesture.startX, y: gesture.startY });
+        }
+        logStep('level-select', 'gesture-end', {
+            pointer,
+            reason,
+            outcome,
+            page: _levelSelectPage,
+            dx: Math.round(dx),
+            dy: Math.round(dy),
+            distance: Math.round(distance),
+            durationMs: Math.round(performance.now() - gesture.startedAt),
+            threshold: LEVEL_SELECT_SWIPE_THRESHOLD
+        });
+        return true;
+    }
+
+    window.__debug.getLevelSelectPaging = () => ({
+        page: _levelSelectPage,
+        pageNumber: _levelSelectPage + 1,
+        pageCount: _levelSelectPageCount(),
+        pageSize: LEVEL_SELECT_PAGE_SIZE,
+        rows: LEVEL_SELECT_ROWS,
+        columns: LEVEL_SELECT_COLS,
+        gestureActive: !!_levelSelectSwipe
+    });
+    window.__debug.setLevelSelectPage = page => {
+        _setLevelSelectPage(page, 'debug-set-page');
+        return window.__debug.getLevelSelectPaging();
+    };
     const LS_KEY = 'big_clever_save_v1';
     // v4.9.6 关卡加载缓存（死亡重来的同步保证，必须声明在最前面避免 TDZ）
     const _cachedLevels = {};
@@ -3203,65 +3352,92 @@
         ctx.restore();
     }
 
-    // ===== v164 选关页面（3 排 × 4 列） =====
-    function drawLevelSelect() {
-        drawGrid();
-        // 标题
-        sketchBold('旅途篇章', W / 2, H * 0.12, 72);
-        sketchText('已通关: ' + _progress.completed.length + ' / ' + TOTAL_LEVELS, W / 2, H * 0.18, 28, 'center', false, 'rgba(0,0,0,0.5)');
+    // ===== v170 选关页面：每页最多 2 排 × 4 列，横向拖动翻页 =====
+    function _drawLevelSelectPage(pageIndex, offsetX, layout, collectButtons) {
+        const { cellW, cellH, gapX, gapY, startX, startY } = layout;
+        const firstIndex = pageIndex * LEVEL_SELECT_PAGE_SIZE;
+        const endIndex = Math.min(TOTAL_LEVELS, firstIndex + LEVEL_SELECT_PAGE_SIZE);
 
-        // 12 关完整展示：3 排 × 4 列，保留底部返回按钮的安全距离。
-        const cols = 4, rows = 3;
-        const cellW = 330, cellH = 150, gapX = 38, gapY = 30;
-        const totalW = cellW * cols + gapX * (cols - 1);
-        const totalH = cellH * rows + gapY * (rows - 1);
-        const startX = (W - totalW) / 2;
-        const startY = H * 0.235;
-
-        uiBTN.levelSelect_btns = [];
-
-        for (let idx = 0; idx < TOTAL_LEVELS; idx++) {
-            const col = idx % cols;
-            const row = Math.floor(idx / cols);
-            const bx = startX + col * (cellW + gapX);
+        for (let idx = firstIndex; idx < endIndex; idx++) {
+            const slot = idx - firstIndex;
+            const col = slot % LEVEL_SELECT_COLS;
+            const row = Math.floor(slot / LEVEL_SELECT_COLS);
+            const bx = startX + col * (cellW + gapX) + offsetX;
             const by = startY + row * (cellH + gapY);
-
             const unlocked = idx + 1 <= _progress.unlocked;
             const completed = _progress.completed.includes(idx);
             const available = _availableLevels.includes(idx);
-
-            // 未解锁但关卡内容存在的标记为"可解锁"
-            // 规则：有 JSON + 前一关通关 才算解锁
             const canPlay = unlocked && available;
-
-            // v4.9.6b 旧逻辑：canPlay=false 一律画锁🔒+未解锁（不区分没开发/未解锁）
-            // 画单元格（wonky 白底黑描边）
             const seed = 90000 + idx * 13;
+
             ctx.save();
-            if (canPlay) {
-                ctx.fillStyle = completed ? '#d5f5d5' : '#fff0bd';
-            } else {
-                ctx.fillStyle = '#e8e8e8';
-            }
+            ctx.fillStyle = canPlay ? (completed ? '#d5f5d5' : '#fff0bd') : '#e8e8e8';
             _wonkyRectPath(bx, by, cellW, cellH, 24, seed, 2); ctx.fill();
             ctx.strokeStyle = '#17343a'; ctx.lineWidth = 3.5;
             _wonkyRectPath(bx, by, cellW, cellH, 24, seed, 2); ctx.stroke();
             ctx.restore();
 
-            // 画关卡编号
             if (canPlay) {
                 sketchBold(String(idx + 1), bx + cellW / 2, by + cellH * 0.34, 46);
                 sketchText(completed ? '✓ 已通关' : '未通关', bx + cellW / 2, by + cellH * 0.62, 23, 'center', false, completed ? '#2a8a2a' : 'rgba(0,0,0,0.5)');
                 sketchText(FANTASY_TITLES[idx] || ('第 ' + (idx + 1) + ' 关'), bx + cellW / 2, by + cellH * 0.84, 20, 'center', false, 'rgba(0,0,0,0.48)');
             } else {
-                // 不可玩：一律浅灰 + 锁图标 + 🔒未解锁/📝待开发 小字
                 drawLockIcon(bx + cellW / 2, by + cellH / 2 - 10);
                 sketchText(available ? '🔒 未解锁' : '📝 待开发', bx + cellW / 2, by + cellH * 0.82, 22, 'center', false, 'rgba(0,0,0,0.5)');
             }
 
-            if (canPlay) {
-                uiBTN.levelSelect_btns.push({ x: bx, y: by, w: cellW, h: cellH, levelIndex: idx });
+            if (collectButtons && canPlay) {
+                // 点击命中区固定在当前页的静止位置。卡片跟手位移不应让一次轻微抖动
+                // 把松手点击映射到相邻卡片或卡片外。
+                uiBTN.levelSelect_btns.push({ x: bx - offsetX, y: by, w: cellW, h: cellH, levelIndex: idx });
             }
+        }
+    }
+
+    function drawLevelSelect() {
+        drawGrid();
+        sketchBold('旅途篇章', W / 2, H * 0.12, 72);
+        sketchText('已通关: ' + _progress.completed.length + ' / ' + TOTAL_LEVELS, W / 2, H * 0.18, 28, 'center', false, 'rgba(0,0,0,0.5)');
+
+        const pageCount = _levelSelectPageCount();
+        _levelSelectPage = Math.max(0, Math.min(pageCount - 1, _levelSelectPage));
+        const cellW = 330, cellH = 150, gapX = 38, gapY = 30;
+        const totalW = cellW * LEVEL_SELECT_COLS + gapX * (LEVEL_SELECT_COLS - 1);
+        const totalH = cellH * LEVEL_SELECT_ROWS + gapY * (LEVEL_SELECT_ROWS - 1);
+        const layout = {
+            cellW,
+            cellH,
+            gapX,
+            gapY,
+            startX: (W - totalW) / 2,
+            startY: H * 0.235
+        };
+        const dragOffset = _levelSelectDragOffset();
+        uiBTN.levelSelect_btns = [];
+
+        // 只让关卡卡片横向滑动；标题、页码和返回按钮保持稳定。
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(30, layout.startY - 16, W - 60, totalH + 32);
+        ctx.clip();
+        _drawLevelSelectPage(_levelSelectPage, dragOffset, layout, true);
+        if (dragOffset < 0 && _levelSelectPage < pageCount - 1) {
+            _drawLevelSelectPage(_levelSelectPage + 1, dragOffset + W, layout, false);
+        } else if (dragOffset > 0 && _levelSelectPage > 0) {
+            _drawLevelSelectPage(_levelSelectPage - 1, dragOffset - W, layout, false);
+        }
+        ctx.restore();
+
+        const pagingY = layout.startY + totalH + 54;
+        sketchText('第 ' + (_levelSelectPage + 1) + ' / ' + pageCount + ' 页  ·  左右滑动', W / 2, pagingY, 24, 'center', false, 'rgba(23,52,58,0.72)');
+        for (let page = 0; page < pageCount; page++) {
+            const dotX = W / 2 + (page - (pageCount - 1) / 2) * 34;
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(dotX, pagingY + 32, page === _levelSelectPage ? 7 : 5, 0, Math.PI * 2);
+            ctx.fillStyle = page === _levelSelectPage ? '#17343a' : 'rgba(23,52,58,0.25)';
+            ctx.fill();
+            ctx.restore();
         }
 
         // 返回营地按钮
@@ -3342,6 +3518,7 @@
             }
             if (inRect(p, uiBTN.start)) {
                 gameState = 'levelSelect';
+                _setLevelSelectPage(0, 'menu-button-open');
                 logStep('state', 'menu→levelSelect', {});
             }
             if (inRect(p, uiBTN.creator)) { gameState='creatorList'; logStep('state','menu→creatorList',{}); }
@@ -3586,6 +3763,7 @@
         }
     }
     function handleUp(reason = 'mouse-up', point = null) {
+        _endLevelSelectGesture(point, 'mouse', reason);
         _endSceneGesture(point, 'mouse', reason);
         const control = _mouseControl;
         _mouseControl = null;
@@ -3610,17 +3788,22 @@
     canvas.addEventListener('mousedown', e => {
         handleUp('mouse-new-down');
         const p = getMousePos(e), t = gameState === 'playing' ? _movingTargetAt(p) : null;
-        if (_beginSceneGesture(p, 'mouse')) {
+        if (_beginLevelSelectGesture(p, 'mouse')) {
+            return;
+        } else if (_beginSceneGesture(p, 'mouse')) {
             return;
         } else if (t) {
             _mouseMovingTarget = t.obj;
             logStep('input','moving-element-hold',{kind:t.kind,id:t.obj.id,pointer:'mouse'});
         } else handleDown(p);
     });
-    canvas.addEventListener('mousemove', e => _moveSceneGesture(getMousePos(e), 'mouse'));
+    canvas.addEventListener('mousemove', e => {
+        const p = getMousePos(e);
+        if (!_moveLevelSelectGesture(p, 'mouse')) _moveSceneGesture(p, 'mouse');
+    });
     canvas.addEventListener('mouseup', e => handleUp('canvas-mouseup', getMousePos(e)));
     canvas.addEventListener('mouseleave', () => handleUp('canvas-mouseleave'));
-    window.addEventListener('mouseup', () => handleUp('window-mouseup'));
+    window.addEventListener('mouseup', e => handleUp('window-mouseup', getMousePos(e)));
     function _touchPos(touch) {
         const rect = canvas.getBoundingClientRect();
         return { x: (touch.clientX - rect.left) * (W / rect.width), y: (touch.clientY - rect.top) * (H / rect.height) };
@@ -3637,6 +3820,7 @@
         for (const touch of Array.from(e.changedTouches)) {
             const p = _touchPos(touch);
             const moving = gameState === 'playing' ? _movingTargetAt(p) : null;
+            if(_beginLevelSelectGesture(p,touch.identifier))continue;
             if(_beginSceneGesture(p,touch.identifier))continue;
             if(moving){_heldMovingTargets.set(touch.identifier,moving.obj);logStep('input','moving-element-hold',{kind:moving.kind,id:moving.obj.id,pointer:touch.identifier});continue;}
             const control = gameState === 'playing' ? _controlAt(p) : null;
@@ -3652,12 +3836,17 @@
     }, { passive: false });
     canvas.addEventListener('touchmove', e => {
         e.preventDefault();
-        for(const touch of Array.from(e.changedTouches))_moveSceneGesture(_touchPos(touch),touch.identifier);
+        for(const touch of Array.from(e.changedTouches)){
+            const p=_touchPos(touch);
+            if(!_moveLevelSelectGesture(p,touch.identifier))_moveSceneGesture(p,touch.identifier);
+        }
     }, { passive: false });
     function _releaseChangedTouches(e, reason) {
         e.preventDefault();
         for (const touch of Array.from(e.changedTouches)) {
-            if(_endSceneGesture(_touchPos(touch),touch.identifier,reason))continue;
+            const p=_touchPos(touch);
+            if(_endLevelSelectGesture(p,touch.identifier,reason))continue;
+            if(_endSceneGesture(p,touch.identifier,reason))continue;
             if(_heldMovingTargets.has(touch.identifier)){const obj=_heldMovingTargets.get(touch.identifier);_heldMovingTargets.delete(touch.identifier);logStep('input','moving-element-release',{id:obj&&obj.id,pointer:touch.identifier,reason});continue;}
             const control = _activeTouchControls.get(touch.identifier);
             if (!control) continue;
@@ -3747,6 +3936,7 @@
             _persistentCrateCount = 1;
         }
         currentLevelIndex = idx;
+        _setLevelSelectPage(Math.floor(idx / LEVEL_SELECT_PAGE_SIZE), 'level-load-sync', { levelIndex:idx });
         const isAvail = _availableLevels.includes(idx);
         const isUnlocked = (idx+1) <= _progress.unlocked;
         // idx=0 例外（因为 fallback 也能用），其它没开发 = 提前打印 blocked 原因
@@ -4445,6 +4635,7 @@
         const requestedScreen = new URLSearchParams(location.search).get('screen');
         if (requestedScreen === 'levelSelect') {
             gameState = 'levelSelect';
+            _setLevelSelectPage(0, 'startup-route');
             logStep('state', 'startup-route', { requested: requestedScreen, resolved: gameState });
         } else if (requestedScreen === 'menu') {
             gameState = 'menu';
