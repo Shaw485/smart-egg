@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 173;   // 跟 index.html 的 ?v=173 保持一致
+    const GAME_CODE_VERSION = 174;   // 跟 index.html 的 ?v=174 保持一致
     const GAME_TITLE = '怪奇之原';
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
@@ -39,6 +39,10 @@
     const MOVE_SPEED = 300.0;
     const JUMP_VELOCITY = -1080.0;
     const HALF_W = 40.0, HALF_H = 60.0;
+    const PHYSICS_COLLISION = window.SmartEggPhysicsCollision;
+    if (!PHYSICS_COLLISION || typeof PHYSICS_COLLISION.resolveHorizontalPlatformCollision !== 'function') {
+        throw new Error('physics-collision.js 未加载，无法安全启动横向碰撞');
+    }
     // v4.9.5 成功进门动画：3阶段 2 秒 = 120 帧
     //   阶段1 (120→80): 0~40帧  门打开动画
     //   阶段2 (80→20):  40~100帧  蛋滑入+被吸入+缩小到0消失
@@ -417,6 +421,7 @@
         persistentReset: { crates:_persistentCrateCount, active:_persistentLevelActive },
         dragWorld: { offset:_dragWorldOffset }
       }),
+      resolveHorizontalPlatformCollision: options => PHYSICS_COLLISION.resolveHorizontalPlatformCollision(options),
       setFrameHandler: (fn) => {
         // 让外部在每帧执行一个钩子（用于自动化测试）
         window.__frameHook = fn;
@@ -442,6 +447,8 @@
     // v4.9.7a 死亡/坏关卡前 10 帧 player 快照（环形buffer），排查"为什么掉下去/为什么没碰门"直接回溯状态
     const PLAYER_RING_SIZE = 10;
     const _playerRing = [];
+    // 同一平台的防瞬移诊断最多每秒一条，保留证据而不逐帧刷屏。
+    const _horizontalSnapGuardLastAt = new Map();
     function _pushPlayerRing() {
         const snap = {
             f: frameCount,
@@ -2049,7 +2056,10 @@
                 }
             }
         }
-        // X 方向
+        // X 方向：只在人物本帧从平台侧边越入时阻挡。旧实现只要 AABB 有重叠就按
+        // 速度方向把人物塞到平台远端；第二关人物在箱子旁轻微下沉时会从 x≈750
+        // 瞬移到整块地面的左边 x=-40。
+        const previousPlayerX = player.x;
         player.x += player.vx * dt;
         if (levelData.no_fall && !levelData.infinite_horizontal) {
             const mb=_mapBounds(levelData);
@@ -2057,12 +2067,49 @@
         }
         player.onGround = false;
         for (const p of plats) {
-            const px = p.x - p.w / 2, py = p.y - p.h / 2;
-            if (rectVsRect(player.x - HALF_W, player.y - HALF_H, HALF_W * 2, HALF_H * 2,
-                            px, py, p.w, p.h)) {
-                if (player.vx > 0) player.x = px - HALF_W;
-                else if (player.vx < 0) player.x = px + p.w + HALF_W;
+            const attemptedPlayerX = player.x;
+            const collision = PHYSICS_COLLISION.resolveHorizontalPlatformCollision({
+                previousX: previousPlayerX,
+                nextX: attemptedPlayerX,
+                playerY: player.y,
+                halfW: HALF_W,
+                halfH: HALF_H,
+                vx: player.vx,
+                platform: p,
+                edgeTolerance: 2,
+                topTolerance: 4
+            });
+            if (collision.blocked) {
+                player.x = collision.x;
+                logStep('collide', 'horizontal-platform-block', {
+                    levelIndex: currentLevelIndex,
+                    platformKind: p.kind || 'unknown',
+                    side: collision.side,
+                    previousX: Math.round(previousPlayerX),
+                    attemptedX: Math.round(attemptedPlayerX),
+                    resolvedX: Math.round(collision.x),
+                    playerY: Math.round(player.y)
+                });
                 player.vx = 0;
+                break;
+            }
+            if ((collision.reason === 'preexisting-horizontal-overlap' || collision.reason === 'top-surface-contact')
+                && Number.isFinite(collision.legacyResolvedX)
+                && Math.abs(collision.legacyResolvedX - attemptedPlayerX) > HALF_W * 2) {
+                const guardKey = `${currentLevelIndex}:${p.kind || 'unknown'}:${Math.round(p.x)}`;
+                const now = performance.now();
+                if (!_horizontalSnapGuardLastAt.has(guardKey) || now - _horizontalSnapGuardLastAt.get(guardKey) > 1000) {
+                    _horizontalSnapGuardLastAt.set(guardKey, now);
+                    logStep('collide', 'horizontal-snap-prevented', {
+                        levelIndex: currentLevelIndex,
+                        platformKind: p.kind || 'unknown',
+                        previousX: Math.round(previousPlayerX),
+                        keptX: Math.round(attemptedPlayerX),
+                        rejectedLegacyX: Math.round(collision.legacyResolvedX),
+                        playerY: Math.round(player.y),
+                        reason: collision.reason
+                    });
+                }
             }
         }
         // 玩家左右接触木箱时推动它；平台或另一只木箱挡住时停止。
