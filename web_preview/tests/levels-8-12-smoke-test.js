@@ -10,8 +10,8 @@ const gameSource = fs.readFileSync(path.join(root, 'web_preview/game.js'), 'utf8
 const indexSource = fs.readFileSync(path.join(root, 'web_preview/index.html'), 'utf8');
 const debugGuide = fs.readFileSync(path.join(root, 'web_preview/README.md'), 'utf8');
 
-assert.match(gameSource, /const GAME_CODE_VERSION = 174/);
-assert.match(indexSource, /game\.js\?v=174/);
+assert.match(gameSource, /const GAME_CODE_VERSION = 175/);
+assert.match(indexSource, /game\.js\?v=175/);
 assert.match(gameSource, /const TOTAL_LEVELS = 12/);
 assert.match(gameSource, /_updateNewLevelMechanics\(dt\)/);
 assert.match(gameSource, /persistent-crate-land/);

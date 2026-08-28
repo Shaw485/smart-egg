@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 174;   // 跟 index.html 的 ?v=174 保持一致
+    const GAME_CODE_VERSION = 175;   // 跟 index.html 的 ?v=175 保持一致
     const GAME_TITLE = '怪奇之原';
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
@@ -1178,13 +1178,17 @@
         ctx.closePath();
     }
 
-    function drawGrid() {
+    function drawGrid(options = {}) {
+        const parallaxX = Number(options.parallaxX) || 0;
+        const hideSun = !!options.hideSun;
         // 辽阔高空：清透蓝天、暖色天际与大块高云
         const sky=ctx.createLinearGradient(0,0,0,H);sky.addColorStop(0,'#63a9c8');sky.addColorStop(.48,'#b9d9c8');sky.addColorStop(.76,'#ead39b');sky.addColorStop(1,'#9bb18a');ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
-        const glow=ctx.createRadialGradient(W*.78,H*.2,12,W*.78,H*.2,230);glow.addColorStop(0,'rgba(255,244,181,.9)');glow.addColorStop(.55,'rgba(255,222,141,.28)');glow.addColorStop(1,'rgba(255,220,150,0)');ctx.fillStyle=glow;ctx.fillRect(0,0,W,H);
+        if (!hideSun) {
+            const glow=ctx.createRadialGradient(W*.78,H*.2,12,W*.78,H*.2,230);glow.addColorStop(0,'rgba(255,244,181,.9)');glow.addColorStop(.55,'rgba(255,222,141,.28)');glow.addColorStop(1,'rgba(255,220,150,0)');ctx.fillStyle=glow;ctx.fillRect(0,0,W,H);
+        }
         ctx.fillStyle='rgba(255,249,222,.68)';for(const cloud of [[.16,.17,150,38],[.47,.11,190,46],[.72,.3,130,32]]){ctx.beginPath();ctx.ellipse(W*cloud[0],H*cloud[1],cloud[2],cloud[3],-.05,0,Math.PI*2);ctx.ellipse(W*cloud[0]+cloud[2]*.45,H*cloud[1]+4,cloud[2]*.58,cloud[3]*.72,.03,0,Math.PI*2);ctx.fill();}
         // 极远台地与群峰，多层低对比制造纵深
-        const horizon=H*.7;for(let layer=0;layer<3;layer++){ctx.fillStyle=['#87a59a','#708f86','#58766e'][layer];ctx.globalAlpha=[.55,.68,.82][layer];ctx.beginPath();ctx.moveTo(0,H);ctx.lineTo(0,horizon+layer*45);for(let x=0;x<=W;x+=120){const mesa=(Math.sin(x*.006+layer*1.7)+1)*34;ctx.lineTo(x,horizon+layer*45-mesa-(x%(360)<170?38:0));}ctx.lineTo(W,H);ctx.closePath();ctx.fill();}ctx.globalAlpha=1;
+        const horizon=H*.7;for(let layer=0;layer<3;layer++){const factor=.06+layer*.045;const shift=parallaxX*factor;const offset=-(shift%480);ctx.fillStyle=['#87a59a','#708f86','#58766e'][layer];ctx.globalAlpha=[.55,.68,.82][layer];ctx.beginPath();ctx.moveTo(0,H);ctx.lineTo(0,horizon+layer*45);for(let x=-360+offset;x<=W+360;x+=120){const worldX=x+shift;const mesa=(Math.sin(worldX*.006+layer*1.7)+1)*34;const plateau=(((worldX%360)+360)%360)<170?38:0;ctx.lineTo(x,horizon+layer*45-mesa-plateau);}ctx.lineTo(W,H);ctx.closePath();ctx.fill();}ctx.globalAlpha=1;
         // 谷底薄雾与蜿蜒河光，强调玩家所在位置很高
         ctx.fillStyle='rgba(238,238,205,.42)';ctx.beginPath();ctx.ellipse(W*.53,H*.82,W*.48,H*.12,0,0,Math.PI*2);ctx.fill();ctx.strokeStyle='rgba(211,236,223,.72)';ctx.lineWidth=18;ctx.beginPath();ctx.moveTo(W*.15,H*.88);ctx.bezierCurveTo(W*.38,H*.78,W*.55,H*.96,W*.83,H*.8);ctx.stroke();
     }
@@ -4109,6 +4113,15 @@
             visualSidewalls: 'vertical',
             extendsBelowViewport: true
         });
+        if (levelData.infinite_horizontal) {
+            logStep('render', 'infinite-parallax-config', {
+                levelIndex: idx,
+                cameraAnchorX: 420,
+                mountainFactors: [0.06, 0.105, 0.15],
+                groundFeaturesWorldAnchored: true,
+                expectedDirection: 'player-right => ground/grass/mountains-left'
+            });
+        }
         logStep('state', 'enter-playing', {
             levelIndex: idx,
             hasLevelData: !!levelData,
@@ -4272,8 +4285,12 @@
                 const cliff=ctx.createLinearGradient(0,y,0,y+h);cliff.addColorStop(0,'#777b63');cliff.addColorStop(.25,'#655f54');cliff.addColorStop(1,'#3e4442');ctx.fillStyle=cliff;groundPath();ctx.fill();
                 ctx.save();groundPath();ctx.clip();ctx.fillStyle='#83975e';ctx.fillRect(x,y,w,24);ctx.fillStyle='#d7bb6e';ctx.fillRect(x,y,w,8);
                 const first=levelData.infinite_horizontal?Math.floor((_cameraX-150)/150)*150:x+60,last=levelData.infinite_horizontal?_cameraX+W+150:x+w-40;for(let gx=first;gx<last;gx+=150){_fantasyLine([[gx,y],[gx-5,y-15]],'#34483e',3);_fantasyLine([[gx,y],[gx+7,y-12]],'#34483e',3);}
-                ctx.strokeStyle='rgba(38,48,48,.72)';ctx.lineWidth=4;for(let rx=x+95,ri=0;rx<x+w-40;rx+=170,ri++){const len=50+(ri%3)*34;ctx.beginPath();ctx.moveTo(rx,y+38);ctx.lineTo(rx-12,y+38+len*.45);ctx.lineTo(rx+7,y+38+len);ctx.stroke();}
-                ctx.fillStyle='rgba(228,205,142,.18)';for(let sx=x+60; sx<x+w; sx+=210){ctx.beginPath();ctx.ellipse(sx,y+75,42,9,-.08,0,Math.PI*2);ctx.fill();}
+                const featureFirst=levelData.infinite_horizontal?Math.floor((_cameraX-250)/170)*170:x+95;
+                const featureLast=levelData.infinite_horizontal?_cameraX+W+250:x+w-40;
+                ctx.strokeStyle='rgba(38,48,48,.72)';ctx.lineWidth=4;for(let rx=featureFirst,ri=Math.floor(featureFirst/170);rx<featureLast;rx+=170,ri++){const len=50+(((ri%3)+3)%3)*34;ctx.beginPath();ctx.moveTo(rx,y+38);ctx.lineTo(rx-12,y+38+len*.45);ctx.lineTo(rx+7,y+38+len);ctx.stroke();}
+                const patchFirst=levelData.infinite_horizontal?Math.floor((_cameraX-250)/210)*210:x+60;
+                const patchLast=levelData.infinite_horizontal?_cameraX+W+250:x+w;
+                ctx.fillStyle='rgba(228,205,142,.18)';for(let sx=patchFirst;sx<patchLast;sx+=210){ctx.beginPath();ctx.ellipse(sx,y+75,42,9,-.08,0,Math.PI*2);ctx.fill();}
                 ctx.restore();
                 _fantasyLine([[x,y],[x+w,y]],'#17343a',6);
                 if(leftCliff)_fantasyLine([[x,y],[x,y+h]],'#17343a',7);
@@ -4416,14 +4433,22 @@
                 const nxt = idx + 1;
                 const overflow  = nxt >= TOTAL_LEVELS;
                 const nAvail    = _availableLevels.includes(nxt);
-                const nUnlocked = (nxt + 1) <= _progress.unlocked;
-                const hasNext   = !overflow && nAvail && nUnlocked;
+                const unlockedBefore = _progress.unlocked;
                 if (!_progress.completed.includes(idx)) _progress.completed.push(idx);
                 const nextUnlock = Math.min(TOTAL_LEVELS, Math.max(_progress.unlocked, idx + 2));
                 _progress.unlocked = nextUnlock;
+                const nUnlocked = (nxt + 1) <= _progress.unlocked;
+                const hasNext   = !overflow && nAvail && nUnlocked;
                 saveProgress();
                 logStep('state', 'progress-saved', { levelIndex: idx, completed: _progress.completed, unlocked: _progress.unlocked });
+                logStep('state', 'mainline-auto-next-decision', {
+                    idx, nxt, hasNext, overflow, nxt_available: nAvail, nxt_unlocked: nUnlocked,
+                    unlocked_before: unlockedBefore, unlocked_after: _progress.unlocked
+                });
                 const labelSec = (GOAL_HIT_JUMP_MS / 1000).toFixed(2) + 's';
+                _goalHitJumped = true;
+                _goalHitStartMs = 0;
+                _goalHitLevelIndex = -1;
                 if (hasNext) {
                     logStep('state', 'goalHit(' + labelSec + ')→next', {
                         idx, nxt, elapsed_ms: Math.round(elapsed), target_ms: GOAL_HIT_JUMP_MS, fps: Math.round(_fpsSmoothed)
@@ -4436,7 +4461,7 @@
                     currentLevelIndex = nxt;
                     loadLevelByIndex(nxt);
                 } else {
-                    logStep('state', 'goalHit(' + labelSec + ')→levelSelect', {
+                    logStep('state', 'goalHit(' + labelSec + ')→complete', {
                         idx, nxt, overflow, nxt_available: nAvail, nxt_unlocked: nUnlocked,
                         reason: overflow ? '最后一关' : (!nAvail ? '下一关未开发' : '下一关未解锁'),
                         elapsed_ms: Math.round(elapsed), target_ms: GOAL_HIT_JUMP_MS, fps: Math.round(_fpsSmoothed),
@@ -4444,11 +4469,9 @@
                     });
                     showSuccess = false;
                     showDead = false;
-                    gameState = 'levelSelect';
+                    gameState = 'complete';
+                    _completeTimer = 0;
                 }
-                _goalHitJumped = true;
-                _goalHitStartMs = 0;
-                _goalHitLevelIndex = -1;
             }
         }
 
@@ -4555,7 +4578,11 @@
         }
 
         try {
-            drawGrid();
+            const gameplayWorldVisible = !['menu','levelSelect','creatorList','creatorEdit','complete','completeIntro'].includes(gameState);
+            drawGrid({
+                parallaxX: gameplayWorldVisible && levelData && levelData.infinite_horizontal ? _cameraX : 0,
+                hideSun: gameplayWorldVisible && _hasMechanic('shadow_switch')
+            });
             if (gameState === 'menu') drawMenu();
             else if (gameState === 'levelSelect') drawLevelSelect();
             else if (gameState === 'creatorList') drawCreatorList();
