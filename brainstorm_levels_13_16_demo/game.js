@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const VERSION = 'review-13-42-v1';
+  const VERSION = 'review-13-42-v2';
   const W = 1920;
   const H = 1080;
   const GROUND_Y = 790;
@@ -1535,5 +1535,9 @@
     screen = 'summary'; status = 'summary'; level = null;
   } else if (requestedIndex >= 0) enterLevel(requestedIndex, 'startup-query');
   else enterLevel(nextReviewIndex, 'resume-first-undecided');
+  if (screen === 'level' && startupParams.get('hint') === '1') {
+    hintVisible = true;
+    log('ui', 'hint-auto-open-debug', { source: 'startup-query' });
+  }
   requestAnimationFrame(tick);
 })();

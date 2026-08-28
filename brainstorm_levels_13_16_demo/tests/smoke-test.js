@@ -22,24 +22,31 @@ function functionBody(source, functionName, nextFunctionName) {
 
 assert.match(html, /第13–42关连续评审/);
 assert.match(html, /aria-label="怪奇之原第13关至第42关连续试玩评审"/);
-assert.match(html, /style\.css\?v=4/);
-assert.match(html, /logger\.js\?v=4[\s\S]*logic\.js\?v=4[\s\S]*levels\.js\?v=4[\s\S]*game\.js\?v=4/);
+assert.match(html, /style\.css\?v=5/);
+assert.match(html, /logger\.js\?v=5[\s\S]*logic\.js\?v=5[\s\S]*levels\.js\?v=5[\s\S]*game\.js\?v=5/);
 assert.doesNotMatch(html, /src="\.\.\//);
 
 assert.strictEqual(levels.length, 30);
 assert.deepStrictEqual(levels.map(level => level.id), Array.from({ length: 30 }, (_, index) => index + 13));
+assert.deepStrictEqual(levels.map(level => level.title), [
+  '进退之间', '保持距离', '一笔成路', '风停之后', '方向借走了', '日影无声', '路在字里', '守门人的礼仪', '花之暗号', '钥匙的影子',
+  '别急着走', '小一点', '云不肯落', '两扇都像', '题目落地', '屏住一下', '第二口气', '别看它', '终点太远', '无形之上',
+  '镜中方向', '抬脚成桥', '同频的门', '地面换班', '胆小的钥匙', '箱子不只是箱子', '月亮在脚下', '三声之后', '墙也会忘', '先回到开始'
+], '画面直接显示的关卡标题不得随提示改写而变化');
 assert.strictEqual(new Set(levels.map(level => level.mechanic)).size, 30, '30关机制键必须互不重复');
 levels.forEach(level => {
   assert(level.title.length >= 3, '关卡标题过短：' + level.id);
   assert(level.teaser.length >= 8, '关卡引子过短：' + level.id);
-  assert(level.hint.length >= 8, '提示过短：' + level.id);
+  assert(level.hint.length >= 22, '提示必须具体说明操作：' + level.id);
+  assert(/[按点拖走跳松擦划移推顶]/.test(level.hint), '提示必须包含可执行动作：' + level.id);
   assert(Array.isArray(level.creator) && level.creator.length >= 1, '缺少创造模式元数据：' + level.id);
   assert(game.includes("mechanic === '" + level.mechanic + "'") || game.includes("mechanic === \"" + level.mechanic + "\""), '游戏引擎未接入机制：' + level.mechanic);
 });
 
 const level15 = levels.find(level => level.id === 15);
 assert(level15);
-assert.doesNotMatch(level15.hint, /左|右|起笔|松手|画笔|虚线/);
+assert.match(level15.hint, /左岸.*右岸.*松开/);
+assert.doesNotMatch(level15.hint, /画笔|虚线/);
 const drawInk = functionBody(game, 'drawInkPath', 'drawKey');
 assert.doesNotMatch(drawInk, /setLineDash|虚线|画笔/);
 assert.match(drawInk, /moveTo\(650, GROUND_Y\)[\s\S]*lineTo\(1270, GROUND_Y\)/);
@@ -66,6 +73,8 @@ assert.match(game, /canvas\.addEventListener\('pointerdown'/);
 assert.match(game, /canvas\.addEventListener\('pointermove'/);
 assert.match(game, /canvas\.addEventListener\('pointerup'/);
 assert.match(game, /hintVisible = false/);
+assert.match(game, /startupParams\.get\('hint'\) === '1'/);
+assert.match(game, /hint-auto-open-debug/);
 
 const renderLevel = functionBody(game, 'renderLevel', 'drawSummary');
 assert.match(renderLevel, /drawDropTerrain\(\)[\s\S]*floorsForLevel\(\)\.forEach\(drawGround\)[\s\S]*drawMechanic\(\)[\s\S]*drawPlayer\(\)/);
