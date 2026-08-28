@@ -1,0 +1,17 @@
+{
+  "$schema": "Part7_level_json_schema_v1",
+  "id": 13,
+  "source_review_id": 15,
+  "name": "一笔成路",
+  "type": "ink_path",
+  "mechanics": ["ink_path"],
+  "description": {"hint_l1": "从断崖左岸按住并连续划到右岸，连接两岸后再松手；画出的黑色道路可以踩上去。"},
+  "world_size": {"w": 1920, "h": 1080},
+  "spawn": {"x": 350, "y": 810},
+  "platforms": [
+    {"x": 325, "y": 1090, "w": 650, "h": 440, "kind": "ground"},
+    {"x": 1595, "y": 1090, "w": 650, "h": 440, "kind": "ground"}
+  ],
+  "doors": [{"id": "goal_door_13", "x": 1580, "y": 765, "w": 150, "h": 210, "is_goal": true}],
+  "crates": [], "keys": [], "question_blocks": [], "decor": []
+}

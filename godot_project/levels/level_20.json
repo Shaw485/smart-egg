@@ -1,0 +1,15 @@
+{
+  "$schema": "Part7_level_json_schema_v1",
+  "id": 20,
+  "source_review_id": 41,
+  "name": "墙也会忘",
+  "type": "erase_wall",
+  "mechanics": ["erase_wall"],
+  "no_fall": true,
+  "description": {"hint_l1": "在中间高墙上按住手指并来回滑动，多擦几次直到墙完全消失，再向右走进门。"},
+  "world_size": {"w": 1920, "h": 1080},
+  "spawn": {"x": 350, "y": 810},
+  "platforms": [{"x": 960, "y": 1090, "w": 1920, "h": 440, "kind": "ground"}],
+  "doors": [{"id": "goal_door_20", "x": 1580, "y": 765, "w": 150, "h": 210, "is_goal": true}],
+  "crates": [], "keys": [], "question_blocks": [], "decor": []
+}

@@ -1,0 +1,15 @@
+{
+  "$schema": "Part7_level_json_schema_v1",
+  "id": 14,
+  "source_review_id": 17,
+  "name": "方向借走了",
+  "type": "reverse_controls",
+  "mechanics": ["reverse_controls"],
+  "no_fall": true,
+  "description": {"hint_l1": "这一关左右方向相反：按左会向右，按右会向左。反着操作，走到右侧门前。"},
+  "world_size": {"w": 1920, "h": 1080},
+  "spawn": {"x": 350, "y": 810},
+  "platforms": [{"x": 960, "y": 1090, "w": 1920, "h": 440, "kind": "ground"}],
+  "doors": [{"id": "goal_door_14", "x": 1580, "y": 765, "w": 150, "h": 210, "is_goal": true}],
+  "crates": [], "keys": [], "question_blocks": [], "decor": []
+}

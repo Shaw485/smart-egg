@@ -1,0 +1,17 @@
+{
+  "$schema": "Part7_level_json_schema_v1",
+  "id": 12,
+  "source_review_id": 13,
+  "name": "进退之间",
+  "type": "dual_bridge",
+  "mechanics": ["dual_bridge"],
+  "description": {"hint_l1": "同时按住左、右两个方向按钮约 1 秒，等两侧道路在断崖中间接合，再向右走进门。"},
+  "world_size": {"w": 1920, "h": 1080},
+  "spawn": {"x": 350, "y": 810},
+  "platforms": [
+    {"x": 360, "y": 1090, "w": 720, "h": 440, "kind": "ground"},
+    {"x": 1560, "y": 1090, "w": 720, "h": 440, "kind": "ground"}
+  ],
+  "doors": [{"id": "goal_door_12", "x": 1580, "y": 765, "w": 150, "h": 210, "is_goal": true}],
+  "crates": [], "keys": [], "question_blocks": [], "decor": []
+}

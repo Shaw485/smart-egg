@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 177;   // 跟 index.html 的 ?v=177 保持一致
+    const GAME_CODE_VERSION = 178;   // 跟 index.html 的 ?v=178 保持一致
     const GAME_TITLE = '怪奇之原';
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
@@ -32,7 +32,9 @@
     const FANTASY_TITLES = [
         '风起之门', '云阶试炼', '锁语遗迹', '断崖双跃',
         '守门人的礼仪', '花之暗号', '逃走的门',
-        '日影无声', '等风来', '纸上有路', '痕迹未散', '远方未远'
+        '日影无声', '等风来', '纸上有路', '痕迹未散', '远方未远',
+        '进退之间', '一笔成路', '方向借走了', '小一点', '屏住一下',
+        '别看它', '同频的门', '地面换班', '墙也会忘'
     ];
     const GRAVITY = 2000.0;
     const MAX_FALL = 1200.0;
@@ -40,8 +42,12 @@
     const JUMP_VELOCITY = -1080.0;
     const HALF_W = 40.0, HALF_H = 60.0;
     const PHYSICS_COLLISION = window.SmartEggPhysicsCollision;
+    const ACCEPTED_MECHANICS = window.SmartEggAcceptedMechanics;
     if (!PHYSICS_COLLISION || typeof PHYSICS_COLLISION.resolveHorizontalPlatformCollision !== 'function') {
         throw new Error('physics-collision.js 未加载，无法安全启动横向碰撞');
+    }
+    if (!ACCEPTED_MECHANICS || typeof ACCEPTED_MECHANICS.validateInkStroke !== 'function') {
+        throw new Error('accepted-mechanics.js 未加载，无法启动已评审关卡');
     }
     // v4.9.5 成功进门动画：3阶段 2 秒 = 120 帧
     //   阶段1 (120→80): 0~40帧  门打开动画
@@ -119,6 +125,13 @@
     let _persistentLevelActive = false;
     let _lastStaticCrateLandingId = null;
     let _dragWorldOffset = 0;
+    // 第 13–21 关来自独立评审池。状态全部按关卡复位，并通过细分日志模块独立排查。
+    let _acceptedDualHold = 0, _acceptedDualBuilt = false, _acceptedDualStarted = false;
+    let _acceptedInkPath = [], _acceptedInkBuilt = false, _acceptedInkErrorUntil = 0;
+    let _acceptedPlayerSmall = false, _acceptedFreezePointer = false;
+    let _acceptedFacing = 1, _acceptedFaceHold = 0, _acceptedFaceUnlocked = false;
+    let _acceptedDoorVY = 0, _acceptedDoorLocked = false;
+    let _acceptedGroundPhase = 0, _acceptedWallErase = 0;
     function _mechanicsOf(lv) {
         if(!lv)return [];
         if(Array.isArray(lv.mechanics))return lv.mechanics.filter(x=>x&&x!=='normal');
@@ -152,11 +165,94 @@
         _wordDragPos = {x:0,y:0};
         _lastStaticCrateLandingId = null;
         _dragWorldOffset = 0;
+        _acceptedDualHold = 0;
+        _acceptedDualBuilt = false;
+        _acceptedDualStarted = false;
+        _acceptedInkPath = [];
+        _acceptedInkBuilt = false;
+        _acceptedInkErrorUntil = 0;
+        _acceptedPlayerSmall = false;
+        _acceptedFreezePointer = false;
+        _acceptedFacing = 1;
+        _acceptedFaceHold = 0;
+        _acceptedFaceUnlocked = false;
+        _acceptedDoorVY = 0;
+        _acceptedDoorLocked = false;
+        _acceptedGroundPhase = 0;
+        _acceptedWallErase = 0;
         logStep('mechanic', 'level-mechanic-reset', {
             levelIndex: currentLevelIndex,
             mechanics: _mechanicsOf(levelData),
-            persistentCrates: _persistentCrateCount
+            persistentCrates: _persistentCrateCount,
+            reviewSourceId: levelData && levelData.source_review_id || null
         });
+    }
+    function _acceptedBridgeGeometry(kind) {
+        const ink = kind === 'ink_path';
+        const left = ink ? 650 : 720;
+        const right = ink ? 1270 : 1200;
+        return {
+            left,
+            right,
+            top: 870,
+            platform: {
+                id: ink ? 'accepted_ink_bridge' : 'accepted_dual_bridge',
+                x: (left + right) / 2,
+                y: 894,
+                w: right - left,
+                h: 48,
+                kind: ink ? 'ink_bridge' : 'dual_bridge'
+            }
+        };
+    }
+    function _ensureAcceptedBridge(kind) {
+        const geometry = _acceptedBridgeGeometry(kind);
+        if (!(levelData.platforms || []).some(platform => platform.id === geometry.platform.id)) {
+            levelData.platforms.push({...geometry.platform});
+            logStep('mechanic:bridge', 'accepted-bridge-created', {
+                levelIndex: currentLevelIndex,
+                sourceReviewId: levelData.source_review_id,
+                mechanic: kind,
+                platform: geometry.platform
+            });
+        }
+        return geometry;
+    }
+    function _setAcceptedGroundPhase(phase, source) {
+        const next = phase === 1 ? 1 : 0;
+        const before = _acceptedGroundPhase;
+        _acceptedGroundPhase = next;
+        levelData.platforms = (levelData.platforms || []).filter(platform => platform.id !== 'ground_phase_bridge');
+        levelData.platforms.push(next === 0
+            ? {id:'ground_phase_bridge',x:795,y:882,w:350,h:24,kind:'phase_bridge'}
+            : {id:'ground_phase_bridge',x:1125,y:882,w:350,h:24,kind:'phase_bridge'});
+        if (before !== next) {
+            playSfx('unlock');
+            logStep('mechanic:terrain', 'ground-phase-change', {
+                levelIndex: currentLevelIndex,
+                sourceReviewId: levelData.source_review_id,
+                before,
+                after: next,
+                source,
+                playerX: Math.round(player.x)
+            });
+        }
+    }
+    function _acceptedFreezeHeld() {
+        return _acceptedFreezePointer || Array.from(_controlSources.values()).includes('freeze');
+    }
+    function _acceptedDoorGateOpen() {
+        if (_hasMechanic('dual_bridge')) return _acceptedDualBuilt;
+        if (_hasMechanic('ink_path')) return _acceptedInkBuilt;
+        if (_hasMechanic('shrink_tunnel')) return _acceptedPlayerSmall;
+        if (_hasMechanic('face_away')) return _acceptedFaceUnlocked;
+        if (_hasMechanic('door_jumps')) return _acceptedDoorLocked;
+        if (_hasMechanic('ground_swap')) return _acceptedGroundPhase === 1;
+        if (_hasMechanic('erase_wall')) return _acceptedWallErase >= 1;
+        return true;
+    }
+    function _acceptedGoalDoor() {
+        return (levelData && levelData.doors || []).find(door => door.is_goal) || null;
     }
     function _wordTitleLayout() {
         const y = currentLevelIndex === 3 ? 190 : 74;
@@ -228,6 +324,54 @@
             logStep('mechanic','word-drag-start',{pointerId,token:'路',dropZone:geometry.dropZone});
             return true;
         }
+        if (_hasMechanic('ink_path')) {
+            const canStart = world.x >= 540 && world.x <= 760 && world.y >= 600 && world.y <= 875;
+            if (!canStart) {
+                logStep('mechanic:gesture','ink-start-rejected',{pointerId,x:Math.round(world.x),y:Math.round(world.y),reason:'outside-left-bank'});
+                return false;
+            }
+            _acceptedInkPath = [world];
+            _sceneDrag = {type:'accepted-ink',pointerId,lastPoint:p,lastWorld:world,length:0};
+            logStep('mechanic:gesture','ink-stroke-start',{pointerId,x:Math.round(world.x),y:Math.round(world.y),maxLength:1100});
+            return true;
+        }
+        if (_hasMechanic('freeze_spikes') && p.y < 850) {
+            _acceptedFreezePointer = true;
+            _sceneDrag = {type:'accepted-freeze',pointerId,lastPoint:p};
+            logStep('mechanic:hazard','hazards-freeze-start',{pointerId,input:'pointer'});
+            return true;
+        }
+        if (_hasMechanic('erase_wall') && world.x >= 870 && world.x <= 1050 && world.y >= 390 && world.y <= 875) {
+            _sceneDrag = {type:'accepted-erase',pointerId,lastPoint:p,lastWorld:world};
+            logStep('mechanic:erase','wall-erase-start',{pointerId,progress:Number(_acceptedWallErase.toFixed(3))});
+            return true;
+        }
+        if (_hasMechanic('shrink_tunnel') && Math.abs(world.x-player.x)<=90 && Math.abs(world.y-player.y)<=110) {
+            _acceptedPlayerSmall = !_acceptedPlayerSmall;
+            playSfx('unlock');
+            logStep('mechanic:transform','player-size-toggle',{pointerId,small:_acceptedPlayerSmall,playerX:Math.round(player.x),playerY:Math.round(player.y)});
+            return true;
+        }
+        if (_hasMechanic('door_jumps')) {
+            const door = _acceptedGoalDoor();
+            if (door && inRect(world,{x:door.x-door.w/2-20,y:door.y-door.h/2-24,w:door.w+40,h:door.h+48}) && door.y < 720) {
+                _acceptedDoorLocked = true;
+                _acceptedDoorVY = 0;
+                playSfx('unlock');
+                logStep('mechanic:door','airborne-door-locked',{pointerId,doorX:Math.round(door.x),doorY:Math.round(door.y)});
+                return true;
+            }
+        }
+        if (_hasMechanic('ground_swap') && world.y > 690 && world.y < 890) {
+            if (world.x > 560 && world.x < 760) {
+                _setAcceptedGroundPhase(0,'left-grass');
+                return true;
+            }
+            if (world.x > 1140 && world.x < 1390) {
+                _setAcceptedGroundPhase(1,'right-grass');
+                return true;
+            }
+        }
         if (_hasMechanic('drag_world') && p.y < 850) {
             _sceneDrag = {type:'world',pointerId,lastX:p.x,lastPoint:p};
             logStep('mechanic','world-drag-start',{pointerId,offset:Math.round(_dragWorldOffset)});
@@ -248,6 +392,25 @@
             _shadowSunX = nextSunX;
         } else if (_sceneDrag.type === 'word') {
             _wordDragPos = world;
+        } else if (_sceneDrag.type === 'accepted-ink') {
+            const previous = _sceneDrag.lastWorld || world;
+            const distance = Math.hypot(world.x-previous.x,world.y-previous.y);
+            if(distance>=8){
+                _sceneDrag.length += distance;
+                _sceneDrag.lastWorld = world;
+                _acceptedInkPath.push(world);
+            }
+        } else if (_sceneDrag.type === 'accepted-erase') {
+            const previous = _sceneDrag.lastWorld || world;
+            const distance = Math.hypot(world.x-previous.x,world.y-previous.y);
+            _sceneDrag.lastWorld = world;
+            const before = _acceptedWallErase;
+            _acceptedWallErase = ACCEPTED_MECHANICS.eraseProgress(_acceptedWallErase,distance);
+            if(before<1&&_acceptedWallErase>=1){
+                playSfx('unlock');
+                logStep('mechanic:erase','wall-erased',{pointerId,totalDistance:Math.round((_sceneDrag.totalDistance||0)+distance)});
+            }
+            _sceneDrag.totalDistance = (_sceneDrag.totalDistance||0)+distance;
         } else if (_sceneDrag.type === 'world') {
             const delta = p.x - _sceneDrag.lastX;
             _sceneDrag.lastX = p.x;
@@ -295,6 +458,17 @@
             });
         } else if (drag.type === 'sun') {
             logStep('mechanic','shadow-drag-end',{pointerId,sunX:Math.round(_shadowSunX),shadowTipX:Math.round(_shadowTipX),moved:_shadowSunMoved,reason});
+        } else if (drag.type === 'accepted-ink') {
+            const result = ACCEPTED_MECHANICS.validateInkStroke(_acceptedInkPath);
+            _acceptedInkBuilt = !!result.valid;
+            if(_acceptedInkBuilt){_ensureAcceptedBridge('ink_path');playSfx('unlock');}
+            else _acceptedInkErrorUntil=performance.now()+1400;
+            logStep('mechanic:gesture','ink-stroke-end',{pointerId,accepted:result.valid,rejectReason:result.reason,length:Math.round(result.length),points:_acceptedInkPath.length,reason});
+        } else if (drag.type === 'accepted-freeze') {
+            _acceptedFreezePointer = false;
+            logStep('mechanic:hazard','hazards-freeze-end',{pointerId,reason});
+        } else if (drag.type === 'accepted-erase') {
+            logStep('mechanic:erase','wall-erase-end',{pointerId,progress:Number(_acceptedWallErase.toFixed(3)),erased:_acceptedWallErase>=1,distance:Math.round(drag.totalDistance||0),reason});
         } else if (drag.type === 'world') {
             const door = (levelData.doors||[]).find(d=>d.is_goal);
             logStep('mechanic','world-drag-end',{pointerId,offset:Math.round(_dragWorldOffset),doorX:door&&Math.round(door.x),reason});
@@ -344,6 +518,59 @@
                         logStep('mechanic','stillness-door-overlap-ready',{overlap:Math.round(overlap),threshold,approachOffset,playerX:Math.round(player.x),doorX:Math.round(door.x)});
                     }
                 }
+            }
+        }
+        if (_hasMechanic('dual_bridge')) {
+            const both = !!input.left && !!input.right;
+            const before = _acceptedDualHold;
+            _acceptedDualHold = ACCEPTED_MECHANICS.advanceHold(_acceptedDualHold,both,dt,1);
+            if(both&&!_acceptedDualStarted){
+                _acceptedDualStarted=true;
+                logStep('mechanic:bridge','dual-hold-start',{requiredSeconds:1,sourceReviewId:levelData.source_review_id});
+            }
+            if(!both&&_acceptedDualStarted&&!_acceptedDualBuilt){
+                _acceptedDualStarted=false;
+                logStep('mechanic:bridge','dual-hold-cancel',{heldSeconds:Number(before.toFixed(3))});
+            }
+            if(!_acceptedDualBuilt&&_acceptedDualHold>=1){
+                _acceptedDualBuilt=true;
+                _ensureAcceptedBridge('dual_bridge');
+                playSfx('unlock');
+                logStep('mechanic:bridge','dual-hold-complete',{heldSeconds:Number(_acceptedDualHold.toFixed(3))});
+            }
+        }
+        const liveDirection=(input.right?1:0)-(input.left?1:0);
+        if(liveDirection!==0)_acceptedFacing=liveDirection;
+        if(_hasMechanic('face_away')){
+            const door=_acceptedGoalDoor();
+            const close=door&&Math.abs(player.x-door.x)<235;
+            const active=!!close&&_acceptedFacing<0&&liveDirection===0&&player.onGround;
+            const before=_acceptedFaceHold;
+            _acceptedFaceHold=active?Math.min(1.2,_acceptedFaceHold+dt):Math.max(0,_acceptedFaceHold-dt*2);
+            if(Math.floor(before*4)!==Math.floor(_acceptedFaceHold*4)){
+                logStep('mechanic:direction','face-away-progress',{seconds:Number(_acceptedFaceHold.toFixed(2)),requiredSeconds:1.2,playerX:Math.round(player.x),doorX:door&&Math.round(door.x)});
+            }
+            if(!_acceptedFaceUnlocked&&_acceptedFaceHold>=1.2){
+                _acceptedFaceUnlocked=true;
+                playSfx('unlock');
+                logStep('mechanic:direction','face-away-unlocked',{playerX:Math.round(player.x),doorX:door&&Math.round(door.x)});
+            }
+        }
+        if(_hasMechanic('door_jumps')){
+            const door=_acceptedGoalDoor();
+            if(door&&!_acceptedDoorLocked){
+                _acceptedDoorVY=Math.min(1200,_acceptedDoorVY+GRAVITY*dt);
+                door.y+=_acceptedDoorVY*dt;
+                if(door.y>=765){door.y=765;_acceptedDoorVY=0;}
+            }
+        }
+        if(_hasMechanic('freeze_spikes')&&!_acceptedFreezeHeld()&&player.x>760&&player.x<1320){
+            const dangerous=Math.sin(frameCount*.15)>-.25;
+            if(dangerous){
+                const before={x:Math.round(player.x),y:Math.round(player.y)};
+                player.x=levelData.spawn.x;player.y=levelData.spawn.y;player.vx=0;player.vy=0;player.onGround=false;
+                playSfx('land');
+                logStep('mechanic:hazard','spike-contact-reset',{before,spawn:levelData.spawn,frozen:false});
             }
         }
     }
@@ -433,7 +660,19 @@
         stillness: { seconds:_stillTime, approachStarted:_stillApproachLogged },
         wordBridge: { placed:_wordPlaced, drag:_sceneDrag&&_sceneDrag.type },
         persistentReset: { crates:_persistentCrateCount, active:_persistentLevelActive },
-        dragWorld: { offset:_dragWorldOffset }
+        dragWorld: { offset:_dragWorldOffset },
+        acceptedReview: {
+          sourceId: levelData && levelData.source_review_id || null,
+          dual: { hold:_acceptedDualHold, built:_acceptedDualBuilt },
+          ink: { points:_acceptedInkPath.length, built:_acceptedInkBuilt },
+          small:_acceptedPlayerSmall,
+          frozen:_acceptedFreezeHeld(),
+          facing:_acceptedFacing,
+          faceHold:_acceptedFaceHold,
+          doorLocked:_acceptedDoorLocked,
+          groundPhase:_acceptedGroundPhase,
+          wallErase:_acceptedWallErase
+        }
       }),
       resolveHorizontalPlatformCollision: options => PHYSICS_COLLISION.resolveHorizontalPlatformCollision(options),
       setFrameHandler: (fn) => {
@@ -456,6 +695,9 @@
         ['door',true],['collide',true],['puzzle',true],['progress',true],['audio',true],
         ['creator',true],['export',true],['dead',true],['guard',true],['fatal',true],
         ['snapshot',true],['debug',true],['level-select',true],['render',true],
+        ['mechanic:bridge',true],['mechanic:gesture',true],['mechanic:transform',true],
+        ['mechanic:hazard',true],['mechanic:direction',true],['mechanic:door',true],
+        ['mechanic:terrain',true],['mechanic:erase',true],
         ['physics',location.search.includes('verbose=1')]
     ]);
     // v4.9.7a 死亡/坏关卡前 10 帧 player 快照（环形buffer），排查"为什么掉下去/为什么没碰门"直接回溯状态
@@ -589,7 +831,7 @@
     const input = { left: false, right: false, jumpPressed: false, jumpHeld: false };
     let helpVisible = false;
     const keys = { ArrowLeft:'left', KeyA:'left', ArrowRight:'right', KeyD:'right',
-                   Space:'jump', ArrowUp:'jump', KeyW:'jump' };
+                   Space:'jump', ArrowUp:'jump', KeyW:'jump', ShiftLeft:'freeze', ShiftRight:'freeze' };
     // 切关时若实体键仍按住，浏览器会继续派发 repeat keydown。
     // 记录真实按下的键，并在新关中屏蔽它们，直到收到对应 keyup。
     const _heldKeyboardCodes = new Set();
@@ -657,6 +899,7 @@
         _activeTouchControls.clear();
         _heldMovingTargets.clear();
         _mouseMovingTarget = null;
+        _acceptedFreezePointer = false;
         input.left = false;
         input.right = false;
         input.jumpPressed = false;
@@ -1553,7 +1796,7 @@
     }
 
     // ===== v4.9.6 选关 + 通关存档 =====
-    const TOTAL_LEVELS = 12;
+    const TOTAL_LEVELS = 21;
     const LEVEL_SELECT_COLS = 4;
     const LEVEL_SELECT_ROWS = 2;
     const LEVEL_SELECT_PAGE_SIZE = LEVEL_SELECT_COLS * LEVEL_SELECT_ROWS;
@@ -1724,14 +1967,28 @@
         try {
             const s = localStorage.getItem(LS_KEY);
             const parsed = s ? JSON.parse(s) : { unlocked: 1, completed: [] };
+            const completed = Array.from(new Set((Array.isArray(parsed.completed) ? parsed.completed : [])
+                .map(Number)
+                .filter(index => Number.isInteger(index) && index >= 0 && index < TOTAL_LEVELS)))
+                .sort((a, b) => a - b);
+            let contiguousCompleted = 0;
+            while (completed.includes(contiguousCompleted)) contiguousCompleted += 1;
+            const storedUnlocked = Number.isFinite(Number(parsed.unlocked)) ? Math.floor(Number(parsed.unlocked)) : 1;
+            const migrated = {
+                unlocked: Math.max(1, Math.min(TOTAL_LEVELS, Math.max(storedUnlocked, contiguousCompleted + 1))),
+                completed
+            };
             // v4.9.7a G类：localStorage 读取成功/失败详情
             logStep('progress', 'loadProgress-success', {
                 key: LS_KEY, raw_bytes: (s||'').length,
-                unlocked: parsed.unlocked,
-                completed_count: (parsed.completed||[]).length,
-                completed: JSON.stringify(parsed.completed||[])
+                unlocked_before: parsed.unlocked,
+                unlocked_after: migrated.unlocked,
+                completed_count: migrated.completed.length,
+                completed: JSON.stringify(migrated.completed),
+                total_levels: TOTAL_LEVELS,
+                migration: migrated.unlocked !== parsed.unlocked ? 'expanded-mainline-v178' : 'not-needed'
             });
-            return parsed;
+            return migrated;
         } catch(e) {
             logStep('fatal', 'loadProgress-error', { key: LS_KEY, err: e.message, stack: String(e.stack||'').slice(0,200) });
             return { unlocked: 1, completed: [] };
@@ -1934,6 +2191,7 @@
         }
         for (const d of doors) {
             const dx = d.x - d.w / 2, dy = d.y - d.h / 2;
+            const distX = Math.abs(player.x - d.x);
             const overlap = rectOverlapArea(
                 player.x - HALF_W, player.y - HALF_H, HALF_W * 2, HALF_H * 2,
                 dx, dy, d.w, d.h);
@@ -1942,13 +2200,15 @@
             const passwordGateOpen = !_hasMechanic('flower_password') || _passwordSolved;
             const movingGateOpen = !_hasMechanic('hold_to_stop') || !d.hold_to_stop || _isMovingHeld(d);
             const persistentGateOpen = !_hasMechanic('persistent_reset') || _persistentCrateCount >= 3;
+            const acceptedGateOpen = _acceptedDoorGateOpen();
+            const acceptedDoorHit = _hasMechanic('door_jumps') && _acceptedDoorLocked && distX <= 90;
             if (d.is_goal && _hasMechanic('flower_password') && !_passwordSolved && performance.now() >= _passwordDismissUntil && overlap >= PLAYER_HALF_AREA) {
                 _passwordVisible = true;
                 _resetAllInput('password-panel-open', { blockHeldKeyboard: true });
                 logStep('puzzle','password-panel-open',{input:_passwordInput, revealed:_questionBlocks.map(b=>b.revealed)});
                 return;
             }
-            if (d.is_goal && !doorLocked && knockGateOpen && passwordGateOpen && movingGateOpen && persistentGateOpen && overlap >= PLAYER_HALF_AREA) {
+            if (d.is_goal && !doorLocked && knockGateOpen && passwordGateOpen && movingGateOpen && persistentGateOpen && acceptedGateOpen && (overlap >= PLAYER_HALF_AREA || acceptedDoorHit)) {
                 // v19.0 简化阻断：只阻断「倒计时进行中（_goalHitStartMs>0）」的重复触发
                 //   v18 阻断了 _goalHitJumped=true（上一次已经跳完的标志）→ 但跳完后下一关进入前，loadLevelAndStart 会清零这个标志
                 //   双重保险：这里只看「现在是否在倒计时中」→ 更安全（即便 loadLevel 清零遗漏也不会卡 goal-hit）
@@ -2006,6 +2266,7 @@
         let md = 0;
         if (input.left) md -= 1;
         if (input.right) md += 1;
+        if (_hasMechanic('reverse_controls')) md *= -1;
         player.moveDir = md;
         // v20.0：跳跃触发规则（严格：只有 onGround=true 当下按跳才生效，空中按跳直接丢弃，落地后不补跳！）
         //   v19 bug（=「jump buffer/落地补跳」，用户明确禁止）：
@@ -2045,6 +2306,11 @@
             player.vy = JUMP_VELOCITY;
             player.wantJump = false;
             if (levelData.double_jump) player.jumpsLeft = Math.max(0, player.jumpsLeft - 1);
+            if(_hasMechanic('door_jumps')&&!_acceptedDoorLocked){
+                _acceptedDoorVY=JUMP_VELOCITY*.82;
+                const door=_acceptedGoalDoor();
+                logStep('mechanic:door','door-jump-triggered',{doorY:door&&Math.round(door.y),velocity:Math.round(_acceptedDoorVY),sourceReviewId:levelData.source_review_id});
+            }
             playSfx('jump');
             logStep('input', 'jump-fired', {
                 f: frameCount,
@@ -2087,6 +2353,22 @@
         if (levelData.no_fall && !levelData.infinite_horizontal) {
             const mb=_mapBounds(levelData);
             player.x = Math.max(mb.minX+HALF_W, Math.min(mb.maxX-HALF_W, player.x));
+        }
+        let acceptedObstacle = null;
+        if(_hasMechanic('shrink_tunnel')){
+            acceptedObstacle={name:'shrink-tunnel',...ACCEPTED_MECHANICS.sideBlock(previousPlayerX,player.x,HALF_W,710,1320,!_acceptedPlayerSmall)};
+        }else if(_hasMechanic('erase_wall')){
+            acceptedObstacle={name:'erasable-wall',...ACCEPTED_MECHANICS.sideBlock(previousPlayerX,player.x,HALF_W,900,1020,_acceptedWallErase<1)};
+        }
+        if(acceptedObstacle&&acceptedObstacle.blocked){
+            const attemptedX=player.x;
+            player.x=acceptedObstacle.x;player.vx=0;
+            const key=`accepted-obstacle:${currentLevelIndex}:${acceptedObstacle.name}:${acceptedObstacle.side}`;
+            const now=performance.now();
+            if(!_horizontalSnapGuardLastAt.has(key)||now-_horizontalSnapGuardLastAt.get(key)>500){
+                _horizontalSnapGuardLastAt.set(key,now);
+                logStep('collide','accepted-obstacle-horizontal-block',{levelIndex:currentLevelIndex,sourceReviewId:levelData.source_review_id,obstacle:acceptedObstacle.name,side:acceptedObstacle.side,previousX:Math.round(previousPlayerX),attemptedX:Math.round(attemptedX),resolvedX:Math.round(player.x)});
+            }
         }
         player.onGround = false;
         for (const p of plats) {
@@ -4441,6 +4723,38 @@
             for(let x=700;x<3900;x+=330){ctx.beginPath();ctx.moveTo(x,870);ctx.lineTo(x-12,844);ctx.moveTo(x,870);ctx.lineTo(x+17,850);ctx.stroke();}
             ctx.restore();
         }
+        if(_hasMechanic('dual_bridge')&&!_acceptedDualBuilt&&_acceptedDualHold>0){
+            const g=_acceptedBridgeGeometry('dual_bridge'),progress=_acceptedDualHold;
+            ctx.save();ctx.strokeStyle='#e7c767';ctx.lineWidth=16;ctx.lineCap='round';
+            ctx.beginPath();ctx.moveTo(g.left,g.top+5);ctx.quadraticCurveTo(g.left+90,g.top-145,g.left+(g.right-g.left)*.5*progress,g.top);
+            ctx.moveTo(g.right,g.top+5);ctx.quadraticCurveTo(g.right-90,g.top-145,g.right-(g.right-g.left)*.5*progress,g.top);ctx.stroke();ctx.restore();
+        }
+        if(_hasMechanic('ink_path')){
+            const visible=_acceptedInkBuilt||(_sceneDrag&&_sceneDrag.type==='accepted-ink')||performance.now()<_acceptedInkErrorUntil;
+            if(visible&&_acceptedInkPath.length>1){
+                ctx.save();ctx.globalAlpha=_acceptedInkBuilt ? 1 : (performance.now() < _acceptedInkErrorUntil ? .38 : .82);ctx.strokeStyle='#17343a';ctx.lineWidth=12;ctx.lineCap='round';ctx.lineJoin='round';ctx.beginPath();ctx.moveTo(_acceptedInkPath[0].x,_acceptedInkPath[0].y);for(let i=1;i<_acceptedInkPath.length;i++)ctx.lineTo(_acceptedInkPath[i].x,_acceptedInkPath[i].y);ctx.stroke();ctx.restore();
+            }
+        }
+        if(_hasMechanic('shrink_tunnel')){
+            ctx.save();ctx.fillStyle='#596957';ctx.strokeStyle='#17343a';ctx.lineWidth=7;_roundPath(700,585,630,100,12);ctx.fill();ctx.stroke();ctx.restore();
+        }
+        if(_hasMechanic('freeze_spikes')){
+            const frozen=_acceptedFreezeHeld();
+            for(let x=780;x<=1280;x+=70){const rise=frozen?12:30+(Math.sin(frameCount*.15+x)+1)*28;ctx.save();ctx.fillStyle=frozen?'#79c8d1':'#d94b54';ctx.strokeStyle='#17343a';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(x-25,870);ctx.lineTo(x,870-rise);ctx.lineTo(x+25,870);ctx.closePath();ctx.fill();ctx.stroke();ctx.restore();}
+        }
+        if(_hasMechanic('face_away')&&_acceptedFaceHold>0){
+            const door=_acceptedGoalDoor();if(door){ctx.save();ctx.fillStyle='rgba(255,240,189,.78)';ctx.beginPath();ctx.arc(door.x,door.y-door.h/2-34,12+24*_acceptedFaceHold/1.2,0,Math.PI*2);ctx.fill();ctx.restore();}
+        }
+        if(_hasMechanic('door_jumps')){
+            const door=_acceptedGoalDoor();if(door&&door.y<720&&!_acceptedDoorLocked){ctx.save();ctx.strokeStyle='rgba(231,199,103,.72)';ctx.lineWidth=6;ctx.beginPath();ctx.arc(door.x,door.y-door.h/2-28,20,0,Math.PI*2);ctx.stroke();ctx.restore();}
+        }
+        if(_hasMechanic('ground_swap')){
+            const grass=(x,active)=>{ctx.save();ctx.strokeStyle=active?'#e7c767':'#17343a';ctx.lineWidth=7;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(x,870);ctx.lineTo(x-24,816);ctx.moveTo(x,870);ctx.lineTo(x,803);ctx.moveTo(x,870);ctx.lineTo(x+27,822);ctx.stroke();ctx.restore();};
+            grass(665,_acceptedGroundPhase===0);grass(1240,_acceptedGroundPhase===1);
+        }
+        if(_hasMechanic('erase_wall')&&_acceptedWallErase<1){
+            ctx.save();ctx.globalAlpha=Math.max(.12,1-_acceptedWallErase);ctx.fillStyle='#655e76';ctx.strokeStyle='#17343a';ctx.lineWidth=8;_roundPath(900,410,120,460,10);ctx.fill();ctx.stroke();ctx.restore();
+        }
     }
     function drawFantasyDoors(){
         if(showSuccess&&doorOpenT<1)doorOpenT=Math.min(1,doorOpenT+1/40);else if(!showSuccess)doorOpenT=Math.max(0,doorOpenT-.1);
@@ -4460,7 +4774,8 @@
     function drawFantasyCrates(){for(let i=0;i<crates.length;i++){const c=crates[i],x=c.x-c.w/2,y=c.y-c.h/2;ctx.save();ctx.fillStyle='#9b653d';ctx.strokeStyle='#17343a';ctx.lineWidth=6;_roundPath(x,y,c.w,c.h,9);ctx.fill();ctx.stroke();ctx.fillStyle='#c78a4d';ctx.fillRect(x+13,y+13,c.w-26,c.h-26);ctx.strokeRect(x+13,y+13,c.w-26,c.h-26);_fantasyLine([[x+18,y+18],[x+c.w-18,y+c.h-18]],'#70452f',7);_fantasyLine([[x+c.w-18,y+18],[x+18,y+c.h-18]],'#70452f',7);ctx.fillStyle='#e0ba61';ctx.fillRect(x-3,y+8,c.w+6,13);ctx.fillRect(x-3,y+c.h-21,c.w+6,13);ctx.restore();}}
     function drawFantasyPlayer(){
         let ax=player.x,ay=player.y,scale=1;if(showSuccess){const e=SUCCESS_TOTAL-successTimer;if(e>=40&&e<100){const t=(e-40)/60,q=t*t;ax=_animStartX+(_animTargetX-_animStartX)*q;ay=_animStartY+(_animTargetY-_animStartY)*q;scale=1-q;}else if(e>=100)return;}
-        const air=!player.onGround,walking=player.onGround&&Math.abs(player.vx)>10,rising=air&&player.vy<0,clock=performance.now()*.001,dir=player.vx<0?-1:1,bob=walking?-Math.max(0,Math.sin(player.walkT))*5:0;
+        if(_hasMechanic('shrink_tunnel')&&_acceptedPlayerSmall){ay+=(1-.62)*84;scale*=.62;}
+        const air=!player.onGround,walking=player.onGround&&Math.abs(player.vx)>10,rising=air&&player.vy<0,clock=performance.now()*.001,dir=player.vx<0?-1:(player.vx>0?1:_acceptedFacing),bob=walking?-Math.max(0,Math.sin(player.walkT))*5:0;
         ctx.save();ctx.translate(ax,ay-24+bob);ctx.scale(dir*scale,scale);const run=walking?1:0,lift=air?1:0,wave=Math.sin(clock*14)*6*run+Math.sin(clock*8)*3*lift;
         ctx.fillStyle='#b54043';ctx.beginPath();ctx.moveTo(-7,-31);ctx.bezierCurveTo(-31-run*20-lift*12,-15-wave,-50-run*28,24-wave*.5-lift*10,-36-run*20,50-lift*14);ctx.quadraticCurveTo(-6,39-wave*.2,15,31);ctx.closePath();ctx.fill();ctx.strokeStyle='#17343a';ctx.lineWidth=5;ctx.stroke();
         ctx.fillStyle='#f2d18c';ctx.beginPath();ctx.ellipse(0,-34,27,30,0,0,Math.PI*2);ctx.fill();ctx.stroke();

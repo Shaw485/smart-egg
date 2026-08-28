@@ -11,8 +11,8 @@ const guide = fs.readFileSync(path.join(root, 'web_preview/README.md'), 'utf8');
 const level7 = JSON.parse(fs.readFileSync(path.join(root, 'godot_project/levels/level_6.json'), 'utf8'));
 const level8 = JSON.parse(fs.readFileSync(path.join(root, 'godot_project/levels/level_7.json'), 'utf8'));
 
-assert.match(game, /const GAME_CODE_VERSION = 177/);
-assert.match(index, /game\.js\?v=177/);
+assert.match(game, /const GAME_CODE_VERSION = 178/);
+assert.match(index, /game\.js\?v=178/);
 assert.strictEqual(level7.infinite_horizontal, true, '第7关应保持无限横向');
 assert.ok(level7.mechanics.includes('hold_to_stop'), '第7关应保留按住门停止机制');
 assert.ok(level8.mechanics.includes('shadow_switch'), '第8关应保留光影机关');
@@ -26,7 +26,7 @@ assert.ok(unlockAssignment >= 0 && unlockAssignment < nextUnlockedCheck && nextU
   '自动下一关必须在保存新解锁值后再作判断');
 const completedIndex = 8;
 const unlockedBefore = 9;
-const nextUnlock = Math.min(12, Math.max(unlockedBefore, completedIndex + 2));
+const nextUnlock = Math.min(21, Math.max(unlockedBefore, completedIndex + 2));
 assert.strictEqual(nextUnlock, 10);
 assert.strictEqual((completedIndex + 2) <= nextUnlock, true,
   '首次完成第9关后应立即解锁并进入第10关');
@@ -55,7 +55,7 @@ assert.match(game, /hideSun: gameplayWorldVisible && _hasMechanic\('shadow_switc
 assert.match(game, /createRadialGradient\(_shadowSunX,220,12,_shadowSunX,220,108\)/);
 
 assert.match(guide, /正式关卡/);
-assert.match(guide, /第 13–42 关仍在独立连续评审池/);
+assert.match(guide, /评审编号 13、15、17、24、28、30、35、36、41/);
 assert.match(guide, /state\/mainline-auto-next-decision/);
 assert.match(guide, /render\/infinite-parallax-config/);
 

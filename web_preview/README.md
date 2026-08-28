@@ -2,14 +2,15 @@
 
 ## 关卡与版本
 
-- 网页主线当前为代码版本 `v177`，共 12 个已合入的正式关卡。
-- 第 13–42 关仍在独立连续评审池 `../brainstorm_levels_13_16_demo/index.html?v=6` 中；它们要等试玩时选择“加入主关”并完成统一合并后，才会进入正式主线计数，不是丢失或被删除。
+- 网页主线当前为代码版本 `v178`，共 21 个已合入的正式关卡。
+- 评审编号 13、15、17、24、28、30、35、36、41 已按这个顺序合并并重新编号为主线第 13–21 关；原连续评审页仍保留为结果档案，未入选候选不会出现在正式主线。
 - 第 8–12 关依次为影子机关、静止追门、标题拖字成桥、重来保留箱子、拖动世界。
-- 正式关卡数据位于 `../godot_project/levels/level_0.json` 至 `level_11.json`，离线包位于 `../godot_project/levels/levels_bundle.js`。
-- `index.html` 的脚本与样式缓存参数已同步为 `v177`。
+- 第 13–21 关依次为：双向同时按住生桥、一笔连接两岸、反向控制、点击人物缩小、按住空白冻结尖刺、背对门等待、人物与门同步跳跃、点击草切换地面、来回擦除墙壁。
+- 正式关卡数据位于 `../godot_project/levels/level_0.json` 至 `level_20.json`，离线包位于 `../godot_project/levels/levels_bundle.js`。
+- `index.html` 的脚本与样式缓存参数已同步为 `v178`。
 - `?screen=levelSelect` 可从独立试玩页安全返回完整主线选关页；不带该参数时仍从首页启动。
 - 首页正式标题与浏览器窗口标题统一为“怪奇之原”；运行时诊断导出中的 `branding.title` 可核对当前品牌标题。
-- 主线选关页每页固定最多 `4 列 × 2 排`，第 1 页为 1–8 关，第 2 页为 9–12 关。手机左右滑动、电脑按住鼠标横向拖动，或使用键盘左右方向键均可翻页；轻触/单击仍进入对应关卡。进入第 9–12 关后再从暂停页返回选关，会保留在第 2 页。
+- 主线选关页每页固定最多 `4 列 × 2 排`，第 1 页为 1–8 关、第 2 页为 9–16 关、第 3 页为 17–21 关。手机左右滑动、电脑按住鼠标横向拖动，或使用键盘左右方向键均可翻页；轻触/单击仍进入对应关卡。暂停返回选关会保留当前关所在页。
 
 ## 日志与独立调试
 
@@ -31,7 +32,7 @@
 
 第 10 关标题“纸上有路”使用固定等距四字布局；“路”仍是独立可拖对象，但未操作前与其他三字字距完全一致。第 11 关楼梯箱与平台处于同一碰撞层：侧面记录 `collide/static-crate-horizontal-block`，底部记录 `collide/static-crate-ceiling-block`，顶面首次接触记录 `collide/persistent-crate-land`；人物不能穿箱，但可以站上并沿箱顶移动。
 
-`tests/mainline-function-parity-test.js` 是 UI 改版的功能守恒检查：固定验证首页、主线选关、暂停返回、创造模式、编辑器撤销与移动、键盘控制、日志导出及提示跨关复位仍然存在。`tests/levels-8-12-smoke-test.js` 会模拟第 9 关静止等待，并校验第 10 关自然落点、桥两端及桥面高度，同时核对全部 12 关 JSON 与离线包一致。
+`tests/mainline-function-parity-test.js` 是 UI 改版的功能守恒检查：固定验证首页、主线选关、暂停返回、创造模式、编辑器撤销与移动、键盘控制、日志导出及提示跨关复位仍然存在。`tests/levels-8-12-smoke-test.js` 会模拟第 9 关静止等待，并校验第 10 关自然落点、桥两端及桥面高度，同时核对全部 21 关 JSON 与离线包一致。`tests/accepted-levels-mainline-test.js` 固定验证 9 个评审来源的顺序、机制接线、手势判定、存档迁移和分模块日志。
 
 第 12 关的全景拖拽会先调用 `_sceneGestureBlockedByUI(p)`；提示、重来、暂停以及提示/成功/死亡弹层区域会记录 `mechanic/scene-gesture-bypassed-ui` 并交还旧 UI 点击处理，避免新增手势吞掉原按钮。
 
@@ -49,7 +50,7 @@ _setLogModule('level-select', false)
 _setLogModule('level-select', true)
 ```
 
-`tests/level-select-pagination-test.js` 固定检查每页 8 关、第二页索引映射、横滑阈值、取消保护、相邻页无点击热区和鼠标/触摸接线。浏览器验收还应真实完成左滑到第 2 页、点击第 9 关、暂停返回第 2 页和右滑回第 1 页。
+`tests/level-select-pagination-test.js` 固定检查 21 关分成三页、每页最多 8 关、各页索引映射、横滑阈值、取消保护、相邻页无点击热区和鼠标/触摸接线。浏览器验收还应真实完成连续左滑到第 3 页、点击第 17 关、暂停返回第 3 页和右滑回前页。
 
 日志模块可分别启停，默认关闭逐帧 `physics` 噪声日志。需要排查物理过程时，可以在地址后追加 `?verbose=1`，或在控制台单独开启：
 
@@ -71,5 +72,15 @@ __debug.exportLog()
 - `mechanic`：每关特殊机关及其状态变化。
 - `storage`：存档、创造模式和关卡码。
 - `runtime`：启动、资源、音频及异常。
+- `mechanic:bridge`：第 13 关双键生桥的开始、取消和完成。
+- `mechanic:gesture`：第 14 关墨迹起止、长度和拒绝原因。
+- `mechanic:transform`：第 16 关人物缩小状态。
+- `mechanic:hazard`：第 17 关尖刺冻结与接触复位。
+- `mechanic:direction`：第 18 关朝向与背对计时。
+- `mechanic:door`：第 19 关门跳跃及空中锁定。
+- `mechanic:terrain`：第 20 关道路阶段切换。
+- `mechanic:erase`：第 21 关擦除手势、距离和完成度。
+
+上述子模块均可用 `_setLogModule('mechanic:bridge', false)` 形式独立关闭，或用 `_findLogs('', 'mechanic:bridge')` 单独筛选。每次进入第 13–21 关还会在状态上下文记录 `reviewSourceId`，便于从正式编号反查原评审关。旧存档在读取时按连续通关记录补齐新关解锁，迁移结果记录在 `progress/loadProgress-success` 的 `unlocked_before`、`unlocked_after`、`total_levels` 与 `migration` 字段。
 
 日志只保存在当前浏览器会话的内存中，最多 10000 条；导出后可用于复现。不要把密码、令牌、授权头或个人敏感信息写入日志上下文。

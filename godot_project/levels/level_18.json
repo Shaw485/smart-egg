@@ -1,0 +1,15 @@
+{
+  "$schema": "Part7_level_json_schema_v1",
+  "id": 18,
+  "source_review_id": 35,
+  "name": "同频的门",
+  "type": "door_jumps",
+  "mechanics": ["door_jumps"],
+  "no_fall": true,
+  "description": {"hint_l1": "先让人物跳起，门也会跟着跳；趁门还在空中时直接点击门，把它停住并打开。"},
+  "world_size": {"w": 1920, "h": 1080},
+  "spawn": {"x": 350, "y": 810},
+  "platforms": [{"x": 960, "y": 1090, "w": 1920, "h": 440, "kind": "ground"}],
+  "doors": [{"id": "goal_door_18", "x": 1580, "y": 765, "w": 150, "h": 210, "is_goal": true}],
+  "crates": [], "keys": [], "question_blocks": [], "decor": []
+}

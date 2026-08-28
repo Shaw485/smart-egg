@@ -1,0 +1,15 @@
+{
+  "$schema": "Part7_level_json_schema_v1",
+  "id": 17,
+  "source_review_id": 30,
+  "name": "别看它",
+  "type": "face_away",
+  "mechanics": ["face_away"],
+  "no_fall": true,
+  "description": {"hint_l1": "走到门旁边，轻按一下左方向让人物背对门，然后松开所有按键并保持约 1 秒。"},
+  "world_size": {"w": 1920, "h": 1080},
+  "spawn": {"x": 350, "y": 810},
+  "platforms": [{"x": 960, "y": 1090, "w": 1920, "h": 440, "kind": "ground"}],
+  "doors": [{"id": "goal_door_17", "x": 1580, "y": 765, "w": 150, "h": 210, "is_goal": true}],
+  "crates": [], "keys": [], "question_blocks": [], "decor": []
+}

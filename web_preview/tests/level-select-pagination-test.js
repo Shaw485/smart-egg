@@ -11,7 +11,7 @@ const style = fs.readFileSync(path.join(root, 'web_preview/style.css'), 'utf8');
 const COLS = 4;
 const ROWS = 2;
 const PAGE_SIZE = COLS * ROWS;
-const TOTAL_LEVELS = 12;
+const TOTAL_LEVELS = 21;
 const SWIPE_THRESHOLD = 120;
 const TAP_SLOP = 28;
 
@@ -29,10 +29,12 @@ function classifyGesture(dx, dy, reason = 'end') {
 }
 
 assert.deepStrictEqual(itemsForPage(0), [0, 1, 2, 3, 4, 5, 6, 7], '第一页必须只有第1–8关');
-assert.deepStrictEqual(itemsForPage(1), [8, 9, 10, 11], '第二页必须映射到第9–12关且不生成空卡片');
-assert.strictEqual(Math.ceil(TOTAL_LEVELS / PAGE_SIZE), 2, '12关应分成两页');
+assert.deepStrictEqual(itemsForPage(1), [8, 9, 10, 11, 12, 13, 14, 15], '第二页必须映射到第9–16关');
+assert.deepStrictEqual(itemsForPage(2), [16, 17, 18, 19, 20], '第三页必须映射到第17–21关且不生成空卡片');
+assert.strictEqual(Math.ceil(TOTAL_LEVELS / PAGE_SIZE), 3, '21关应分成三页');
 assert.strictEqual(itemsForPage(1)[0], 8, '第二页第一格必须打开第9关');
-assert.strictEqual(itemsForPage(1)[3], 11, '第二页第四格必须打开第12关');
+assert.strictEqual(itemsForPage(1)[7], 15, '第二页第八格必须打开第16关');
+assert.strictEqual(itemsForPage(2)[4], 20, '第三页第五格必须打开第21关');
 
 assert.strictEqual(classifyGesture(-120, 0), 'swipe', '达到阈值的左滑必须翻到下一页');
 assert.strictEqual(classifyGesture(120, 0), 'swipe', '达到阈值的右滑必须翻到上一页');
@@ -42,7 +44,7 @@ assert.strictEqual(classifyGesture(20, 10), 'tap', '轻触必须继续打开关�
 assert.strictEqual(classifyGesture(150, 0, 'cancel'), 'cancelled', '触摸取消不能翻页');
 assert.strictEqual(classifyGesture(0, 0, 'canvas-mouseleave'), 'cancelled', '鼠标移出不能误点关卡');
 
-assert.match(game, /const GAME_CODE_VERSION = 177/);
+assert.match(game, /const GAME_CODE_VERSION = 178/);
 assert.match(game, /const LEVEL_SELECT_COLS = 4/);
 assert.match(game, /const LEVEL_SELECT_ROWS = 2/);
 assert.match(game, /const LEVEL_SELECT_PAGE_SIZE = LEVEL_SELECT_COLS \* LEVEL_SELECT_ROWS/);
@@ -72,4 +74,4 @@ assert.match(game, /logStep\('level-select', 'page-boundary'/, '首尾页越界�
 assert.match(game, /\['level-select',true\]/, '选关日志模块必须可独立开关');
 assert.match(game, /getLevelSelectPaging/, '必须提供选关分页调试状态');
 
-console.log('主线选关分页测试通过：每页4×2、第二页映射、横滑阈值、取消保护、点击延迟和独立日志均有效。');
+console.log('主线选关分页测试通过：21关分3页、每页4×2、横滑阈值、取消保护、点击延迟和独立日志均有效。');
