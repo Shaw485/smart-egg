@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 179;   // 跟 index.html 的 ?v=179 保持一致
+    const GAME_CODE_VERSION = 180;   // 跟 index.html 的 ?v=180 保持一致
     const GAME_TITLE = '怪奇之原';
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
@@ -1436,7 +1436,7 @@
     }
 
     function drawGrid(options = {}) {
-        const parallaxX = Number(options.parallaxX) || 0;
+        const mountainParallaxX = Number(options.mountainParallaxX) || 0;
         const hideSun = !!options.hideSun;
         // 辽阔高空：清透蓝天、暖色天际与大块高云
         const sky=ctx.createLinearGradient(0,0,0,H);sky.addColorStop(0,'#63a9c8');sky.addColorStop(.48,'#b9d9c8');sky.addColorStop(.76,'#ead39b');sky.addColorStop(1,'#9bb18a');ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
@@ -1445,7 +1445,7 @@
         }
         ctx.fillStyle='rgba(255,249,222,.68)';for(const cloud of [[.16,.17,150,38],[.47,.11,190,46],[.72,.3,130,32]]){ctx.beginPath();ctx.ellipse(W*cloud[0],H*cloud[1],cloud[2],cloud[3],-.05,0,Math.PI*2);ctx.ellipse(W*cloud[0]+cloud[2]*.45,H*cloud[1]+4,cloud[2]*.58,cloud[3]*.72,.03,0,Math.PI*2);ctx.fill();}
         // 极远台地与群峰，多层低对比制造纵深
-        const horizon=H*.7;for(let layer=0;layer<3;layer++){const factor=.06+layer*.045;const shift=parallaxX*factor;const offset=-(shift%480);ctx.fillStyle=['#87a59a','#708f86','#58766e'][layer];ctx.globalAlpha=[.55,.68,.82][layer];ctx.beginPath();ctx.moveTo(0,H);ctx.lineTo(0,horizon+layer*45);for(let x=-360+offset;x<=W+360;x+=120){const worldX=x+shift;const mesa=(Math.sin(worldX*.006+layer*1.7)+1)*34;const plateau=(((worldX%360)+360)%360)<170?38:0;ctx.lineTo(x,horizon+layer*45-mesa-plateau);}ctx.lineTo(W,H);ctx.closePath();ctx.fill();}ctx.globalAlpha=1;
+        const horizon=H*.7;for(let layer=0;layer<3;layer++){const factor=.06+layer*.045;const shift=mountainParallaxX*factor;const step=120;const firstWorldX=Math.floor((shift-360)/step)*step;const lastWorldX=shift+W+360;ctx.fillStyle=['#87a59a','#708f86','#58766e'][layer];ctx.globalAlpha=[.55,.68,.82][layer];ctx.beginPath();ctx.moveTo(0,H);ctx.lineTo(0,horizon+layer*45);for(let worldX=firstWorldX;worldX<=lastWorldX;worldX+=step){const screenX=worldX-shift;const mesa=(Math.sin(worldX*.006+layer*1.7)+1)*34;const plateau=(((worldX%360)+360)%360)<170?38:0;ctx.lineTo(screenX,horizon+layer*45-mesa-plateau);}ctx.lineTo(W,H);ctx.closePath();ctx.fill();}ctx.globalAlpha=1;
         // 谷底薄雾与蜿蜒河光，强调玩家所在位置很高
         ctx.fillStyle='rgba(238,238,205,.42)';ctx.beginPath();ctx.ellipse(W*.53,H*.82,W*.48,H*.12,0,0,Math.PI*2);ctx.fill();ctx.strokeStyle='rgba(211,236,223,.72)';ctx.lineWidth=18;ctx.beginPath();ctx.moveTo(W*.15,H*.88);ctx.bezierCurveTo(W*.38,H*.78,W*.55,H*.96,W*.83,H*.8);ctx.stroke();
     }
@@ -4503,12 +4503,16 @@
             extendsBelowViewport: true
         });
         if (levelData.infinite_horizontal) {
+            const mountainMotion = idx === 6 ? 'fixed' : 'stable-world-lattice';
             logStep('render', 'infinite-parallax-config', {
                 levelIndex: idx,
                 cameraAnchorX: 420,
-                mountainFactors: [0.06, 0.105, 0.15],
+                mountainMotion,
+                mountainFactors: mountainMotion === 'fixed' ? [0, 0, 0] : [0.06, 0.105, 0.15],
                 groundFeaturesWorldAnchored: true,
-                expectedDirection: 'player-right => ground/grass/mountains-left'
+                expectedDirection: mountainMotion === 'fixed'
+                    ? 'level-7: player-right => ground/grass-left, mountains-fixed'
+                    : 'player-right => ground/grass/mountains-left-without-seam-pop'
             });
         }
         logStep('state', 'enter-playing', {
@@ -5001,8 +5005,11 @@
 
         try {
             const gameplayWorldVisible = !['menu','levelSelect','creatorList','creatorEdit','complete','completeIntro'].includes(gameState);
+            const mountainParallaxX = gameplayWorldVisible && levelData && levelData.infinite_horizontal
+                ? (currentLevelIndex === 6 ? 0 : _cameraX)
+                : 0;
             drawGrid({
-                parallaxX: gameplayWorldVisible && levelData && levelData.infinite_horizontal ? _cameraX : 0,
+                mountainParallaxX,
                 hideSun: gameplayWorldVisible && _hasMechanic('shadow_switch')
             });
             if (gameState === 'menu') drawMenu();

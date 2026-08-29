@@ -11,8 +11,8 @@ const guide = fs.readFileSync(path.join(root, 'web_preview/README.md'), 'utf8');
 const level7 = JSON.parse(fs.readFileSync(path.join(root, 'godot_project/levels/level_6.json'), 'utf8'));
 const level8 = JSON.parse(fs.readFileSync(path.join(root, 'godot_project/levels/level_7.json'), 'utf8'));
 
-assert.match(game, /const GAME_CODE_VERSION = 179/);
-assert.match(index, /game\.js\?v=179/);
+assert.match(game, /const GAME_CODE_VERSION = 180/);
+assert.match(index, /game\.js\?v=180/);
 assert.strictEqual(level7.infinite_horizontal, true, '第7关应保持无限横向');
 assert.ok(level7.mechanics.includes('hold_to_stop'), '第7关应保留按住门停止机制');
 assert.ok(level8.mechanics.includes('shadow_switch'), '第8关应保留光影机关');
@@ -34,19 +34,28 @@ assert.match(game, /mainline-auto-next-decision/);
 assert.match(game, /goalHit\(' \+ labelSec \+ '\)→complete/);
 assert.match(game, /gameState = 'complete';/);
 
-// 第7关参照物必须使用相机/世界坐标；人物右跑时所有参照物屏幕坐标变小。
+// 第7关只移动地面参照物，山脉必须固定；第9关山脉使用连续世界坐标，不能在取模边界闪烁。
 assert.match(game, /function drawGrid\(options = \{\}\)/);
-assert.match(game, /const shift=parallaxX\*factor/);
+assert.match(game, /const mountainParallaxX = Number\(options\.mountainParallaxX\) \|\| 0/);
+assert.match(game, /currentLevelIndex === 6 \? 0 : _cameraX/);
+assert.match(game, /const firstWorldX=Math\.floor\(\(shift-360\)\/step\)\*step/);
+assert.match(game, /const screenX=worldX-shift/);
+assert.doesNotMatch(game, /const offset=-\(shift%480\)/, '山脉不能再使用会在边界跳变的取模偏移');
+assert.match(game, /mountainMotion = idx === 6 \? 'fixed' : 'stable-world-lattice'/);
 assert.match(game, /groundFeaturesWorldAnchored: true/);
 assert.match(game, /featureFirst=levelData\.infinite_horizontal\?Math\.floor\(\(_cameraX-250\)\/170\)\*170/);
 const worldX = 1800;
-for (const factor of [0.06, 0.105, 0.15, 1]) {
+for (const factor of [1]) {
   const before = worldX - 200 * factor;
   const afterRightRun = worldX - 500 * factor;
   const afterLeftRun = worldX + 100 * factor;
-  assert.ok(afterRightRun < before, `factor ${factor}: 向右跑时参照物应向左`);
-  assert.ok(afterLeftRun > before, `factor ${factor}: 向左跑时参照物应向右`);
+  assert.ok(afterRightRun < before, '第7关向右跑时地面参照物应向左');
+  assert.ok(afterLeftRun > before, '第7关向左跑时地面参照物应向右');
 }
+assert.strictEqual(1800 - 0 * 0.15, 1800, '第7关山脉屏幕位置必须与相机位置无关');
+const stableScreenX = (cameraX, factor, sampleWorldX) => sampleWorldX - cameraX * factor;
+assert.ok(Math.abs((stableScreenX(7999, 0.15, 8400) - stableScreenX(8000, 0.15, 8400)) - 0.15) < 1e-9,
+  '第9关跨越旧取模边界时山脉只能连续移动，不能整段跳变');
 
 // 第8关隐藏通用右上太阳，同时仍由关卡机制绘制左上太阳。
 assert.match(game, /const hideSun = !!options\.hideSun/);
