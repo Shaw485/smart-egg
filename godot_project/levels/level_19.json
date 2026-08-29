@@ -1,18 +1,15 @@
 {
   "$schema": "Part7_level_json_schema_v1",
   "id": 19,
-  "source_review_id": 36,
-  "name": "地面换班",
-  "type": "ground_swap",
-  "mechanics": ["ground_swap"],
-  "description": {"hint_l1": "先走到左半段道路最右端，再点击右岸的小草切换道路；脚下接住后继续向右走进门。"},
+  "source_review_id": 41,
+  "name": "墙也会忘",
+  "type": "erase_wall",
+  "mechanics": ["erase_wall"],
+  "no_fall": true,
+  "description": {"hint_l1": "在中间高墙上按住手指并来回滑动，多擦几次直到墙完全消失，再向右走进门。"},
   "world_size": {"w": 1920, "h": 1080},
   "spawn": {"x": 350, "y": 810},
-  "platforms": [
-    {"x": 310, "y": 1090, "w": 620, "h": 440, "kind": "ground"},
-    {"x": 1610, "y": 1090, "w": 620, "h": 440, "kind": "ground"},
-    {"id": "ground_phase_bridge", "x": 795, "y": 882, "w": 350, "h": 24, "kind": "phase_bridge"}
-  ],
+  "platforms": [{"x": 960, "y": 1090, "w": 1920, "h": 440, "kind": "ground"}],
   "doors": [{"id": "goal_door_19", "x": 1580, "y": 765, "w": 150, "h": 210, "is_goal": true}],
   "crates": [], "keys": [], "question_blocks": [], "decor": []
 }

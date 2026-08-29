@@ -1,17 +1,21 @@
 {
   "$schema": "Part7_level_json_schema_v1",
   "id": 13,
-  "source_review_id": 15,
-  "name": "一笔成路",
-  "type": "ink_path",
-  "mechanics": ["ink_path"],
-  "description": {"hint_l1": "从断崖左岸按住并连续划到右岸，连接两岸后再松手；画出的黑色道路可以踩上去。"},
+  "source_review_id": 17,
+  "name": "方向借走了",
+  "type": "reverse_controls",
+  "mechanics": ["reverse_controls"],
+  "no_fall": true,
+  "description": {"hint_l1": "这一关左右方向相反。反着操作移动，并连续跳上三层阶梯，最后进入右上方的门。"},
   "world_size": {"w": 1920, "h": 1080},
   "spawn": {"x": 350, "y": 810},
   "platforms": [
-    {"x": 325, "y": 1090, "w": 650, "h": 440, "kind": "ground"},
-    {"x": 1595, "y": 1090, "w": 650, "h": 440, "kind": "ground"}
+    {"x": 960, "y": 1090, "w": 1920, "h": 440, "kind": "ground"},
+    {"x": 650, "y": 770, "w": 260, "h": 52, "kind": "reverse_step_1"},
+    {"x": 950, "y": 650, "w": 260, "h": 52, "kind": "reverse_step_2"},
+    {"x": 1250, "y": 530, "w": 260, "h": 52, "kind": "reverse_step_3"},
+    {"x": 1515, "y": 530, "w": 300, "h": 52, "kind": "reverse_goal_step"}
   ],
-  "doors": [{"id": "goal_door_13", "x": 1580, "y": 765, "w": 150, "h": 210, "is_goal": true}],
+  "doors": [{"id": "goal_door_13", "x": 1515, "y": 399, "w": 150, "h": 210, "is_goal": true}],
   "crates": [], "keys": [], "question_blocks": [], "decor": []
 }

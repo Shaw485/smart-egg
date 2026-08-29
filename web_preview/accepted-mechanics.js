@@ -1,7 +1,7 @@
 (function (root) {
     'use strict';
 
-    const ACCEPTED_REVIEW_IDS = Object.freeze([13, 15, 17, 24, 28, 30, 35, 36, 41]);
+    const ACCEPTED_REVIEW_IDS = Object.freeze([13, 17, 24, 28, 30, 35, 36, 41]);
 
     function clamp(value, min, max) {
         return Math.max(min, Math.min(max, Number(value) || 0));
@@ -54,12 +54,40 @@
         return clamp((Number(current) || 0) + Math.max(0, Number(distance) || 0) / 950, 0, 1);
     }
 
+    function migrateProgressForRemovedLevel(progress, totalLevels, targetRevision, removedIndex) {
+        const parsed = progress && typeof progress === 'object' ? progress : {};
+        const total = Math.max(1, Math.floor(Number(totalLevels) || 1));
+        const target = Math.max(1, Math.floor(Number(targetRevision) || 1));
+        const removed = Math.max(0, Math.floor(Number(removedIndex) || 0));
+        const sourceRevision = Number(parsed.mainline_revision) || 0;
+        const sourceCompleted = (Array.isArray(parsed.completed) ? parsed.completed : [])
+            .map(Number)
+            .filter(index => Number.isInteger(index) && index >= 0);
+        const remap = index => index === removed ? null : (index > removed ? index - 1 : index);
+        const remapped = sourceRevision < target
+            ? sourceCompleted.map(remap).filter(index => index !== null)
+            : sourceCompleted;
+        const completed = Array.from(new Set(remapped.filter(index => index < total))).sort((a, b) => a - b);
+        let contiguousCompleted = 0;
+        while (completed.includes(contiguousCompleted)) contiguousCompleted += 1;
+        const rawUnlocked = Number.isFinite(Number(parsed.unlocked)) ? Math.floor(Number(parsed.unlocked)) : 1;
+        const storedUnlocked = sourceRevision < target && rawUnlocked > removed + 1 ? rawUnlocked - 1 : rawUnlocked;
+        return {
+            unlocked: Math.max(1, Math.min(total, Math.max(storedUnlocked, contiguousCompleted + 1))),
+            completed,
+            mainline_revision: target,
+            source_revision: sourceRevision,
+            migrated: sourceRevision < target
+        };
+    }
+
     const api = Object.freeze({
         ACCEPTED_REVIEW_IDS,
         validateInkStroke,
         advanceHold,
         sideBlock,
         eraseProgress,
+        migrateProgressForRemovedLevel,
         strokeLength
     });
 

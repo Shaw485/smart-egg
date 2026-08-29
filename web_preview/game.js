@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 178;   // 跟 index.html 的 ?v=178 保持一致
+    const GAME_CODE_VERSION = 179;   // 跟 index.html 的 ?v=179 保持一致
     const GAME_TITLE = '怪奇之原';
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
@@ -33,7 +33,7 @@
         '风起之门', '云阶试炼', '锁语遗迹', '断崖双跃',
         '守门人的礼仪', '花之暗号', '逃走的门',
         '日影无声', '等风来', '纸上有路', '痕迹未散', '远方未远',
-        '进退之间', '一笔成路', '方向借走了', '小一点', '屏住一下',
+        '进退之间', '方向借走了', '小一点', '屏住一下',
         '别看它', '同频的门', '地面换班', '墙也会忘'
     ];
     const GRAVITY = 2000.0;
@@ -125,7 +125,7 @@
     let _persistentLevelActive = false;
     let _lastStaticCrateLandingId = null;
     let _dragWorldOffset = 0;
-    // 第 13–21 关来自独立评审池。状态全部按关卡复位，并通过细分日志模块独立排查。
+    // 第 13–20 关来自独立评审池。状态全部按关卡复位，并通过细分日志模块独立排查。
     let _acceptedDualHold = 0, _acceptedDualBuilt = false, _acceptedDualStarted = false;
     let _acceptedInkPath = [], _acceptedInkBuilt = false, _acceptedInkErrorUntil = 0;
     let _acceptedPlayerSmall = false, _acceptedFreezePointer = false;
@@ -1796,7 +1796,7 @@
     }
 
     // ===== v4.9.6 选关 + 通关存档 =====
-    const TOTAL_LEVELS = 21;
+    const TOTAL_LEVELS = 20;
     const LEVEL_SELECT_COLS = 4;
     const LEVEL_SELECT_ROWS = 2;
     const LEVEL_SELECT_PAGE_SIZE = LEVEL_SELECT_COLS * LEVEL_SELECT_ROWS;
@@ -1967,17 +1967,13 @@
         try {
             const s = localStorage.getItem(LS_KEY);
             const parsed = s ? JSON.parse(s) : { unlocked: 1, completed: [] };
-            const completed = Array.from(new Set((Array.isArray(parsed.completed) ? parsed.completed : [])
-                .map(Number)
-                .filter(index => Number.isInteger(index) && index >= 0 && index < TOTAL_LEVELS)))
-                .sort((a, b) => a - b);
-            let contiguousCompleted = 0;
-            while (completed.includes(contiguousCompleted)) contiguousCompleted += 1;
-            const storedUnlocked = Number.isFinite(Number(parsed.unlocked)) ? Math.floor(Number(parsed.unlocked)) : 1;
+            const migration = ACCEPTED_MECHANICS.migrateProgressForRemovedLevel(parsed, TOTAL_LEVELS, 179, 13);
             const migrated = {
-                unlocked: Math.max(1, Math.min(TOTAL_LEVELS, Math.max(storedUnlocked, contiguousCompleted + 1))),
-                completed
+                unlocked: migration.unlocked,
+                completed: migration.completed,
+                mainline_revision: migration.mainline_revision
             };
+            if (s && migration.migrated) localStorage.setItem(LS_KEY, JSON.stringify(migrated));
             // v4.9.7a G类：localStorage 读取成功/失败详情
             logStep('progress', 'loadProgress-success', {
                 key: LS_KEY, raw_bytes: (s||'').length,
@@ -1986,7 +1982,9 @@
                 completed_count: migrated.completed.length,
                 completed: JSON.stringify(migrated.completed),
                 total_levels: TOTAL_LEVELS,
-                migration: migrated.unlocked !== parsed.unlocked ? 'expanded-mainline-v178' : 'not-needed'
+                source_revision: migration.source_revision,
+                target_revision: migrated.mainline_revision,
+                migration: migration.migrated ? 'removed-level-14-v179' : 'not-needed'
             });
             return migrated;
         } catch(e) {

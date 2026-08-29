@@ -10,9 +10,9 @@ const gameSource = fs.readFileSync(path.join(root, 'web_preview/game.js'), 'utf8
 const indexSource = fs.readFileSync(path.join(root, 'web_preview/index.html'), 'utf8');
 const debugGuide = fs.readFileSync(path.join(root, 'web_preview/README.md'), 'utf8');
 
-assert.match(gameSource, /const GAME_CODE_VERSION = 178/);
-assert.match(indexSource, /game\.js\?v=178/);
-assert.match(gameSource, /const TOTAL_LEVELS = 21/);
+assert.match(gameSource, /const GAME_CODE_VERSION = 179/);
+assert.match(indexSource, /game\.js\?v=179/);
+assert.match(gameSource, /const TOTAL_LEVELS = 20/);
 assert.match(gameSource, /_updateNewLevelMechanics\(dt\)/);
 assert.match(gameSource, /persistent-crate-land/);
 assert.match(gameSource, /staticLandingCandidates\.reduce/);
@@ -110,7 +110,7 @@ assert.ok(simulatedOverlap >= requiredOverlap,
 
 const sandbox = { window: {} };
 vm.runInNewContext(fs.readFileSync(path.join(root, 'godot_project/levels/levels_bundle.js'), 'utf8'), sandbox);
-assert.deepStrictEqual(Object.keys(sandbox.window.__SMART_EGG_LEVELS__), Array.from({length:21}, (_,i)=>String(i)));
+assert.deepStrictEqual(Object.keys(sandbox.window.__SMART_EGG_LEVELS__), Array.from({length:20}, (_,i)=>String(i)));
 function normalizeLevelForBundle(level) {
   function stripComments(value) {
     if (Array.isArray(value)) return value.map(stripComments);
@@ -126,7 +126,7 @@ function normalizeLevelForBundle(level) {
   normalized.description = { hint_l1: level.description.hint_l1 };
   return normalized;
 }
-for (let index = 0; index <= 20; index += 1) {
+for (let index = 0; index <= 19; index += 1) {
   const jsonLevel = JSON.parse(fs.readFileSync(path.join(root, `godot_project/levels/level_${index}.json`), 'utf8'));
   assert.strictEqual(
     JSON.stringify(sandbox.window.__SMART_EGG_LEVELS__[index]),
@@ -135,4 +135,4 @@ for (let index = 0; index <= 20; index += 1) {
   );
 }
 
-console.log('主线关卡冒烟测试通过：提示默认关闭，第9关可达，第10关自然落点与齐平桥面有效，全部21关离线包与JSON一致。');
+console.log('主线关卡冒烟测试通过：提示默认关闭，第9关可达，第10关自然落点与齐平桥面有效，全部20关离线包与JSON一致。');
