@@ -8,7 +8,7 @@ const root = path.resolve(__dirname, '../..');
 const game = fs.readFileSync(path.join(root, 'web_preview/game.js'), 'utf8');
 const index = fs.readFileSync(path.join(root, 'web_preview/index.html'), 'utf8');
 
-// UI 和关卡可以继续扩展，但旧主线的入口、模式和关键返回路径不得被裁掉。
+// UI 和关卡可以继续扩展。创造秘境本期正式下线，但代码与本地数据必须保留以便恢复。
 const requiredFunctions = [
   'drawMenu',
   'drawLevelSelect',
@@ -27,10 +27,16 @@ assert.match(game, /const GAME_TITLE = '怪奇之原'/, '首页正式标题必�
 assert.match(game, /sketchBold\(GAME_TITLE, W \/ 2, H \* 0\.34, 120\)/, '首页标题必须单行居中绘制');
 assert.match(index, /<title>怪奇之原 · F4 旷野版<\/title>/, '浏览器窗口标题必须与正式游戏名一致');
 assert.match(game, /gameState = 'levelSelect'/, '必须保留主线选关页');
-assert.match(game, /gameState='creatorList'/, '必须保留创造模式列表页');
-assert.match(game, /gameState='creatorEdit'/, '必须保留关卡编辑器页');
+assert.match(game, /const CREATOR_MODE_ENABLED = false/, '上线版本必须关闭创造秘境功能开关');
+const drawMenuSource = game.slice(game.indexOf('function drawMenu()'), game.indexOf('function _newCreatorDraft()'));
+assert.doesNotMatch(drawMenuSource, /创造秘境/, '首页不应再显示创造秘境入口');
+assert.match(drawMenuSource, /uiBTN\.creator = null/, '首页每帧都必须清空旧创造模式热区');
+assert.match(game, /creator-mode-route-blocked/, '被关闭的创造模式路径必须留下可诊断日志');
+assert.match(game, /function _enforceCreatorModeOffline\(source\)/, '必须在运行时拦截残留创造模式状态');
+assert.match(game, /v === 'creatorList' \|\| v === 'creatorEdit'/, '调试接口也不能绕过下线开关');
+assert.match(game, /const CREATOR_LS_KEY = 'smart_egg_creator_levels_v1'/, '必须保留既有创造模式本地数据键');
+assert.doesNotMatch(game, /removeItem\(CREATOR_LS_KEY\)/, '下线不能删除玩家原有创造模式数据');
 assert.match(game, /gameState = wasPaused \? 'playing' : 'paused'/, '必须保留顶部暂停按钮');
-assert.match(game, /gameState = _playingCustom \? 'creatorList' : 'levelSelect'/, '暂停返回必须按主线\/创造模式回到正确列表');
 assert.match(game, /_creatorHistory\.pop\(\)/, '编辑器撤销功能必须保留');
 assert.match(game, /_creatorSelected/, '编辑器元素选择\/移动功能必须保留');
 assert.match(game, /menu-export-log-click/, '日志导出功能必须保留');
@@ -60,4 +66,4 @@ assert.match(game, /collisionGeometryChanged:\s*false/, '视觉升级必须明�
 assert.match(game, /visualSidewalls:\s*'vertical'/, '日志必须记录断崖侧壁为垂直样式');
 assert.match(game, /extendsBelowViewport:\s*true/, '日志必须记录坑体延伸到视口外');
 
-console.log('主线功能守恒测试通过：首页、选关、暂停返回、创造模式、编辑器、控制与日志均保留。');
+console.log('主线功能守恒测试通过：首页、选关、暂停返回、控制与日志保留；创造秘境入口下线且本地数据保留。');

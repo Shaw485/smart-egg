@@ -6,8 +6,11 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 182;   // 跟 index.html 的 ?v=182 保持一致
+    const GAME_CODE_VERSION = 183;   // 跟 index.html 的 ?v=183 保持一致
     const GAME_TITLE = '怪奇之原';
+    // v183 上线收敛：保留创造秘境代码与本地存档，只关闭正式入口和运行路径。
+    // 重新开放时需恢复此运行时开关，并同步恢复平台适配构建开关；旧存档不会丢失。
+    const CREATOR_MODE_ENABLED = false;
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
         const last = parseInt(localStorage.getItem(LAST_KNOWN_KEY) || '0', 10);
@@ -631,7 +634,15 @@
       getState: () => gameState,
       getPageName: () => currentPageName(),
       PAGE_NAMES,
-      setState: (v) => { gameState = v; },
+      setState: (v) => {
+        if (!CREATOR_MODE_ENABLED && (v === 'creatorList' || v === 'creatorEdit')) {
+          logStep('feature', 'creator-mode-route-blocked', { source:'debug-set-state', requested:v, resolved:gameState });
+          return gameState;
+        }
+        gameState = v;
+        return gameState;
+      },
+      getFeatures: () => ({ creatorMode: { enabled:CREATOR_MODE_ENABLED, localData:'preserved' } }),
       getShowSuccess: () => showSuccess,
       getShowDead: () => showDead,
       getSuccessTimer: () => successTimer,
@@ -691,10 +702,10 @@
     const _logStartedAt = new Date().toISOString();
     window.__gameLogs = window.__gameLogs || [];
     const _logModules = new Map([
-        ['runtime',true],['state',true],['input',true],['mechanic',true],['level-load',true],
+        ['runtime',true],['lifecycle',true],['network',true],['storage',true],['state',true],['input',true],['mechanic',true],['level-load',true],
         ['door',true],['collide',true],['puzzle',true],['progress',true],['audio',true],
         ['creator',true],['export',true],['dead',true],['guard',true],['fatal',true],
-        ['snapshot',true],['debug',true],['level-select',true],['render',true],
+        ['snapshot',true],['debug',true],['feature',true],['level-select',true],['render',true],
         ['mechanic:bridge',true],['mechanic:gesture',true],['mechanic:transform',true],
         ['mechanic:hazard',true],['mechanic:direction',true],['mechanic:door',true],
         ['mechanic:terrain',true],['mechanic:erase',true],
@@ -705,6 +716,33 @@
     const _playerRing = [];
     // 同一平台的防瞬移诊断最多每秒一条，保留证据而不逐帧刷屏。
     const _horizontalSnapGuardLastAt = new Map();
+    function _mapEntriesToObject(map) {
+        const out = {};
+        map.forEach((value, key) => { out[key] = value; });
+        return out;
+    }
+    function _isSensitiveLogKey(key) {
+        const normalized = String(key || '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+        return /(password|passphrase|secret|token|authorization|cookie|privatekey|apikey|clientsecret|appsecret)/.test(normalized);
+    }
+    function _redactLogString(value) {
+        return String(value)
+            .replace(/-----BEGIN [^-\r\n]*PRIVATE KEY-----[\s\S]*?-----END [^-\r\n]*PRIVATE KEY-----/gi, '[REDACTED_PEM]')
+            .replace(/((?:authorization|cookie)\s*[:=]\s*)(?:Basic|Bearer)?\s*[^\r\n]+/gi, '$1[REDACTED]')
+            .replace(/((?:"|'|\b)?(?:access[_-]?token|refresh[_-]?token|id[_-]?token|token|password|passphrase|secret|app[_-]?secret|client[_-]?secret|api[_-]?key|private[_-]?key)(?:"|'|\b)?\s*[:=]\s*["']?)[^"'&,}\s]+/gi, '$1[REDACTED]')
+            .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, '[REDACTED_JWT]');
+    }
+    function _redactLogContext(value, depth=0) {
+        if (depth > 5) return '[depth-limited]';
+        if (Array.isArray(value)) return value.slice(0, 100).map(item => _redactLogContext(item, depth + 1));
+        if (typeof value === 'string') return _redactLogString(value);
+        if (!value || typeof value !== 'object') return value;
+        const clean = {};
+        for (const [key, item] of Object.entries(value)) {
+            clean[key] = _isSensitiveLogKey(key) ? '[REDACTED]' : _redactLogContext(item, depth + 1);
+        }
+        return clean;
+    }
     function _pushPlayerRing() {
         const snap = {
             f: frameCount,
@@ -724,7 +762,7 @@
             at: new Date().toISOString(),
             session: LOG_SESSION_ID,
             cat, tag,
-            kv: kv || {}
+            kv: _redactLogContext(kv || {})
         };
         window.__gameLogs.push(entry);
         if (window.__gameLogs.length > LOG_MAX) window.__gameLogs.shift();
@@ -760,11 +798,12 @@
         _logModules.set(String(category), !!enabled);
         return {category:String(category),enabled:!!enabled};
     };
-    window._logModuleStatus = function() { return Object.fromEntries(_logModules.entries()); };
+    window._logModuleStatus = function() { return _mapEntriesToObject(_logModules); };
     // 暴露 ring buffer 到 debug
     window.__debug.getLastPlayerSnaps = window._deadSnaps;
     window.__debug.setLogModule = window._setLogModule;
     window.__debug.getLogModules = window._logModuleStatus;
+    window.__debug.redactLogContext = value => _redactLogContext(value);
 
     function _runtimeSnapshot() {
         return {
@@ -776,11 +815,14 @@
             page: { href: location.href, protocol: location.protocol, online: navigator.onLine, visibility: document.visibilityState },
             device: { userAgent: navigator.userAgent, platform: navigator.platform, language: navigator.language, dpr: window.devicePixelRatio, viewport: { width: innerWidth, height: innerHeight } },
             backend: {
-                mode: location.protocol === 'file:' ? 'android-local-offline' : 'static-web-preview',
+                mode: window.__wxMiniGame ? 'wechat-minigame-offline' : (location.protocol === 'file:' ? 'android-local-offline' : 'static-web-preview'),
                 apiEndpoint: null,
                 note: '当前游戏无业务后端；关卡来自内置 levels_bundle.js 或本地 JSON。所有资源读取结果记录在 level-load/network 分类。'
             },
-            logging: { maxEntries: LOG_MAX, modules: Object.fromEntries(_logModules.entries()), verboseQuery: location.search.includes('verbose=1') },
+            features: {
+                creatorMode: { enabled: CREATOR_MODE_ENABLED, localData: 'preserved', storageKey: CREATOR_LS_KEY }
+            },
+            logging: { maxEntries: LOG_MAX, modules: _mapEntriesToObject(_logModules), verboseQuery: location.search.includes('verbose=1') },
             game: {
                 pageName: currentPageName(),
                 state: gameState, levelIndex: currentLevelIndex,
@@ -800,6 +842,9 @@
             format: 'smart-egg-diagnostic-log', schemaVersion: 1,
             runtime: _runtimeSnapshot(),
             recentPlayerFrames: _playerRing.slice(),
+            adapterLogs: Array.isArray(window.__SMART_EGG_ADAPTER_DIAGNOSTICS__)
+                ? window.__SMART_EGG_ADAPTER_DIAGNOSTICS__.slice()
+                : [],
             logs: window.__gameLogs.slice()
         };
         const text = JSON.stringify(report, null, 2);
@@ -808,7 +853,7 @@
         try {
             if (window.AndroidLogExporter && typeof window.AndroidLogExporter.exportLog === 'function') {
                 window.AndroidLogExporter.exportLog(filename, text);
-                logStep('export', 'android-export-dispatched', { filename, bytes: text.length });
+                logStep('export', 'native-export-dispatched', { platform:window.__wxMiniGame?'wechat-minigame':'android', filename, bytes: text.length });
                 return;
             }
             const blob = new Blob([text], { type: 'application/json;charset=utf-8' });
@@ -3380,7 +3425,7 @@
         uiBTN.exportLog = { x: logX, y: logY, w: logW, h: logH };
         // 正式游戏名：单行居中，保留 F4 旷野视觉的留白。
         sketchBold(GAME_TITLE, W / 2, H * 0.34, 120);
-        const bw = W * 0.28, bh = 135, gap=70, bx = W/2-bw-gap/2, by = H * 0.58;
+        const bw = W * 0.32, bh = 135, bx = W / 2 - bw / 2, by = H * 0.58;
         // 开始按钮（不规则圆角方形白底黑描边）
         ctx.save();
         ctx.fillStyle = '#fff0bd';
@@ -3389,19 +3434,27 @@
         _wonkyRectPath(bx, by, bw, bh, 52, 55555, 2.5); ctx.stroke();
         ctx.restore();
         sketchBold('踏上旅途', bx + bw / 2, by + bh / 2 + 10, 50);
-        const cbx=W/2+gap/2;
-        ctx.save();ctx.fillStyle='#fff0bd';_wonkyRectPath(cbx,by,bw,bh,52,55595,2.5);ctx.fill();ctx.strokeStyle='#17343a';ctx.lineWidth=5;_wonkyRectPath(cbx,by,bw,bh,52,55595,2.5);ctx.stroke();ctx.restore();
-        sketchBold('创造秘境',cbx+bw/2,by+bh/2+10,50);
         sketchText('© 2024 MVP Demo', W / 2, H - 52, 24, 'center', false, 'rgba(0,0,0,0.4)');
         uiBTN.start = { x: bx, y: by, w: bw, h: bh };
-        uiBTN.creator = { x: cbx, y: by, w: bw, h: bh };
+        uiBTN.creator = null;
     }
 
     function _newCreatorDraft() {
         return { id:'custom-'+Date.now(), name:'我的脑洞关卡 '+(_creatorLevels.length+1), type:'custom', mechanics:[], no_fall:true, infinite_horizontal:false, expand_up:false, map_extent:{left:0,right:0,up:0}, description:{hint_l1:'找到办法进入终点门。'}, world_size:{w:1920,h:1080}, spawn:{x:300,y:810}, platforms:[{x:960,y:1090,w:1920,h:440,kind:'ground'}], doors:[{id:'custom_entry',x:300,y:765,w:150,h:210,is_goal:false},{id:'custom_goal',x:1540,y:765,w:150,h:210,is_goal:true}], crates:[], keys:[], question_blocks:[], decor:[] };
     }
-    function _saveCreatorLevels() { localStorage.setItem(CREATOR_LS_KEY,JSON.stringify(_creatorLevels)); }
+    function _saveCreatorLevels() {
+        if(!CREATOR_MODE_ENABLED){
+            logStep('feature','creator-mode-route-blocked',{source:'creator-save',requested:'storage-write',resolved:gameState});
+            return false;
+        }
+        localStorage.setItem(CREATOR_LS_KEY,JSON.stringify(_creatorLevels));
+        return true;
+    }
     function _saveCreatorDraftToList() {
+        if(!CREATOR_MODE_ENABLED){
+            logStep('feature','creator-mode-route-blocked',{source:'creator-draft-save',requested:'creatorList',resolved:gameState});
+            return;
+        }
         if(!_creatorDraft)return;
         const idx=_creatorLevels.findIndex(x=>x.id===_creatorDraft.id);
         const saved=JSON.parse(JSON.stringify(_creatorDraft));
@@ -3501,6 +3554,10 @@
         logStep('creator','share-code-input-close',{});
     }
     function _submitCodeInput(){
+        if(!CREATOR_MODE_ENABLED){
+            logStep('feature','creator-mode-route-blocked',{source:'level-code-submit',requested:'creatorList',resolved:gameState});
+            return;
+        }
         const raw=_codeInput.value.trim();
         if(!raw){_codeError.textContent='请先粘贴关卡码';_codeInput.focus();return;}
         try{
@@ -3514,6 +3571,10 @@
         }
     }
     function _openCodeInput(){
+        if(!CREATOR_MODE_ENABLED){
+            logStep('feature','creator-mode-route-blocked',{source:'level-code-input',requested:'creatorList',resolved:gameState});
+            return;
+        }
         if(!_codeDialog)return;
         _codeDialog.hidden=false;_codeInput.value='';_codeError.textContent='';
         // 必须由点击事件直接触发真实表单 focus，Android/iOS 才会拉起系统键盘。
@@ -3525,6 +3586,27 @@
         document.getElementById('level-code-submit').addEventListener('click',_submitCodeInput);
         document.getElementById('level-code-cancel').addEventListener('click',_closeCodeInput);
         _codeInput.addEventListener('keydown',e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();_submitCodeInput();}});
+    }
+
+    function _enforceCreatorModeOffline(source) {
+        if (CREATOR_MODE_ENABLED) return false;
+        const creatorState = gameState === 'creatorList' || gameState === 'creatorEdit';
+        if (!creatorState && !_playingCustom) return false;
+        const requested = _playingCustom ? 'custom-play' : gameState;
+        gameState = 'menu';
+        _playingCustom = false;
+        _creatorShareCode = '';
+        _creatorImportPreview = null;
+        _creatorDeleteConfirmIndex = -1;
+        _creatorBindingMode = false;
+        if (_codeDialog) {
+            _codeDialog.hidden = true;
+            if (_codeInput) _codeInput.blur();
+            if (_codeError) _codeError.textContent = '';
+        }
+        _resetAllInput('creator-mode-offline', { clearHeldKeyboard:true, clearBlockedKeyboard:true });
+        logStep('feature','creator-mode-route-blocked',{source,requested,resolved:'menu',localData:'preserved'});
+        return true;
     }
 
     function _syncCreatorGround(){
@@ -3658,6 +3740,10 @@
         sketchText(_creatorTool==='select'?'选择/移动：先点已有元素，再点目标位置。':'移动视野后可在上方、左侧、右侧继续摆放元素。',W/2,995,23);
     }
     function _playCreatorDraft() {
+        if(!CREATOR_MODE_ENABLED){
+            logStep('feature','creator-mode-route-blocked',{source:'custom-play',requested:'playing',resolved:gameState});
+            return;
+        }
         _playingCustom=true; levelData=JSON.parse(JSON.stringify(_creatorDraft)); currentLevelIndex=-1;
         _cachedLevels[-1]=levelData; if(!_availableLevels.includes(-1))_availableLevels.push(-1); loadLevelAndStart();
         logStep('creator','custom-play',{id:levelData.id,name:levelData.name});
@@ -3889,6 +3975,7 @@
         return _setControlSource(sourceId, name, isDown);
     }
     function handleDown(p) {
+        if (_enforceCreatorModeOffline('pointer-input')) return;
         if (_passwordVisible) {
             for (const b of uiBTN.passwordKeys || []) if (inRect(p,b)) {
                 if (b.key === 'close') { _passwordVisible=false; _passwordInput=''; _passwordDismissUntil=performance.now()+900; logStep('puzzle','password-panel-close',{}); return; }
@@ -3919,7 +4006,7 @@
                 _setLevelSelectPage(0, 'menu-button-open');
                 logStep('state', 'menu→levelSelect', {});
             }
-            if (inRect(p, uiBTN.creator)) { gameState='creatorList'; logStep('state','menu→creatorList',{}); }
+            if (CREATOR_MODE_ENABLED && inRect(p, uiBTN.creator)) { gameState='creatorList'; logStep('state','menu→creatorList',{}); }
             return;
         }
         if (gameState === 'creatorList') {
@@ -4853,6 +4940,7 @@
         if (dt > 0.05) dt = 0.05;
         last = now;
         frameCount++;
+        _enforceCreatorModeOffline('frame-guard');
         if (frameCount % 60 === 0) {
             logStep('snapshot', 'one-second-state', {
                 gameState, levelIndex: currentLevelIndex, showSuccess, showDead,
@@ -5288,6 +5376,7 @@
     (async function main() {
         resize();
         logStep('lifecycle', 'session-start', _runtimeSnapshot());
+        logStep('feature', 'creator-mode-status', { enabled:CREATOR_MODE_ENABLED, localData:'preserved', storageKey:CREATOR_LS_KEY });
         // v4.9.6 启动时探测所有可用关卡
         await probeAvailableLevels();
         // 预加载第 0 关数据（菜单页背景用不到，只是启动热身）
@@ -5300,6 +5389,9 @@
         } else if (requestedScreen === 'menu') {
             gameState = 'menu';
             logStep('state', 'startup-route', { requested: requestedScreen, resolved: gameState });
+        } else if (!CREATOR_MODE_ENABLED && (requestedScreen === 'creatorList' || requestedScreen === 'creatorEdit')) {
+            gameState = 'menu';
+            logStep('feature', 'creator-mode-route-blocked', { source:'startup-route', requested:requestedScreen, resolved:gameState });
         }
         if (new URLSearchParams(location.search).get('inputtest') === '1') {
             setTimeout(() => {

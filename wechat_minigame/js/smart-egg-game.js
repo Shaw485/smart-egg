@@ -27,7 +27,11 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 163;   // 微信开发者工具 A/D/空格实体键盘控制；网页/Android 主线仍保持 v159
+    const GAME_CODE_VERSION = 183;   // 跟 index.html 的 ?v=183 保持一致
+    const GAME_TITLE = '怪奇之原';
+    // v183 上线收敛：保留创造秘境代码与本地存档，只关闭正式入口和运行路径。
+    // 重新开放时需恢复此运行时开关，并同步恢复平台适配构建开关；旧存档不会丢失。
+    const CREATOR_MODE_ENABLED = false;
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
         const last = parseInt(localStorage.getItem(LAST_KNOWN_KEY) || '0', 10);
@@ -51,13 +55,24 @@
     const W = 1920, H = 1080;
     const FANTASY_TITLES = [
         '风起之门', '云阶试炼', '锁语遗迹', '断崖双跃',
-        '守门人的礼仪', '花之暗号', '逃走的门'
+        '守门人的礼仪', '花之暗号', '逃走的门',
+        '日影无声', '等风来', '纸上有路', '痕迹未散', '远方未远',
+        '进退之间', '方向借走了', '小一点', '屏住一下',
+        '别看它', '同频的门', '地面换班', '墙也会忘'
     ];
     const GRAVITY = 2000.0;
     const MAX_FALL = 1200.0;
     const MOVE_SPEED = 300.0;
     const JUMP_VELOCITY = -1080.0;
     const HALF_W = 40.0, HALF_H = 60.0;
+    const PHYSICS_COLLISION = window.SmartEggPhysicsCollision;
+    const ACCEPTED_MECHANICS = window.SmartEggAcceptedMechanics;
+    if (!PHYSICS_COLLISION || typeof PHYSICS_COLLISION.resolveHorizontalPlatformCollision !== 'function') {
+        throw new Error('physics-collision.js 未加载，无法安全启动横向碰撞');
+    }
+    if (!ACCEPTED_MECHANICS || typeof ACCEPTED_MECHANICS.validateInkStroke !== 'function') {
+        throw new Error('accepted-mechanics.js 未加载，无法启动已评审关卡');
+    }
     // v4.9.5 成功进门动画：3阶段 2 秒 = 120 帧
     //   阶段1 (120→80): 0~40帧  门打开动画
     //   阶段2 (80→20):  40~100帧  蛋滑入+被吸入+缩小到0消失
@@ -125,6 +140,22 @@
     let _creatorShareCode = '';
     let _creatorShareIndex = -1;
     let _creatorImportPreview = null;
+    // 第 8–12 关独立机制状态：每关可单独日志和复位，不污染其他关卡。
+    let _sceneDrag = null;
+    let _shadowSunX = 100, _shadowSunMoved = false, _shadowTipX = 0, _shadowHold = 0, _shadowUnlocked = false;
+    let _stillTime = 0, _stillApproachLogged = false, _stillDoorReadyLogged = false;
+    let _wordPlaced = false, _wordDragPos = {x:0,y:0};
+    let _persistentCrateCount = 1;
+    let _persistentLevelActive = false;
+    let _lastStaticCrateLandingId = null;
+    let _dragWorldOffset = 0;
+    // 第 13–20 关来自独立评审池。状态全部按关卡复位，并通过细分日志模块独立排查。
+    let _acceptedDualHold = 0, _acceptedDualBuilt = false, _acceptedDualStarted = false;
+    let _acceptedInkPath = [], _acceptedInkBuilt = false, _acceptedInkErrorUntil = 0;
+    let _acceptedPlayerSmall = false, _acceptedFreezePointer = false;
+    let _acceptedFacing = 1, _acceptedFaceHold = 0, _acceptedFaceUnlocked = false;
+    let _acceptedDoorVY = 0, _acceptedDoorLocked = false;
+    let _acceptedGroundPhase = 0, _acceptedWallErase = 0;
     function _mechanicsOf(lv) {
         if(!lv)return [];
         if(Array.isArray(lv.mechanics))return lv.mechanics.filter(x=>x&&x!=='normal');
@@ -135,6 +166,438 @@
         return result;
     }
     function _hasMechanic(name) { return _mechanicsOf(levelData).includes(name); }
+    function _sceneGestureBlockedByUI(p) {
+        // “路”字位于提示框上方且仍清晰可见：用户照着提示按住它时，允许同一次按下
+        // 自动收起提示并开始拖拽。成功/死亡弹层与顶部按钮仍保持完全阻断。
+        const visibleWordHandle = helpVisible && _hasMechanic('word_bridge') && !_wordPlaced
+            && inRect(p, _wordHomeRect());
+        const overlayVisible = showSuccess || showDead || (helpVisible && !visibleWordHandle);
+        const topButton = [uiBTN.help, uiBTN.restart, uiBTN.pause].some(rect => inRect(p, rect));
+        return overlayVisible || topButton;
+    }
+    function _resetMainlineMechanicState() {
+        _sceneDrag = null;
+        _shadowSunX = Number(levelData && levelData.sun && levelData.sun.x) || 100;
+        _shadowSunMoved = false;
+        _shadowTipX = 0;
+        _shadowHold = 0;
+        _shadowUnlocked = false;
+        _stillTime = 0;
+        _stillApproachLogged = false;
+        _stillDoorReadyLogged = false;
+        _wordPlaced = false;
+        _wordDragPos = {x:0,y:0};
+        _lastStaticCrateLandingId = null;
+        _dragWorldOffset = 0;
+        _acceptedDualHold = 0;
+        _acceptedDualBuilt = false;
+        _acceptedDualStarted = false;
+        _acceptedInkPath = [];
+        _acceptedInkBuilt = false;
+        _acceptedInkErrorUntil = 0;
+        _acceptedPlayerSmall = false;
+        _acceptedFreezePointer = false;
+        _acceptedFacing = 1;
+        _acceptedFaceHold = 0;
+        _acceptedFaceUnlocked = false;
+        _acceptedDoorVY = 0;
+        _acceptedDoorLocked = false;
+        _acceptedGroundPhase = 0;
+        _acceptedWallErase = 0;
+        logStep('mechanic', 'level-mechanic-reset', {
+            levelIndex: currentLevelIndex,
+            mechanics: _mechanicsOf(levelData),
+            persistentCrates: _persistentCrateCount,
+            reviewSourceId: levelData && levelData.source_review_id || null
+        });
+    }
+    function _acceptedBridgeGeometry(kind) {
+        const ink = kind === 'ink_path';
+        const left = ink ? 650 : 720;
+        const right = ink ? 1270 : 1200;
+        return {
+            left,
+            right,
+            top: 870,
+            platform: {
+                id: ink ? 'accepted_ink_bridge' : 'accepted_dual_bridge',
+                x: (left + right) / 2,
+                y: 894,
+                w: right - left,
+                h: 48,
+                kind: ink ? 'ink_bridge' : 'dual_bridge'
+            }
+        };
+    }
+    function _ensureAcceptedBridge(kind) {
+        const geometry = _acceptedBridgeGeometry(kind);
+        if (!(levelData.platforms || []).some(platform => platform.id === geometry.platform.id)) {
+            levelData.platforms.push({...geometry.platform});
+            logStep('mechanic:bridge', 'accepted-bridge-created', {
+                levelIndex: currentLevelIndex,
+                sourceReviewId: levelData.source_review_id,
+                mechanic: kind,
+                platform: geometry.platform
+            });
+        }
+        return geometry;
+    }
+    function _setAcceptedGroundPhase(phase, source) {
+        const next = phase === 1 ? 1 : 0;
+        const before = _acceptedGroundPhase;
+        _acceptedGroundPhase = next;
+        levelData.platforms = (levelData.platforms || []).filter(platform => platform.id !== 'ground_phase_bridge');
+        levelData.platforms.push(next === 0
+            ? {id:'ground_phase_bridge',x:795,y:882,w:350,h:24,kind:'phase_bridge'}
+            : {id:'ground_phase_bridge',x:1125,y:882,w:350,h:24,kind:'phase_bridge'});
+        if (before !== next) {
+            playSfx('unlock');
+            logStep('mechanic:terrain', 'ground-phase-change', {
+                levelIndex: currentLevelIndex,
+                sourceReviewId: levelData.source_review_id,
+                before,
+                after: next,
+                source,
+                playerX: Math.round(player.x)
+            });
+        }
+    }
+    function _acceptedFreezeHeld() {
+        return _acceptedFreezePointer || Array.from(_controlSources.values()).includes('freeze');
+    }
+    function _acceptedDoorGateOpen() {
+        if (_hasMechanic('dual_bridge')) return _acceptedDualBuilt;
+        if (_hasMechanic('ink_path')) return _acceptedInkBuilt;
+        if (_hasMechanic('shrink_tunnel')) return _acceptedPlayerSmall;
+        if (_hasMechanic('face_away')) return _acceptedFaceUnlocked;
+        if (_hasMechanic('door_jumps')) return _acceptedDoorLocked;
+        if (_hasMechanic('ground_swap')) return _acceptedGroundPhase === 1;
+        if (_hasMechanic('erase_wall')) return _acceptedWallErase >= 1;
+        return true;
+    }
+    function _acceptedGoalDoor() {
+        return (levelData && levelData.doors || []).find(door => door.is_goal) || null;
+    }
+    function _wordTitleLayout() {
+        const y = currentLevelIndex === 3 ? 190 : 74;
+        const size = 58;
+        const step = 64;
+        const firstX = W / 2 - step * 1.5;
+        return {
+            y, size, step,
+            chars: ['纸','上','有','路'].map((char,index)=>({char,x:firstX+index*step})),
+            roadX: firstX + step * 3
+        };
+    }
+    function _wordHomeRect() {
+        const layout = _wordTitleLayout();
+        return {x:layout.roadX-layout.step/2,y:layout.y-layout.step/2,w:layout.step,h:layout.step};
+    }
+    function _wordBridgeGeometry() {
+        const grounds = (levelData && levelData.platforms || [])
+            .filter(item => (item.kind || 'ground') === 'ground')
+            .slice()
+            .sort((a,b) => a.x - b.x);
+        const left = grounds[0] || {x:360,y:1090,w:720,h:440};
+        const right = grounds[grounds.length - 1] || {x:1550,y:1090,w:740,h:440};
+        const gapLeft = left.x + left.w / 2;
+        const gapRight = right.x - right.w / 2;
+        const groundTop = Math.min(left.y - left.h / 2, right.y - right.h / 2);
+        const gapWidth = Math.max(120, gapRight - gapLeft);
+        const bridgeH = 60;
+        return {
+            gapLeft,
+            gapRight,
+            groundTop,
+            dropZone: {x:gapLeft-90,y:groundTop-330,w:gapWidth+180,h:390},
+            bridge: {id:'word_bridge_surface',x:(gapLeft+gapRight)/2,y:groundTop+bridgeH/2,w:gapWidth,h:bridgeH,kind:'word_bridge'},
+            token: {x:(gapLeft+gapRight)/2,y:groundTop-20}
+        };
+    }
+    function _beginSceneGesture(p, pointerId) {
+        if (gameState !== 'playing' || !levelData) return false;
+        // 新增的场景拖拽不能抢走旧 UI：提示、重来、暂停和弹层永远先交给 handleDown。
+        if (_sceneGestureBlockedByUI(p)) {
+            logStep('mechanic', 'scene-gesture-bypassed-ui', {
+                pointerId,
+                x: Math.round(p.x),
+                y: Math.round(p.y),
+                helpVisible: !!helpVisible,
+                showSuccess: !!showSuccess,
+                showDead: !!showDead
+            });
+            return false;
+        }
+        const world = {x:p.x+_cameraX,y:p.y+_cameraY};
+        if (_hasMechanic('shadow_switch')) {
+            const dx = world.x - _shadowSunX, dy = world.y - 220;
+            if (dx*dx + dy*dy <= 95*95) {
+                _sceneDrag = {type:'sun',pointerId,lastPoint:p,startSunX:_shadowSunX};
+                logStep('mechanic','shadow-drag-start',{pointerId,sunX:Math.round(_shadowSunX)});
+                return true;
+            }
+        }
+        if (_hasMechanic('word_bridge') && !_wordPlaced && inRect(p,_wordHomeRect())) {
+            if (helpVisible) {
+                helpVisible = false;
+                logStep('state','help-auto-close-for-gesture',{pointerId,gesture:'word-drag',levelIndex:currentLevelIndex});
+            }
+            _sceneDrag = {type:'word',pointerId,lastPoint:p};
+            _wordDragPos = world;
+            const geometry = _wordBridgeGeometry();
+            logStep('mechanic','word-drag-start',{pointerId,token:'路',dropZone:geometry.dropZone});
+            return true;
+        }
+        if (_hasMechanic('ink_path')) {
+            const canStart = world.x >= 540 && world.x <= 760 && world.y >= 600 && world.y <= 875;
+            if (!canStart) {
+                logStep('mechanic:gesture','ink-start-rejected',{pointerId,x:Math.round(world.x),y:Math.round(world.y),reason:'outside-left-bank'});
+                return false;
+            }
+            _acceptedInkPath = [world];
+            _sceneDrag = {type:'accepted-ink',pointerId,lastPoint:p,lastWorld:world,length:0};
+            logStep('mechanic:gesture','ink-stroke-start',{pointerId,x:Math.round(world.x),y:Math.round(world.y),maxLength:1100});
+            return true;
+        }
+        if (_hasMechanic('freeze_spikes') && p.y < 850) {
+            _acceptedFreezePointer = true;
+            _sceneDrag = {type:'accepted-freeze',pointerId,lastPoint:p};
+            logStep('mechanic:hazard','hazards-freeze-start',{pointerId,input:'pointer'});
+            return true;
+        }
+        if (_hasMechanic('erase_wall') && world.x >= 870 && world.x <= 1050 && world.y >= 390 && world.y <= 875) {
+            _sceneDrag = {type:'accepted-erase',pointerId,lastPoint:p,lastWorld:world};
+            logStep('mechanic:erase','wall-erase-start',{pointerId,progress:Number(_acceptedWallErase.toFixed(3))});
+            return true;
+        }
+        if (_hasMechanic('shrink_tunnel') && Math.abs(world.x-player.x)<=90 && Math.abs(world.y-player.y)<=110) {
+            _acceptedPlayerSmall = !_acceptedPlayerSmall;
+            playSfx('unlock');
+            logStep('mechanic:transform','player-size-toggle',{pointerId,small:_acceptedPlayerSmall,playerX:Math.round(player.x),playerY:Math.round(player.y)});
+            return true;
+        }
+        if (_hasMechanic('door_jumps')) {
+            const door = _acceptedGoalDoor();
+            if (door && inRect(world,{x:door.x-door.w/2-20,y:door.y-door.h/2-24,w:door.w+40,h:door.h+48}) && door.y < 720) {
+                _acceptedDoorLocked = true;
+                _acceptedDoorVY = 0;
+                playSfx('unlock');
+                logStep('mechanic:door','airborne-door-locked',{pointerId,doorX:Math.round(door.x),doorY:Math.round(door.y)});
+                return true;
+            }
+        }
+        if (_hasMechanic('ground_swap') && world.y > 690 && world.y < 890) {
+            if (world.x > 560 && world.x < 760) {
+                _setAcceptedGroundPhase(0,'left-grass');
+                return true;
+            }
+            if (world.x > 1140 && world.x < 1390) {
+                _setAcceptedGroundPhase(1,'right-grass');
+                return true;
+            }
+        }
+        if (_hasMechanic('drag_world') && p.y < 850) {
+            _sceneDrag = {type:'world',pointerId,lastX:p.x,lastPoint:p};
+            logStep('mechanic','world-drag-start',{pointerId,offset:Math.round(_dragWorldOffset)});
+            return true;
+        }
+        return false;
+    }
+    function _moveSceneGesture(p, pointerId) {
+        if (!_sceneDrag || _sceneDrag.pointerId !== pointerId) return false;
+        _sceneDrag.lastPoint = p;
+        const world = {x:p.x+_cameraX,y:p.y+_cameraY};
+        if (_sceneDrag.type === 'sun') {
+            const nextSunX = Math.max(90,Math.min(1510,world.x));
+            if (!_shadowSunMoved && Math.abs(nextSunX-_sceneDrag.startSunX)>=12) {
+                _shadowSunMoved = true;
+                logStep('mechanic','shadow-drag-armed',{pointerId,startSunX:Math.round(_sceneDrag.startSunX),sunX:Math.round(nextSunX),minimumDelta:12});
+            }
+            _shadowSunX = nextSunX;
+        } else if (_sceneDrag.type === 'word') {
+            _wordDragPos = world;
+        } else if (_sceneDrag.type === 'accepted-ink') {
+            const previous = _sceneDrag.lastWorld || world;
+            const distance = Math.hypot(world.x-previous.x,world.y-previous.y);
+            if(distance>=8){
+                _sceneDrag.length += distance;
+                _sceneDrag.lastWorld = world;
+                _acceptedInkPath.push(world);
+            }
+        } else if (_sceneDrag.type === 'accepted-erase') {
+            const previous = _sceneDrag.lastWorld || world;
+            const distance = Math.hypot(world.x-previous.x,world.y-previous.y);
+            _sceneDrag.lastWorld = world;
+            const before = _acceptedWallErase;
+            _acceptedWallErase = ACCEPTED_MECHANICS.eraseProgress(_acceptedWallErase,distance);
+            if(before<1&&_acceptedWallErase>=1){
+                playSfx('unlock');
+                logStep('mechanic:erase','wall-erased',{pointerId,totalDistance:Math.round((_sceneDrag.totalDistance||0)+distance)});
+            }
+            _sceneDrag.totalDistance = (_sceneDrag.totalDistance||0)+distance;
+        } else if (_sceneDrag.type === 'world') {
+            const delta = p.x - _sceneDrag.lastX;
+            _sceneDrag.lastX = p.x;
+            const previous = _dragWorldOffset;
+            _dragWorldOffset = Math.max(-3000,Math.min(0,_dragWorldOffset + delta));
+            const door = (levelData.doors||[]).find(d=>d.is_goal);
+            if (door) door.x += _dragWorldOffset - previous;
+        }
+        return true;
+    }
+    function _endSceneGesture(p, pointerId, reason) {
+        if (!_sceneDrag || _sceneDrag.pointerId !== pointerId) return false;
+        const drag = _sceneDrag;
+        p = p || drag.lastPoint || {x:0,y:0};
+        _sceneDrag = null;
+        if (drag.type === 'word') {
+            const world = {x:p.x+_cameraX,y:p.y+_cameraY};
+            const geometry = _wordBridgeGeometry();
+            const accepted = inRect(world,geometry.dropZone);
+            if (accepted) {
+                _wordPlaced = true;
+                _wordDragPos = geometry.token;
+                if (!(levelData.platforms||[]).some(item=>item.kind==='word_bridge')) {
+                    levelData.platforms.push({...geometry.bridge});
+                }
+                playSfx('unlock');
+                logStep('mechanic','word-bridge-created',{
+                    pointerId,
+                    gapLeft:Math.round(geometry.gapLeft),
+                    gapRight:Math.round(geometry.gapRight),
+                    groundTop:Math.round(geometry.groundTop),
+                    bridge:geometry.bridge
+                });
+            }
+            const rejectReason = accepted ? null :
+                (world.x < geometry.dropZone.x || world.x > geometry.dropZone.x + geometry.dropZone.w
+                    ? 'outside-horizontal' : 'outside-vertical');
+            logStep('mechanic','word-drop',{
+                accepted,pointerId,
+                screen:{x:Math.round(p.x),y:Math.round(p.y)},
+                world:{x:Math.round(world.x),y:Math.round(world.y)},
+                dropZone:geometry.dropZone,
+                rejectReason,
+                reason
+            });
+        } else if (drag.type === 'sun') {
+            logStep('mechanic','shadow-drag-end',{pointerId,sunX:Math.round(_shadowSunX),shadowTipX:Math.round(_shadowTipX),moved:_shadowSunMoved,reason});
+        } else if (drag.type === 'accepted-ink') {
+            const result = ACCEPTED_MECHANICS.validateInkStroke(_acceptedInkPath);
+            _acceptedInkBuilt = !!result.valid;
+            if(_acceptedInkBuilt){_ensureAcceptedBridge('ink_path');playSfx('unlock');}
+            else _acceptedInkErrorUntil=performance.now()+1400;
+            logStep('mechanic:gesture','ink-stroke-end',{pointerId,accepted:result.valid,rejectReason:result.reason,length:Math.round(result.length),points:_acceptedInkPath.length,reason});
+        } else if (drag.type === 'accepted-freeze') {
+            _acceptedFreezePointer = false;
+            logStep('mechanic:hazard','hazards-freeze-end',{pointerId,reason});
+        } else if (drag.type === 'accepted-erase') {
+            logStep('mechanic:erase','wall-erase-end',{pointerId,progress:Number(_acceptedWallErase.toFixed(3)),erased:_acceptedWallErase>=1,distance:Math.round(drag.totalDistance||0),reason});
+        } else if (drag.type === 'world') {
+            const door = (levelData.doors||[]).find(d=>d.is_goal);
+            logStep('mechanic','world-drag-end',{pointerId,offset:Math.round(_dragWorldOffset),doorX:door&&Math.round(door.x),reason});
+        }
+        return true;
+    }
+    function _updateNewLevelMechanics(dt) {
+        if (_hasMechanic('shadow_switch')) {
+            _shadowTipX = Math.max(30,Math.min(W-30,player.x+(player.x-_shadowSunX)*1.75));
+            const cfg = levelData.shadow_switch || {x:820,hold_seconds:.65};
+            // 人物走动也会改变影尖位置；未真实拖动太阳时禁止机关积累计时。
+            const touching = _shadowSunMoved && Math.abs(_shadowTipX-cfg.x)<78;
+            _shadowHold = touching ? _shadowHold+dt : Math.max(0,_shadowHold-dt*2);
+            if (!_shadowUnlocked && _shadowHold >= (cfg.hold_seconds||.65)) {
+                _shadowUnlocked = true;
+                const door=(levelData.doors||[]).find(d=>d.is_goal);
+                if(door)unlockedDoors.add(door.id);
+                playSfx('unlock');
+                logStep('mechanic','shadow-switch-unlocked',{sunX:Math.round(_shadowSunX),shadowTipX:Math.round(_shadowTipX),sunMoved:_shadowSunMoved,hold:Number(_shadowHold.toFixed(2))});
+            }
+        }
+        if (_hasMechanic('still_door')) {
+            const door=(levelData.doors||[]).find(d=>d.is_goal);
+            if(!door)return;
+            const direction=(input.right?1:0)-(input.left?1:0);
+            const active=direction!==0||input.jumpHeld||Math.abs(player.vy)>35;
+            if(active){
+                if(_stillTime>.08)logStep('mechanic','stillness-broken',{heldSeconds:Number(_stillTime.toFixed(2)),playerX:Math.round(player.x),doorX:Math.round(door.x)});
+                _stillTime=0;_stillApproachLogged=false;
+                if(direction)door.x+=direction*MOVE_SPEED*dt;
+                door.x=Math.max(player.x+520,door.x);
+            }else{
+                _stillTime+=dt;
+                const delay=Number(levelData.idle_delay)||2.2;
+                if(_stillTime>delay){
+                    const approachOffset = Number(levelData.approach_offset) || 55;
+                    const targetX = player.x + approachOffset;
+                    if(!_stillApproachLogged){_stillApproachLogged=true;logStep('mechanic','stillness-approach-start',{delay,approachOffset,targetX:Math.round(targetX),playerX:Math.round(player.x),doorX:Math.round(door.x)});}
+                    door.x+=(targetX-door.x)*Math.min(1,dt*1.35);
+                    const overlap = rectOverlapArea(
+                        player.x-HALF_W,player.y-HALF_H,HALF_W*2,HALF_H*2,
+                        door.x-door.w/2,door.y-door.h/2,door.w,door.h
+                    );
+                    const threshold = HALF_W*2*HALF_H*2*.5;
+                    if(!_stillDoorReadyLogged && overlap>=threshold){
+                        _stillDoorReadyLogged=true;
+                        logStep('mechanic','stillness-door-overlap-ready',{overlap:Math.round(overlap),threshold,approachOffset,playerX:Math.round(player.x),doorX:Math.round(door.x)});
+                    }
+                }
+            }
+        }
+        if (_hasMechanic('dual_bridge')) {
+            const both = !!input.left && !!input.right;
+            const before = _acceptedDualHold;
+            _acceptedDualHold = ACCEPTED_MECHANICS.advanceHold(_acceptedDualHold,both,dt,1);
+            if(both&&!_acceptedDualStarted){
+                _acceptedDualStarted=true;
+                logStep('mechanic:bridge','dual-hold-start',{requiredSeconds:1,sourceReviewId:levelData.source_review_id});
+            }
+            if(!both&&_acceptedDualStarted&&!_acceptedDualBuilt){
+                _acceptedDualStarted=false;
+                logStep('mechanic:bridge','dual-hold-cancel',{heldSeconds:Number(before.toFixed(3))});
+            }
+            if(!_acceptedDualBuilt&&_acceptedDualHold>=1){
+                _acceptedDualBuilt=true;
+                _ensureAcceptedBridge('dual_bridge');
+                playSfx('unlock');
+                logStep('mechanic:bridge','dual-hold-complete',{heldSeconds:Number(_acceptedDualHold.toFixed(3))});
+            }
+        }
+        const liveDirection=(input.right?1:0)-(input.left?1:0);
+        if(liveDirection!==0)_acceptedFacing=liveDirection;
+        if(_hasMechanic('face_away')){
+            const door=_acceptedGoalDoor();
+            const close=door&&Math.abs(player.x-door.x)<235;
+            const active=!!close&&_acceptedFacing<0&&liveDirection===0&&player.onGround;
+            const before=_acceptedFaceHold;
+            _acceptedFaceHold=active?Math.min(1.2,_acceptedFaceHold+dt):Math.max(0,_acceptedFaceHold-dt*2);
+            if(Math.floor(before*4)!==Math.floor(_acceptedFaceHold*4)){
+                logStep('mechanic:direction','face-away-progress',{seconds:Number(_acceptedFaceHold.toFixed(2)),requiredSeconds:1.2,playerX:Math.round(player.x),doorX:door&&Math.round(door.x)});
+            }
+            if(!_acceptedFaceUnlocked&&_acceptedFaceHold>=1.2){
+                _acceptedFaceUnlocked=true;
+                playSfx('unlock');
+                logStep('mechanic:direction','face-away-unlocked',{playerX:Math.round(player.x),doorX:door&&Math.round(door.x)});
+            }
+        }
+        if(_hasMechanic('door_jumps')){
+            const door=_acceptedGoalDoor();
+            if(door&&!_acceptedDoorLocked){
+                _acceptedDoorVY=Math.min(1200,_acceptedDoorVY+GRAVITY*dt);
+                door.y+=_acceptedDoorVY*dt;
+                if(door.y>=765){door.y=765;_acceptedDoorVY=0;}
+            }
+        }
+        if(_hasMechanic('freeze_spikes')&&!_acceptedFreezeHeld()&&player.x>760&&player.x<1320){
+            const dangerous=Math.sin(frameCount*.15)>-.25;
+            if(dangerous){
+                const before={x:Math.round(player.x),y:Math.round(player.y)};
+                player.x=levelData.spawn.x;player.y=levelData.spawn.y;player.vx=0;player.vy=0;player.onGround=false;
+                playSfx('land');
+                logStep('mechanic:hazard','spike-contact-reset',{before,spawn:levelData.spawn,frozen:false});
+            }
+        }
+    }
     function _mapExtent(lv){
         const e=(lv&&lv.map_extent)||{};
         return {left:Math.max(0,Math.floor(e.left||0)),right:Math.max(0,Math.floor(e.right||0)),up:Math.max(0,Math.floor(e.up||0))};
@@ -192,7 +655,15 @@
       getState: () => gameState,
       getPageName: () => currentPageName(),
       PAGE_NAMES,
-      setState: (v) => { gameState = v; },
+      setState: (v) => {
+        if (!CREATOR_MODE_ENABLED && (v === 'creatorList' || v === 'creatorEdit')) {
+          logStep('feature', 'creator-mode-route-blocked', { source:'debug-set-state', requested:v, resolved:gameState });
+          return gameState;
+        }
+        gameState = v;
+        return gameState;
+      },
+      getFeatures: () => ({ creatorMode: { enabled:CREATOR_MODE_ENABLED, localData:'preserved' } }),
       getShowSuccess: () => showSuccess,
       getShowDead: () => showDead,
       getSuccessTimer: () => successTimer,
@@ -215,6 +686,27 @@
         return gameState;
       },
       getLevelData: () => levelData,
+      getMechanicState: () => ({
+        mechanics: _mechanicsOf(levelData),
+        shadow: { sunX:_shadowSunX, moved:_shadowSunMoved, tipX:_shadowTipX, hold:_shadowHold, unlocked:_shadowUnlocked },
+        stillness: { seconds:_stillTime, approachStarted:_stillApproachLogged },
+        wordBridge: { placed:_wordPlaced, drag:_sceneDrag&&_sceneDrag.type },
+        persistentReset: { crates:_persistentCrateCount, active:_persistentLevelActive },
+        dragWorld: { offset:_dragWorldOffset },
+        acceptedReview: {
+          sourceId: levelData && levelData.source_review_id || null,
+          dual: { hold:_acceptedDualHold, built:_acceptedDualBuilt },
+          ink: { points:_acceptedInkPath.length, built:_acceptedInkBuilt },
+          small:_acceptedPlayerSmall,
+          frozen:_acceptedFreezeHeld(),
+          facing:_acceptedFacing,
+          faceHold:_acceptedFaceHold,
+          doorLocked:_acceptedDoorLocked,
+          groundPhase:_acceptedGroundPhase,
+          wallErase:_acceptedWallErase
+        }
+      }),
+      resolveHorizontalPlatformCollision: options => PHYSICS_COLLISION.resolveHorizontalPlatformCollision(options),
       setFrameHandler: (fn) => {
         // 让外部在每帧执行一个钩子（用于自动化测试）
         window.__frameHook = fn;
@@ -230,9 +722,48 @@
     let _logSequence = 0;
     const _logStartedAt = new Date().toISOString();
     window.__gameLogs = window.__gameLogs || [];
+    const _logModules = new Map([
+        ['runtime',true],['lifecycle',true],['network',true],['storage',true],['state',true],['input',true],['mechanic',true],['level-load',true],
+        ['door',true],['collide',true],['puzzle',true],['progress',true],['audio',true],
+        ['creator',true],['export',true],['dead',true],['guard',true],['fatal',true],
+        ['snapshot',true],['debug',true],['feature',true],['level-select',true],['render',true],
+        ['mechanic:bridge',true],['mechanic:gesture',true],['mechanic:transform',true],
+        ['mechanic:hazard',true],['mechanic:direction',true],['mechanic:door',true],
+        ['mechanic:terrain',true],['mechanic:erase',true],
+        ['physics',location.search.includes('verbose=1')]
+    ]);
     // v4.9.7a 死亡/坏关卡前 10 帧 player 快照（环形buffer），排查"为什么掉下去/为什么没碰门"直接回溯状态
     const PLAYER_RING_SIZE = 10;
     const _playerRing = [];
+    // 同一平台的防瞬移诊断最多每秒一条，保留证据而不逐帧刷屏。
+    const _horizontalSnapGuardLastAt = new Map();
+    function _mapEntriesToObject(map) {
+        const out = {};
+        map.forEach((value, key) => { out[key] = value; });
+        return out;
+    }
+    function _isSensitiveLogKey(key) {
+        const normalized = String(key || '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+        return /(password|passphrase|secret|token|authorization|cookie|privatekey|apikey|clientsecret|appsecret)/.test(normalized);
+    }
+    function _redactLogString(value) {
+        return String(value)
+            .replace(/-----BEGIN [^-\r\n]*PRIVATE KEY-----[\s\S]*?-----END [^-\r\n]*PRIVATE KEY-----/gi, '[REDACTED_PEM]')
+            .replace(/((?:authorization|cookie)\s*[:=]\s*)(?:Basic|Bearer)?\s*[^\r\n]+/gi, '$1[REDACTED]')
+            .replace(/((?:"|'|\b)?(?:access[_-]?token|refresh[_-]?token|id[_-]?token|token|password|passphrase|secret|app[_-]?secret|client[_-]?secret|api[_-]?key|private[_-]?key)(?:"|'|\b)?\s*[:=]\s*["']?)[^"'&,}\s]+/gi, '$1[REDACTED]')
+            .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, '[REDACTED_JWT]');
+    }
+    function _redactLogContext(value, depth=0) {
+        if (depth > 5) return '[depth-limited]';
+        if (Array.isArray(value)) return value.slice(0, 100).map(item => _redactLogContext(item, depth + 1));
+        if (typeof value === 'string') return _redactLogString(value);
+        if (!value || typeof value !== 'object') return value;
+        const clean = {};
+        for (const [key, item] of Object.entries(value)) {
+            clean[key] = _isSensitiveLogKey(key) ? '[REDACTED]' : _redactLogContext(item, depth + 1);
+        }
+        return clean;
+    }
     function _pushPlayerRing() {
         const snap = {
             f: frameCount,
@@ -244,6 +775,7 @@
         if (_playerRing.length > PLAYER_RING_SIZE) _playerRing.shift();
     }
     function logStep(cat, tag, kv) {
+        if (_logModules.get(cat) === false) return null;
         const entry = {
             seq: ++_logSequence,
             f: frameCount,
@@ -251,7 +783,7 @@
             at: new Date().toISOString(),
             session: LOG_SESSION_ID,
             cat, tag,
-            kv: kv || {}
+            kv: _redactLogContext(kv || {})
         };
         window.__gameLogs.push(entry);
         if (window.__gameLogs.length > LOG_MAX) window.__gameLogs.shift();
@@ -283,22 +815,35 @@
     };
     window._deadSnaps = function() { return _playerRing.slice(); };
     window._stateChanges = function() { return window._findLogs('', 'state'); };
+    window._setLogModule = function(category, enabled) {
+        _logModules.set(String(category), !!enabled);
+        return {category:String(category),enabled:!!enabled};
+    };
+    window._logModuleStatus = function() { return _mapEntriesToObject(_logModules); };
     // 暴露 ring buffer 到 debug
     window.__debug.getLastPlayerSnaps = window._deadSnaps;
+    window.__debug.setLogModule = window._setLogModule;
+    window.__debug.getLogModules = window._logModuleStatus;
+    window.__debug.redactLogContext = value => _redactLogContext(value);
 
     function _runtimeSnapshot() {
         return {
             codeVersion: GAME_CODE_VERSION,
+            branding: { title: GAME_TITLE },
             sessionId: LOG_SESSION_ID,
             sessionStartedAt: _logStartedAt,
             exportedAt: new Date().toISOString(),
             page: { href: location.href, protocol: location.protocol, online: navigator.onLine, visibility: document.visibilityState },
             device: { userAgent: navigator.userAgent, platform: navigator.platform, language: navigator.language, dpr: window.devicePixelRatio, viewport: { width: window.innerWidth, height: window.innerHeight } },
             backend: {
-                mode: location.protocol === 'file:' ? 'android-local-offline' : 'static-web-preview',
+                mode: window.__wxMiniGame ? 'wechat-minigame-offline' : (location.protocol === 'file:' ? 'android-local-offline' : 'static-web-preview'),
                 apiEndpoint: null,
                 note: '当前游戏无业务后端；关卡来自内置 levels_bundle.js 或本地 JSON。所有资源读取结果记录在 level-load/network 分类。'
             },
+            features: {
+                creatorMode: { enabled: CREATOR_MODE_ENABLED, localData: 'preserved', storageKey: CREATOR_LS_KEY }
+            },
+            logging: { maxEntries: LOG_MAX, modules: _mapEntriesToObject(_logModules), verboseQuery: location.search.includes('verbose=1') },
             game: {
                 pageName: currentPageName(),
                 state: gameState, levelIndex: currentLevelIndex,
@@ -318,6 +863,9 @@
             format: 'smart-egg-diagnostic-log', schemaVersion: 1,
             runtime: _runtimeSnapshot(),
             recentPlayerFrames: _playerRing.slice(),
+            adapterLogs: Array.isArray(window.__SMART_EGG_ADAPTER_DIAGNOSTICS__)
+                ? window.__SMART_EGG_ADAPTER_DIAGNOSTICS__.slice()
+                : [],
             logs: window.__gameLogs.slice()
         };
         const text = JSON.stringify(report, null, 2);
@@ -326,7 +874,7 @@
         try {
             if (window.AndroidLogExporter && typeof window.AndroidLogExporter.exportLog === 'function') {
                 window.AndroidLogExporter.exportLog(filename, text);
-                logStep('export', 'android-export-dispatched', { filename, bytes: text.length });
+                logStep('export', 'native-export-dispatched', { platform:window.__wxMiniGame?'wechat-minigame':'android', filename, bytes: text.length });
                 return;
             }
             const blob = new Blob([text], { type: 'application/json;charset=utf-8' });
@@ -349,7 +897,7 @@
     const input = { left: false, right: false, jumpPressed: false, jumpHeld: false };
     let helpVisible = false;
     const keys = { ArrowLeft:'left', KeyA:'left', ArrowRight:'right', KeyD:'right',
-                   Space:'jump', ArrowUp:'jump', KeyW:'jump' };
+                   Space:'jump', ArrowUp:'jump', KeyW:'jump', ShiftLeft:'freeze', ShiftRight:'freeze' };
     // 切关时若实体键仍按住，浏览器会继续派发 repeat keydown。
     // 记录真实按下的键，并在新关中屏蔽它们，直到收到对应 keyup。
     const _heldKeyboardCodes = new Set();
@@ -417,6 +965,7 @@
         _activeTouchControls.clear();
         _heldMovingTargets.clear();
         _mouseMovingTarget = null;
+        _acceptedFreezePointer = false;
         input.left = false;
         input.right = false;
         input.jumpPressed = false;
@@ -708,11 +1257,22 @@
         }
         // 菜单页快捷键：ENTER/SPACE=进入选关
         if (gameState === 'menu') {
-            if (e.code === 'Enter' || e.code === 'Space') { logStep('input','shortcut',{from_state:gameState,to:'levelSelect',shortcut:'Enter/Space'}); gameState = 'levelSelect'; e.preventDefault(); return; }
+            if (e.code === 'Enter' || e.code === 'Space') {
+                logStep('input','shortcut',{from_state:gameState,to:'levelSelect',shortcut:'Enter/Space'});
+                gameState = 'levelSelect';
+                _setLevelSelectPage(0, 'menu-keyboard-open');
+                e.preventDefault();
+                return;
+            }
         }
-        // 选关页快捷键：ESC回菜单
+        // 选关页快捷键：ESC回菜单，左右方向键翻页。
         if (gameState === 'levelSelect') {
             if (e.code === 'Escape') { logStep('input','shortcut',{from_state:gameState,to:'menu',shortcut:'ESC'}); gameState = 'menu'; e.preventDefault(); return; }
+            if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
+                _setLevelSelectPage(_levelSelectPage + (e.code === 'ArrowRight' ? 1 : -1), 'keyboard-page', { code:e.code });
+                e.preventDefault();
+                return;
+            }
         }
         if (keys[e.code]) {
             if (keys[e.code] === 'jump') {
@@ -776,12 +1336,16 @@
     let unlockedDoors = new Set();
 
     function resetCratesFromLevel() {
-        crates = (levelData && levelData.crates || []).map((c, i) => ({
+        const source = (levelData && levelData.crates || []);
+        const visible = _hasMechanic('persistent_reset') ? source.slice(0, _persistentCrateCount) : source;
+        crates = visible.map((c, i) => ({
             id: c.id || ('crate_' + i),
             x: c.x, y: c.y, w: c.w || 130, h: c.h || 140,
             spawnX: c.x, spawnY: c.y,
-            vy: 0, onGround: false, hold_to_stop: !!c.hold_to_stop
+            vy: 0, onGround: false, hold_to_stop: !!c.hold_to_stop,
+            static_platform: !!c.static_platform
         }));
+        logStep('mechanic','crates-reset',{levelIndex:currentLevelIndex,total:source.length,visible:crates.length,persistent:_hasMechanic('persistent_reset')});
     }
 
     function resetKeysFromLevel() {
@@ -937,13 +1501,17 @@
         ctx.closePath();
     }
 
-    function drawGrid() {
+    function drawGrid(options = {}) {
+        const mountainParallaxX = Number(options.mountainParallaxX) || 0;
+        const hideSun = !!options.hideSun;
         // 辽阔高空：清透蓝天、暖色天际与大块高云
         const sky=ctx.createLinearGradient(0,0,0,H);sky.addColorStop(0,'#63a9c8');sky.addColorStop(.48,'#b9d9c8');sky.addColorStop(.76,'#ead39b');sky.addColorStop(1,'#9bb18a');ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
-        const glow=ctx.createRadialGradient(W*.78,H*.2,12,W*.78,H*.2,230);glow.addColorStop(0,'rgba(255,244,181,.9)');glow.addColorStop(.55,'rgba(255,222,141,.28)');glow.addColorStop(1,'rgba(255,220,150,0)');ctx.fillStyle=glow;ctx.fillRect(0,0,W,H);
+        if (!hideSun) {
+            const glow=ctx.createRadialGradient(W*.78,H*.2,12,W*.78,H*.2,230);glow.addColorStop(0,'rgba(255,244,181,.9)');glow.addColorStop(.55,'rgba(255,222,141,.28)');glow.addColorStop(1,'rgba(255,220,150,0)');ctx.fillStyle=glow;ctx.fillRect(0,0,W,H);
+        }
         ctx.fillStyle='rgba(255,249,222,.68)';for(const cloud of [[.16,.17,150,38],[.47,.11,190,46],[.72,.3,130,32]]){ctx.beginPath();ctx.ellipse(W*cloud[0],H*cloud[1],cloud[2],cloud[3],-.05,0,Math.PI*2);ctx.ellipse(W*cloud[0]+cloud[2]*.45,H*cloud[1]+4,cloud[2]*.58,cloud[3]*.72,.03,0,Math.PI*2);ctx.fill();}
         // 极远台地与群峰，多层低对比制造纵深
-        const horizon=H*.7;for(let layer=0;layer<3;layer++){ctx.fillStyle=['#87a59a','#708f86','#58766e'][layer];ctx.globalAlpha=[.55,.68,.82][layer];ctx.beginPath();ctx.moveTo(0,H);ctx.lineTo(0,horizon+layer*45);for(let x=0;x<=W;x+=120){const mesa=(Math.sin(x*.006+layer*1.7)+1)*34;ctx.lineTo(x,horizon+layer*45-mesa-(x%(360)<170?38:0));}ctx.lineTo(W,H);ctx.closePath();ctx.fill();}ctx.globalAlpha=1;
+        const horizon=H*.7;for(let layer=0;layer<3;layer++){const factor=.06+layer*.045;const shift=mountainParallaxX*factor;const step=120;const firstWorldX=Math.floor((shift-360)/step)*step;const lastWorldX=shift+W+360;ctx.fillStyle=['#87a59a','#708f86','#58766e'][layer];ctx.globalAlpha=[.55,.68,.82][layer];ctx.beginPath();ctx.moveTo(0,H);ctx.lineTo(0,horizon+layer*45);for(let worldX=firstWorldX;worldX<=lastWorldX;worldX+=step){const screenX=worldX-shift;const mesa=(Math.sin(worldX*.006+layer*1.7)+1)*34;const plateau=(((worldX%360)+360)%360)<170?38:0;ctx.lineTo(screenX,horizon+layer*45-mesa-plateau);}ctx.lineTo(W,H);ctx.closePath();ctx.fill();}ctx.globalAlpha=1;
         // 谷底薄雾与蜿蜒河光，强调玩家所在位置很高
         ctx.fillStyle='rgba(238,238,205,.42)';ctx.beginPath();ctx.ellipse(W*.53,H*.82,W*.48,H*.12,0,0,Math.PI*2);ctx.fill();ctx.strokeStyle='rgba(211,236,223,.72)';ctx.lineWidth=18;ctx.beginPath();ctx.moveTo(W*.15,H*.88);ctx.bezierCurveTo(W*.38,H*.78,W*.55,H*.96,W*.83,H*.8);ctx.stroke();
     }
@@ -1081,9 +1649,21 @@
 
         // 所有关卡标题水平居中；第四关仍单独下移一行，避免与顶部按钮挤在一起。
         const titleIsLower = currentLevelIndex === 3;
-        sketchBold(_playingCustom ? ((levelData && levelData.name) || '无名秘境') : (FANTASY_TITLES[currentLevelIndex] || (levelData && levelData.name) || '风在门后等待'),
-                   W / 2,
-                   titleIsLower ? 190 : 74, 58);
+        if (!_playingCustom && _hasMechanic('word_bridge')) {
+            const wordTitle = _wordTitleLayout();
+            for (let index = 0; index < 3; index++) {
+                const item = wordTitle.chars[index];
+                sketchBold(item.char, item.x, wordTitle.y, wordTitle.size);
+            }
+            if (!_wordPlaced && !(_sceneDrag && _sceneDrag.type === 'word')) {
+                const road = wordTitle.chars[3];
+                sketchBold(road.char, road.x, wordTitle.y, wordTitle.size);
+            }
+        } else {
+            sketchBold(_playingCustom ? ((levelData && levelData.name) || '无名秘境') : (FANTASY_TITLES[currentLevelIndex] || (levelData && levelData.name) || '风在门后等待'),
+                       W / 2,
+                       titleIsLower ? 190 : 74, 58);
+        }
     }
 
     // 画实心三角形（手绘感，带轻微抖动，默认白色，底部按键传黑色）
@@ -1173,7 +1753,15 @@
     function drawGameplayMessage() {
         if (!helpVisible && gameState !== 'paused') return;
         const isPaused = gameState === 'paused';
-        const boxW = 760, boxH = isPaused ? 260 : 150;
+        const hint = levelData && levelData.description && levelData.description.hint_l1
+            ? levelData.description.hint_l1 : '按 ← → 移动，点击右下按钮跳跃。';
+        const hintLines=[];
+        if(!isPaused){
+            ctx.save();ctx.font='700 25px "PingFang SC",sans-serif';let line='';
+            for(const char of Array.from(hint)){const next=line+char;if(line&&ctx.measureText(next).width>680){hintLines.push(line);line=char;}else line=next;}
+            if(line)hintLines.push(line);ctx.restore();
+        }
+        const boxW = 760, boxH = isPaused ? 260 : Math.max(150,118+hintLines.length*38);
         const boxX = (W - boxW) / 2, boxY = 180;
         ctx.save();
         ctx.fillStyle = 'rgba(255,255,255,0.96)';
@@ -1202,9 +1790,7 @@
             uiBTN.pauseLevelSelect = null;
             uiBTN.pauseResume = null;
             sketchBold('提示', W / 2, boxY + 48, 36);
-            const hint = levelData && levelData.description && levelData.description.hint_l1
-                ? levelData.description.hint_l1 : '按 ← → 移动，点击右下按钮跳跃。';
-            sketchBold(hint, W / 2, boxY + 104, 25);
+            hintLines.forEach((line,index)=>sketchBold(line,W/2,boxY+100+index*38,25));
         }
     }
 
@@ -1276,7 +1862,144 @@
     }
 
     // ===== v4.9.6 选关 + 通关存档 =====
-    const TOTAL_LEVELS = 10;
+    const TOTAL_LEVELS = 20;
+    const LEVEL_SELECT_COLS = 4;
+    const LEVEL_SELECT_ROWS = 2;
+    const LEVEL_SELECT_PAGE_SIZE = LEVEL_SELECT_COLS * LEVEL_SELECT_ROWS;
+    const LEVEL_SELECT_SWIPE_THRESHOLD = 120;
+    const LEVEL_SELECT_TAP_SLOP = 28;
+    let _levelSelectPage = 0;
+    let _levelSelectSwipe = null;
+
+    function _levelSelectPageCount() {
+        return Math.max(1, Math.ceil(TOTAL_LEVELS / LEVEL_SELECT_PAGE_SIZE));
+    }
+    function _setLevelSelectPage(nextPage, reason, details = {}) {
+        const before = _levelSelectPage;
+        const requested = Math.round(Number(nextPage) || 0);
+        const pageCount = _levelSelectPageCount();
+        _levelSelectPage = Math.max(0, Math.min(pageCount - 1, requested));
+        if (_levelSelectPage !== before) {
+            // 翻页后立刻清掉上一页命中区，避免下一帧绘制前的极速二次点击
+            // 命中已经离屏的旧卡片。
+            uiBTN.levelSelect_btns = [];
+            logStep('level-select', 'page-change', {
+                from: before,
+                to: _levelSelectPage,
+                requested,
+                pageCount,
+                reason,
+                ...details
+            });
+        } else if (requested !== before) {
+            logStep('level-select', 'page-boundary', {
+                page: before,
+                requested,
+                pageCount,
+                reason,
+                ...details
+            });
+        }
+        return _levelSelectPage;
+    }
+    function _levelSelectDragOffset() {
+        if (!_levelSelectSwipe) return 0;
+        let dx = _levelSelectSwipe.currentX - _levelSelectSwipe.startX;
+        const lastPage = _levelSelectPageCount() - 1;
+        if ((dx > 0 && _levelSelectPage === 0) || (dx < 0 && _levelSelectPage === lastPage)) dx *= 0.28;
+        return Math.max(-W, Math.min(W, dx));
+    }
+    function _beginLevelSelectGesture(p, pointer) {
+        if (gameState !== 'levelSelect') return false;
+        if (_levelSelectSwipe) {
+            logStep('level-select', 'gesture-pointer-ignored', {
+                activePointer: _levelSelectSwipe.pointer,
+                ignoredPointer: pointer,
+                reason: 'single-pointer-navigation'
+            });
+            return true;
+        }
+        _levelSelectSwipe = {
+            pointer,
+            startPage: _levelSelectPage,
+            startX: p.x,
+            startY: p.y,
+            currentX: p.x,
+            currentY: p.y,
+            startedAt: performance.now()
+        };
+        logStep('level-select', 'gesture-start', {
+            pointer,
+            page: _levelSelectPage,
+            x: Math.round(p.x),
+            y: Math.round(p.y)
+        });
+        return true;
+    }
+    function _moveLevelSelectGesture(p, pointer) {
+        if (!_levelSelectSwipe || _levelSelectSwipe.pointer !== pointer) return false;
+        _levelSelectSwipe.currentX = p.x;
+        _levelSelectSwipe.currentY = p.y;
+        return true;
+    }
+    function _endLevelSelectGesture(p, pointer, reason) {
+        if (!_levelSelectSwipe || _levelSelectSwipe.pointer !== pointer) return false;
+        const gesture = _levelSelectSwipe;
+        const end = p || { x: gesture.currentX, y: gesture.currentY };
+        const dx = end.x - gesture.startX;
+        const dy = end.y - gesture.startY;
+        const distance = Math.hypot(dx, dy);
+        const isRelease = reason === 'end' || reason === 'pointerup' || reason === 'canvas-mouseup' || reason === 'window-mouseup';
+        // 手势期间若页面状态或页码已被键盘/Esc 改变，则释放只负责清理，
+        // 不再把旧按下位置解释成新页面上的点击或翻页。
+        const canComplete = gameState === 'levelSelect' && _levelSelectPage === gesture.startPage;
+        const isHorizontalSwipe = canComplete && isRelease && Math.abs(dx) >= LEVEL_SELECT_SWIPE_THRESHOLD
+            && Math.abs(dx) > Math.abs(dy) * 1.15;
+        const isTapRelease = canComplete && (reason === 'end' || reason === 'pointerup' || reason === 'canvas-mouseup')
+            && distance <= LEVEL_SELECT_TAP_SLOP;
+        _levelSelectSwipe = null;
+
+        let outcome = canComplete ? 'cancelled' : 'state-or-page-changed';
+        if (isHorizontalSwipe) {
+            const direction = dx < 0 ? 1 : -1;
+            const before = _levelSelectPage;
+            _setLevelSelectPage(before + direction, 'horizontal-swipe', {
+                dx: Math.round(dx),
+                dy: Math.round(dy),
+                pointer
+            });
+            outcome = _levelSelectPage === before ? 'boundary' : 'page-change';
+        } else if (isTapRelease) {
+            outcome = 'tap';
+            handleDown({ x: gesture.startX, y: gesture.startY });
+        }
+        logStep('level-select', 'gesture-end', {
+            pointer,
+            reason,
+            outcome,
+            page: _levelSelectPage,
+            dx: Math.round(dx),
+            dy: Math.round(dy),
+            distance: Math.round(distance),
+            durationMs: Math.round(performance.now() - gesture.startedAt),
+            threshold: LEVEL_SELECT_SWIPE_THRESHOLD
+        });
+        return true;
+    }
+
+    window.__debug.getLevelSelectPaging = () => ({
+        page: _levelSelectPage,
+        pageNumber: _levelSelectPage + 1,
+        pageCount: _levelSelectPageCount(),
+        pageSize: LEVEL_SELECT_PAGE_SIZE,
+        rows: LEVEL_SELECT_ROWS,
+        columns: LEVEL_SELECT_COLS,
+        gestureActive: !!_levelSelectSwipe
+    });
+    window.__debug.setLevelSelectPage = page => {
+        _setLevelSelectPage(page, 'debug-set-page');
+        return window.__debug.getLevelSelectPaging();
+    };
     const LS_KEY = 'big_clever_save_v1';
     // v4.9.6 关卡加载缓存（死亡重来的同步保证，必须声明在最前面避免 TDZ）
     const _cachedLevels = {};
@@ -1310,14 +2033,26 @@
         try {
             const s = localStorage.getItem(LS_KEY);
             const parsed = s ? JSON.parse(s) : { unlocked: 1, completed: [] };
+            const migration = ACCEPTED_MECHANICS.migrateProgressForRemovedLevel(parsed, TOTAL_LEVELS, 179, 13);
+            const migrated = {
+                unlocked: migration.unlocked,
+                completed: migration.completed,
+                mainline_revision: migration.mainline_revision
+            };
+            if (s && migration.migrated) localStorage.setItem(LS_KEY, JSON.stringify(migrated));
             // v4.9.7a G类：localStorage 读取成功/失败详情
             logStep('progress', 'loadProgress-success', {
                 key: LS_KEY, raw_bytes: (s||'').length,
-                unlocked: parsed.unlocked,
-                completed_count: (parsed.completed||[]).length,
-                completed: JSON.stringify(parsed.completed||[])
+                unlocked_before: parsed.unlocked,
+                unlocked_after: migrated.unlocked,
+                completed_count: migrated.completed.length,
+                completed: JSON.stringify(migrated.completed),
+                total_levels: TOTAL_LEVELS,
+                source_revision: migration.source_revision,
+                target_revision: migrated.mainline_revision,
+                migration: migration.migrated ? 'removed-level-14-v179' : 'not-needed'
             });
-            return parsed;
+            return migrated;
         } catch(e) {
             logStep('fatal', 'loadProgress-error', { key: LS_KEY, err: e.message, stack: String(e.stack||'').slice(0,200) });
             return { unlocked: 1, completed: [] };
@@ -1486,6 +2221,7 @@
         });
 
         _updateMovingTargets(dt);
+        _updateNewLevelMechanics(dt);
         // ② 进门判定（playing状态下才检查，命中后立刻冻结+return）
         const PLAYER_HALF_AREA = HALF_W * 2 * HALF_H * 2 * 0.5;
         // v4.9.7a E类：门碰撞日志（每个门每帧 overlap 详情，排查"蛋在门口没触发过关"最关键）
@@ -1519,6 +2255,7 @@
         }
         for (const d of doors) {
             const dx = d.x - d.w / 2, dy = d.y - d.h / 2;
+            const distX = Math.abs(player.x - d.x);
             const overlap = rectOverlapArea(
                 player.x - HALF_W, player.y - HALF_H, HALF_W * 2, HALF_H * 2,
                 dx, dy, d.w, d.h);
@@ -1526,13 +2263,16 @@
             const knockGateOpen = !_hasMechanic('knock_twice') || _validKnockCount >= 2;
             const passwordGateOpen = !_hasMechanic('flower_password') || _passwordSolved;
             const movingGateOpen = !_hasMechanic('hold_to_stop') || !d.hold_to_stop || _isMovingHeld(d);
+            const persistentGateOpen = !_hasMechanic('persistent_reset') || _persistentCrateCount >= 3;
+            const acceptedGateOpen = _acceptedDoorGateOpen();
+            const acceptedDoorHit = _hasMechanic('door_jumps') && _acceptedDoorLocked && distX <= 90;
             if (d.is_goal && _hasMechanic('flower_password') && !_passwordSolved && performance.now() >= _passwordDismissUntil && overlap >= PLAYER_HALF_AREA) {
                 _passwordVisible = true;
                 _resetAllInput('password-panel-open', { blockHeldKeyboard: true });
                 logStep('puzzle','password-panel-open',{input:_passwordInput, revealed:_questionBlocks.map(b=>b.revealed)});
                 return;
             }
-            if (d.is_goal && !doorLocked && knockGateOpen && passwordGateOpen && movingGateOpen && overlap >= PLAYER_HALF_AREA) {
+            if (d.is_goal && !doorLocked && knockGateOpen && passwordGateOpen && movingGateOpen && persistentGateOpen && acceptedGateOpen && (overlap >= PLAYER_HALF_AREA || acceptedDoorHit)) {
                 // v19.0 简化阻断：只阻断「倒计时进行中（_goalHitStartMs>0）」的重复触发
                 //   v18 阻断了 _goalHitJumped=true（上一次已经跳完的标志）→ 但跳完后下一关进入前，loadLevelAndStart 会清零这个标志
                 //   双重保险：这里只看「现在是否在倒计时中」→ 更安全（即便 loadLevel 清零遗漏也不会卡 goal-hit）
@@ -1590,6 +2330,7 @@
         let md = 0;
         if (input.left) md -= 1;
         if (input.right) md += 1;
+        if (_hasMechanic('reverse_controls')) md *= -1;
         player.moveDir = md;
         // v20.0：跳跃触发规则（严格：只有 onGround=true 当下按跳才生效，空中按跳直接丢弃，落地后不补跳！）
         //   v19 bug（=「jump buffer/落地补跳」，用户明确禁止）：
@@ -1629,6 +2370,11 @@
             player.vy = JUMP_VELOCITY;
             player.wantJump = false;
             if (levelData.double_jump) player.jumpsLeft = Math.max(0, player.jumpsLeft - 1);
+            if(_hasMechanic('door_jumps')&&!_acceptedDoorLocked){
+                _acceptedDoorVY=JUMP_VELOCITY*.82;
+                const door=_acceptedGoalDoor();
+                logStep('mechanic:door','door-jump-triggered',{doorY:door&&Math.round(door.y),velocity:Math.round(_acceptedDoorVY),sourceReviewId:levelData.source_review_id});
+            }
             playSfx('jump');
             logStep('input', 'jump-fired', {
                 f: frameCount,
@@ -1641,6 +2387,7 @@
         const plats = levelData.platforms || [];
         // 木箱重力与平台碰撞。木箱可坠落，重开关卡时由 JSON 初始位置恢复。
         for (const c of crates) {
+            if(c.static_platform){c.vy=0;c.onGround=true;continue;}
             if(c.hold_to_stop&&_isMovingHeld(c)){c.vy=0;continue;}
             if (levelData.no_fall&&!levelData.infinite_horizontal){const mb=_mapBounds(levelData);c.x=Math.max(mb.minX+c.w/2,Math.min(mb.maxX-c.w/2,c.x));}
             c.vy = Math.min(MAX_FALL, c.vy + GRAVITY * dt);
@@ -1662,24 +2409,116 @@
                 }
             }
         }
-        // X 方向
+        // X 方向：只在人物本帧从平台侧边越入时阻挡。旧实现只要 AABB 有重叠就按
+        // 速度方向把人物塞到平台远端；第二关人物在箱子旁轻微下沉时会从 x≈750
+        // 瞬移到整块地面的左边 x=-40。
+        const previousPlayerX = player.x;
         player.x += player.vx * dt;
         if (levelData.no_fall && !levelData.infinite_horizontal) {
             const mb=_mapBounds(levelData);
             player.x = Math.max(mb.minX+HALF_W, Math.min(mb.maxX-HALF_W, player.x));
         }
+        let acceptedObstacle = null;
+        if(_hasMechanic('shrink_tunnel')){
+            acceptedObstacle={name:'shrink-tunnel',...ACCEPTED_MECHANICS.sideBlock(previousPlayerX,player.x,HALF_W,710,1320,!_acceptedPlayerSmall)};
+        }else if(_hasMechanic('erase_wall')){
+            acceptedObstacle={name:'erasable-wall',...ACCEPTED_MECHANICS.sideBlock(previousPlayerX,player.x,HALF_W,900,1020,_acceptedWallErase<1)};
+        }
+        if(acceptedObstacle&&acceptedObstacle.blocked){
+            const attemptedX=player.x;
+            player.x=acceptedObstacle.x;player.vx=0;
+            const key=`accepted-obstacle:${currentLevelIndex}:${acceptedObstacle.name}:${acceptedObstacle.side}`;
+            const now=performance.now();
+            if(!_horizontalSnapGuardLastAt.has(key)||now-_horizontalSnapGuardLastAt.get(key)>500){
+                _horizontalSnapGuardLastAt.set(key,now);
+                logStep('collide','accepted-obstacle-horizontal-block',{levelIndex:currentLevelIndex,sourceReviewId:levelData.source_review_id,obstacle:acceptedObstacle.name,side:acceptedObstacle.side,previousX:Math.round(previousPlayerX),attemptedX:Math.round(attemptedX),resolvedX:Math.round(player.x)});
+            }
+        }
         player.onGround = false;
         for (const p of plats) {
-            const px = p.x - p.w / 2, py = p.y - p.h / 2;
-            if (rectVsRect(player.x - HALF_W, player.y - HALF_H, HALF_W * 2, HALF_H * 2,
-                            px, py, p.w, p.h)) {
-                if (player.vx > 0) player.x = px - HALF_W;
-                else if (player.vx < 0) player.x = px + p.w + HALF_W;
+            const attemptedPlayerX = player.x;
+            const collision = PHYSICS_COLLISION.resolveHorizontalPlatformCollision({
+                previousX: previousPlayerX,
+                nextX: attemptedPlayerX,
+                playerY: player.y,
+                halfW: HALF_W,
+                halfH: HALF_H,
+                vx: player.vx,
+                platform: p,
+                edgeTolerance: 2,
+                topTolerance: 4
+            });
+            if (collision.blocked) {
+                player.x = collision.x;
+                logStep('collide', 'horizontal-platform-block', {
+                    levelIndex: currentLevelIndex,
+                    platformKind: p.kind || 'unknown',
+                    side: collision.side,
+                    previousX: Math.round(previousPlayerX),
+                    attemptedX: Math.round(attemptedPlayerX),
+                    resolvedX: Math.round(collision.x),
+                    playerY: Math.round(player.y)
+                });
                 player.vx = 0;
+                break;
             }
+            if ((collision.reason === 'preexisting-horizontal-overlap' || collision.reason === 'top-surface-contact')
+                && Number.isFinite(collision.legacyResolvedX)
+                && Math.abs(collision.legacyResolvedX - attemptedPlayerX) > HALF_W * 2) {
+                const guardKey = `${currentLevelIndex}:${p.kind || 'unknown'}:${Math.round(p.x)}`;
+                const now = performance.now();
+                if (!_horizontalSnapGuardLastAt.has(guardKey) || now - _horizontalSnapGuardLastAt.get(guardKey) > 1000) {
+                    _horizontalSnapGuardLastAt.set(guardKey, now);
+                    logStep('collide', 'horizontal-snap-prevented', {
+                        levelIndex: currentLevelIndex,
+                        platformKind: p.kind || 'unknown',
+                        previousX: Math.round(previousPlayerX),
+                        keptX: Math.round(attemptedPlayerX),
+                        rejectedLegacyX: Math.round(collision.legacyResolvedX),
+                        playerY: Math.round(player.y),
+                        reason: collision.reason
+                    });
+                }
+            }
+        }
+        // 第11关楼梯箱与普通平台使用同一横向碰撞层：侧面不可穿过，
+        // 但人物脚在箱顶时仍交给 Y 方向处理，因此可以自然站立和行走。
+        for (const c of crates) {
+            if (!c.static_platform || player.vx === 0) continue;
+            const attemptedPlayerX = player.x;
+            const collision = PHYSICS_COLLISION.resolveHorizontalPlatformCollision({
+                previousX: previousPlayerX,
+                nextX: attemptedPlayerX,
+                playerY: player.y,
+                halfW: HALF_W,
+                halfH: HALF_H,
+                vx: player.vx,
+                platform: c,
+                edgeTolerance: 2,
+                topTolerance: 4
+            });
+            if (!collision.blocked) continue;
+            player.x = collision.x;
+            player.vx = 0;
+            const guardKey = `static-crate:${currentLevelIndex}:${c.id}`;
+            const now = performance.now();
+            if (!_horizontalSnapGuardLastAt.has(guardKey) || now - _horizontalSnapGuardLastAt.get(guardKey) > 500) {
+                _horizontalSnapGuardLastAt.set(guardKey, now);
+                logStep('collide', 'static-crate-horizontal-block', {
+                    levelIndex: currentLevelIndex,
+                    crateId: c.id,
+                    side: collision.side,
+                    previousX: Math.round(previousPlayerX),
+                    attemptedX: Math.round(attemptedPlayerX),
+                    resolvedX: Math.round(collision.x),
+                    playerY: Math.round(player.y)
+                });
+            }
+            break;
         }
         // 玩家左右接触木箱时推动它；平台或另一只木箱挡住时停止。
         for (const c of crates) {
+            if(c.static_platform)continue;
             if (!rectVsRect(player.x - HALF_W, player.y - HALF_H, HALF_W * 2, HALF_H * 2,
                             c.x - c.w / 2, c.y - c.h / 2, c.w, c.h)) continue;
             if (player.vx === 0) continue;
@@ -1712,6 +2551,8 @@
             }
         }
         // Y 方向
+        const previousPlayerBottom = player.y + HALF_H;
+        const previousPlayerTop = player.y - HALF_H;
         player.y += player.vy * dt;
         const landingSpeed = player.vy;
         if (player.vy < 0 && _questionBlocks.length) {
@@ -1744,8 +2585,24 @@
                 }
             }
         }
-        // 木箱也是可站立的动态平台。
+        // 木箱也是可站立的动态平台。第11关的楼梯箱只使用稳定顶面：
+        // 同一帧同时穿过多个箱子接缝时，固定选择最高顶面，避免受数组顺序/帧率影响。
+        const staticLandingCandidates = [];
         for (const c of crates) {
+            if(c.static_platform){
+                const top=c.y-c.h/2;
+                const bottom=c.y+c.h/2;
+                const overlapsX=player.x+HALF_W>c.x-c.w/2&&player.x-HALF_W<c.x+c.w/2;
+                const crossedTop=player.vy>=0&&previousPlayerBottom<=top+10&&player.y+HALF_H>=top;
+                if(overlapsX&&crossedTop)staticLandingCandidates.push(c);
+                const crossedBottom=player.vy<0&&previousPlayerTop>=bottom-10&&player.y-HALF_H<=bottom;
+                if(overlapsX&&crossedBottom){
+                    player.y=bottom+HALF_H;
+                    player.vy=0;
+                    logStep('collide','static-crate-ceiling-block',{crate:c.id,bottom:Math.round(bottom),px:Math.round(player.x)});
+                }
+                continue;
+            }
             if (!rectVsRect(player.x - HALF_W, player.y - HALF_H, HALF_W * 2, HALF_H * 2,
                             c.x - c.w / 2, c.y - c.h / 2, c.w, c.h)) continue;
             if (player.vy > 0) {
@@ -1758,6 +2615,18 @@
                 player.y = c.y + c.h / 2 + HALF_H;
                 player.vy = 0;
             }
+        }
+        if(staticLandingCandidates.length){
+            const landing=staticLandingCandidates.reduce((best,c)=>(c.y-c.h/2)<(best.y-best.h/2)?c:best);
+            player.y=landing.y-landing.h/2-HALF_H;
+            player.vy=0;player.onGround=true;player.jumpsLeft=levelData.double_jump?2:1;
+            if(landingSpeed>260)playSfx('land');
+            if(_lastStaticCrateLandingId!==landing.id){
+                _lastStaticCrateLandingId=landing.id;
+                logStep('collide','persistent-crate-land',{crate:landing.id,top:Math.round(landing.y-landing.h/2),candidates:staticLandingCandidates.map(c=>c.id),px:Math.round(player.x)});
+            }
+        }else{
+            _lastStaticCrateLandingId=null;
         }
 
         // 门判定（已移到顶部，这里不再重复）
@@ -2575,11 +3444,9 @@
         _wonkyRectPath(logX, logY, logW, logH, 20, 55139, 2); ctx.stroke(); ctx.restore();
         sketchBold('导出日志', logX + logW / 2, logY + logH / 2 + 5, 30);
         uiBTN.exportLog = { x: logX, y: logY, w: logW, h: logH };
-        // 主菜单保持简单风格
-        // 正式游戏名暂时保持主线现有名称；F4 只替换视觉与音乐。
-        sketchBold('大聪明', W / 2, H * 0.24, 100);
-        sketchBold('脑洞蛋', W / 2, H * 0.40, 120);
-        const bw = W * 0.28, bh = 135, gap=70, bx = W/2-bw-gap/2, by = H * 0.58;
+        // 正式游戏名：单行居中，保留 F4 旷野视觉的留白。
+        sketchBold(GAME_TITLE, W / 2, H * 0.34, 120);
+        const bw = W * 0.32, bh = 135, bx = W / 2 - bw / 2, by = H * 0.58;
         // 开始按钮（不规则圆角方形白底黑描边）
         ctx.save();
         ctx.fillStyle = '#fff0bd';
@@ -2588,19 +3455,27 @@
         _wonkyRectPath(bx, by, bw, bh, 52, 55555, 2.5); ctx.stroke();
         ctx.restore();
         sketchBold('踏上旅途', bx + bw / 2, by + bh / 2 + 10, 50);
-        const cbx=W/2+gap/2;
-        ctx.save();ctx.fillStyle='#fff0bd';_wonkyRectPath(cbx,by,bw,bh,52,55595,2.5);ctx.fill();ctx.strokeStyle='#17343a';ctx.lineWidth=5;_wonkyRectPath(cbx,by,bw,bh,52,55595,2.5);ctx.stroke();ctx.restore();
-        sketchBold('创造秘境',cbx+bw/2,by+bh/2+10,50);
         sketchText('© 2024 MVP Demo', W / 2, H - 52, 24, 'center', false, 'rgba(0,0,0,0.4)');
         uiBTN.start = { x: bx, y: by, w: bw, h: bh };
-        uiBTN.creator = { x: cbx, y: by, w: bw, h: bh };
+        uiBTN.creator = null;
     }
 
     function _newCreatorDraft() {
         return { id:'custom-'+Date.now(), name:'我的脑洞关卡 '+(_creatorLevels.length+1), type:'custom', mechanics:[], no_fall:true, infinite_horizontal:false, expand_up:false, map_extent:{left:0,right:0,up:0}, description:{hint_l1:'找到办法进入终点门。'}, world_size:{w:1920,h:1080}, spawn:{x:300,y:810}, platforms:[{x:960,y:1090,w:1920,h:440,kind:'ground'}], doors:[{id:'custom_entry',x:300,y:765,w:150,h:210,is_goal:false},{id:'custom_goal',x:1540,y:765,w:150,h:210,is_goal:true}], crates:[], keys:[], question_blocks:[], decor:[] };
     }
-    function _saveCreatorLevels() { localStorage.setItem(CREATOR_LS_KEY,JSON.stringify(_creatorLevels)); }
+    function _saveCreatorLevels() {
+        if(!CREATOR_MODE_ENABLED){
+            logStep('feature','creator-mode-route-blocked',{source:'creator-save',requested:'storage-write',resolved:gameState});
+            return false;
+        }
+        localStorage.setItem(CREATOR_LS_KEY,JSON.stringify(_creatorLevels));
+        return true;
+    }
     function _saveCreatorDraftToList() {
+        if(!CREATOR_MODE_ENABLED){
+            logStep('feature','creator-mode-route-blocked',{source:'creator-draft-save',requested:'creatorList',resolved:gameState});
+            return;
+        }
         if(!_creatorDraft)return;
         const idx=_creatorLevels.findIndex(x=>x.id===_creatorDraft.id);
         const saved=JSON.parse(JSON.stringify(_creatorDraft));
@@ -2700,6 +3575,10 @@
         logStep('creator','share-code-input-close',{});
     }
     function _submitCodeInput(){
+        if(!CREATOR_MODE_ENABLED){
+            logStep('feature','creator-mode-route-blocked',{source:'level-code-submit',requested:'creatorList',resolved:gameState});
+            return;
+        }
         const raw=_codeInput.value.trim();
         if(!raw){_codeError.textContent='请先粘贴关卡码';_codeInput.focus();return;}
         try{
@@ -2713,6 +3592,10 @@
         }
     }
     function _openCodeInput(){
+        if(!CREATOR_MODE_ENABLED){
+            logStep('feature','creator-mode-route-blocked',{source:'level-code-input',requested:'creatorList',resolved:gameState});
+            return;
+        }
         if(window.__wxMiniGame&&typeof window.__wxPromptLevelCode==='function'){
             window.__wxPromptLevelCode(raw=>{
                 _codeInput.value=String(raw||'');
@@ -2732,6 +3615,27 @@
         document.getElementById('level-code-submit').addEventListener('click',_submitCodeInput);
         document.getElementById('level-code-cancel').addEventListener('click',_closeCodeInput);
         _codeInput.addEventListener('keydown',e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();_submitCodeInput();}});
+    }
+
+    function _enforceCreatorModeOffline(source) {
+        if (CREATOR_MODE_ENABLED) return false;
+        const creatorState = gameState === 'creatorList' || gameState === 'creatorEdit';
+        if (!creatorState && !_playingCustom) return false;
+        const requested = _playingCustom ? 'custom-play' : gameState;
+        gameState = 'menu';
+        _playingCustom = false;
+        _creatorShareCode = '';
+        _creatorImportPreview = null;
+        _creatorDeleteConfirmIndex = -1;
+        _creatorBindingMode = false;
+        if (_codeDialog) {
+            _codeDialog.hidden = true;
+            if (_codeInput) _codeInput.blur();
+            if (_codeError) _codeError.textContent = '';
+        }
+        _resetAllInput('creator-mode-offline', { clearHeldKeyboard:true, clearBlockedKeyboard:true });
+        logStep('feature','creator-mode-route-blocked',{source,requested,resolved:'menu',localData:'preserved'});
+        return true;
     }
 
     function _syncCreatorGround(){
@@ -2865,6 +3769,10 @@
         sketchText(_creatorTool==='select'?'选择/移动：先点已有元素，再点目标位置。':'移动视野后可在上方、左侧、右侧继续摆放元素。',W/2,995,23);
     }
     function _playCreatorDraft() {
+        if(!CREATOR_MODE_ENABLED){
+            logStep('feature','creator-mode-route-blocked',{source:'custom-play',requested:'playing',resolved:gameState});
+            return;
+        }
         _playingCustom=true; levelData=JSON.parse(JSON.stringify(_creatorDraft)); currentLevelIndex=-1;
         _cachedLevels[-1]=levelData; if(!_availableLevels.includes(-1))_availableLevels.push(-1); loadLevelAndStart();
         logStep('creator','custom-play',{id:levelData.id,name:levelData.name});
@@ -2957,65 +3865,92 @@
         ctx.restore();
     }
 
-    // ===== v4.9.6 选关页面（2 排 × 5 列） =====
-    function drawLevelSelect() {
-        drawGrid();
-        // 标题
-        sketchBold('旅途篇章', W / 2, H * 0.12, 72);
-        sketchText('已通关: ' + _progress.completed.length + ' / ' + TOTAL_LEVELS, W / 2, H * 0.18, 28, 'center', false, 'rgba(0,0,0,0.5)');
+    // ===== v170 选关页面：每页最多 2 排 × 4 列，横向拖动翻页 =====
+    function _drawLevelSelectPage(pageIndex, offsetX, layout, collectButtons) {
+        const { cellW, cellH, gapX, gapY, startX, startY } = layout;
+        const firstIndex = pageIndex * LEVEL_SELECT_PAGE_SIZE;
+        const endIndex = Math.min(TOTAL_LEVELS, firstIndex + LEVEL_SELECT_PAGE_SIZE);
 
-        // 布局：2 排 × 5 列
-        const cols = 5, rows = 2;
-        const cellW = 300, cellH = 200, gapX = 50, gapY = 50;
-        const totalW = cellW * cols + gapX * (cols - 1);
-        const totalH = cellH * rows + gapY * (rows - 1);
-        const startX = (W - totalW) / 2;
-        const startY = H * 0.30;
-
-        uiBTN.levelSelect_btns = [];
-
-        for (let idx = 0; idx < TOTAL_LEVELS; idx++) {
-            const col = idx % cols;
-            const row = Math.floor(idx / cols);
-            const bx = startX + col * (cellW + gapX);
+        for (let idx = firstIndex; idx < endIndex; idx++) {
+            const slot = idx - firstIndex;
+            const col = slot % LEVEL_SELECT_COLS;
+            const row = Math.floor(slot / LEVEL_SELECT_COLS);
+            const bx = startX + col * (cellW + gapX) + offsetX;
             const by = startY + row * (cellH + gapY);
-
             const unlocked = idx + 1 <= _progress.unlocked;
             const completed = _progress.completed.includes(idx);
             const available = _availableLevels.includes(idx);
-
-            // 未解锁但关卡内容存在的标记为"可解锁"
-            // 规则：有 JSON + 前一关通关 才算解锁
             const canPlay = unlocked && available;
-
-            // v4.9.6b 旧逻辑：canPlay=false 一律画锁🔒+未解锁（不区分没开发/未解锁）
-            // 画单元格（wonky 白底黑描边）
             const seed = 90000 + idx * 13;
+
             ctx.save();
-            if (canPlay) {
-                ctx.fillStyle = completed ? '#d5f5d5' : '#fff0bd';
-            } else {
-                ctx.fillStyle = '#e8e8e8';
-            }
+            ctx.fillStyle = canPlay ? (completed ? '#d5f5d5' : '#fff0bd') : '#e8e8e8';
             _wonkyRectPath(bx, by, cellW, cellH, 24, seed, 2); ctx.fill();
             ctx.strokeStyle = '#17343a'; ctx.lineWidth = 3.5;
             _wonkyRectPath(bx, by, cellW, cellH, 24, seed, 2); ctx.stroke();
             ctx.restore();
 
-            // 画关卡编号
             if (canPlay) {
-                sketchBold(String(idx + 1), bx + cellW / 2, by + cellH * 0.35, 56);
-                sketchText(completed ? '✓ 已通关' : '未通关', bx + cellW / 2, by + cellH * 0.62, 26, 'center', false, completed ? '#2a8a2a' : 'rgba(0,0,0,0.5)');
-                sketchText('第 ' + (idx + 1) + ' 关', bx + cellW / 2, by + cellH * 0.82, 22, 'center', false, 'rgba(0,0,0,0.4)');
+                sketchBold(String(idx + 1), bx + cellW / 2, by + cellH * 0.34, 46);
+                sketchText(completed ? '✓ 已通关' : '未通关', bx + cellW / 2, by + cellH * 0.62, 23, 'center', false, completed ? '#2a8a2a' : 'rgba(0,0,0,0.5)');
+                sketchText(FANTASY_TITLES[idx] || ('第 ' + (idx + 1) + ' 关'), bx + cellW / 2, by + cellH * 0.84, 20, 'center', false, 'rgba(0,0,0,0.48)');
             } else {
-                // 不可玩：一律浅灰 + 锁图标 + 🔒未解锁/📝待开发 小字
                 drawLockIcon(bx + cellW / 2, by + cellH / 2 - 10);
                 sketchText(available ? '🔒 未解锁' : '📝 待开发', bx + cellW / 2, by + cellH * 0.82, 22, 'center', false, 'rgba(0,0,0,0.5)');
             }
 
-            if (canPlay) {
-                uiBTN.levelSelect_btns.push({ x: bx, y: by, w: cellW, h: cellH, levelIndex: idx });
+            if (collectButtons && canPlay) {
+                // 点击命中区固定在当前页的静止位置。卡片跟手位移不应让一次轻微抖动
+                // 把松手点击映射到相邻卡片或卡片外。
+                uiBTN.levelSelect_btns.push({ x: bx - offsetX, y: by, w: cellW, h: cellH, levelIndex: idx });
             }
+        }
+    }
+
+    function drawLevelSelect() {
+        drawGrid();
+        sketchBold('旅途篇章', W / 2, H * 0.12, 72);
+        sketchText('已通关: ' + _progress.completed.length + ' / ' + TOTAL_LEVELS, W / 2, H * 0.18, 28, 'center', false, 'rgba(0,0,0,0.5)');
+
+        const pageCount = _levelSelectPageCount();
+        _levelSelectPage = Math.max(0, Math.min(pageCount - 1, _levelSelectPage));
+        const cellW = 330, cellH = 150, gapX = 38, gapY = 30;
+        const totalW = cellW * LEVEL_SELECT_COLS + gapX * (LEVEL_SELECT_COLS - 1);
+        const totalH = cellH * LEVEL_SELECT_ROWS + gapY * (LEVEL_SELECT_ROWS - 1);
+        const layout = {
+            cellW,
+            cellH,
+            gapX,
+            gapY,
+            startX: (W - totalW) / 2,
+            startY: H * 0.235
+        };
+        const dragOffset = _levelSelectDragOffset();
+        uiBTN.levelSelect_btns = [];
+
+        // 只让关卡卡片横向滑动；标题、页码和返回按钮保持稳定。
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(30, layout.startY - 16, W - 60, totalH + 32);
+        ctx.clip();
+        _drawLevelSelectPage(_levelSelectPage, dragOffset, layout, true);
+        if (dragOffset < 0 && _levelSelectPage < pageCount - 1) {
+            _drawLevelSelectPage(_levelSelectPage + 1, dragOffset + W, layout, false);
+        } else if (dragOffset > 0 && _levelSelectPage > 0) {
+            _drawLevelSelectPage(_levelSelectPage - 1, dragOffset - W, layout, false);
+        }
+        ctx.restore();
+
+        const pagingY = layout.startY + totalH + 54;
+        sketchText('第 ' + (_levelSelectPage + 1) + ' / ' + pageCount + ' 页  ·  左右滑动', W / 2, pagingY, 24, 'center', false, 'rgba(23,52,58,0.72)');
+        for (let page = 0; page < pageCount; page++) {
+            const dotX = W / 2 + (page - (pageCount - 1) / 2) * 34;
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(dotX, pagingY + 32, page === _levelSelectPage ? 7 : 5, 0, Math.PI * 2);
+            ctx.fillStyle = page === _levelSelectPage ? '#17343a' : 'rgba(23,52,58,0.25)';
+            ctx.fill();
+            ctx.restore();
         }
 
         // 返回营地按钮
@@ -3069,6 +4004,7 @@
         return _setControlSource(sourceId, name, isDown);
     }
     function handleDown(p) {
+        if (_enforceCreatorModeOffline('pointer-input')) return;
         if (_passwordVisible) {
             for (const b of uiBTN.passwordKeys || []) if (inRect(p,b)) {
                 if (b.key === 'close') { _passwordVisible=false; _passwordInput=''; _passwordDismissUntil=performance.now()+900; logStep('puzzle','password-panel-close',{}); return; }
@@ -3096,9 +4032,10 @@
             }
             if (inRect(p, uiBTN.start)) {
                 gameState = 'levelSelect';
+                _setLevelSelectPage(0, 'menu-button-open');
                 logStep('state', 'menu→levelSelect', {});
             }
-            if (inRect(p, uiBTN.creator)) { gameState='creatorList'; logStep('state','menu→creatorList',{}); }
+            if (CREATOR_MODE_ENABLED && inRect(p, uiBTN.creator)) { gameState='creatorList'; logStep('state','menu→creatorList',{}); }
             return;
         }
         if (gameState === 'creatorList') {
@@ -3339,7 +4276,9 @@
             }
         }
     }
-    function handleUp(reason = 'mouse-up') {
+    function handleUp(reason = 'mouse-up', point = null) {
+        _endLevelSelectGesture(point, 'mouse', reason);
+        _endSceneGesture(point, 'mouse', reason);
         const control = _mouseControl;
         _mouseControl = null;
         if (control) {
@@ -3360,17 +4299,67 @@
         }
         _mouseMovingTarget = null;
     }
+    // 现代浏览器统一走 Pointer Events，并捕获指针以保证滑出卡片/画布后仍能收到松手。
+    // 旧 mouse/touch 监听继续保留作后备；pointer 手势活跃时它们只会被记录为重复指针并忽略。
+    function _levelSelectPointerKey(e) { return 'pointer:' + e.pointerId; }
+    canvas.addEventListener('pointerdown', e => {
+        if (gameState !== 'levelSelect') return;
+        const pointer = _levelSelectPointerKey(e);
+        if (_beginLevelSelectGesture(getMousePos(e), pointer)) {
+            try {
+                canvas.setPointerCapture(e.pointerId);
+            } catch (error) {
+                logStep('level-select', 'pointer-capture-failed', {
+                    pointer,
+                    pointerType: e.pointerType || 'unknown',
+                    message: String(error && error.message || error)
+                });
+            }
+            e.preventDefault();
+        }
+    }, { passive: false });
+    canvas.addEventListener('pointermove', e => {
+        const pointer = _levelSelectPointerKey(e);
+        if (_moveLevelSelectGesture(getMousePos(e), pointer)) e.preventDefault();
+    }, { passive: false });
+    function _finishLevelSelectPointer(e, reason) {
+        const pointer = _levelSelectPointerKey(e);
+        if (_endLevelSelectGesture(getMousePos(e), pointer, reason)) {
+            try {
+                if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
+            } catch (error) {
+                logStep('level-select', 'pointer-release-failed', {
+                    pointer,
+                    pointerType: e.pointerType || 'unknown',
+                    reason,
+                    message: String(error && error.message || error)
+                });
+            }
+            e.preventDefault();
+        }
+    }
+    canvas.addEventListener('pointerup', e => _finishLevelSelectPointer(e, 'pointerup'), { passive: false });
+    canvas.addEventListener('pointercancel', e => _finishLevelSelectPointer(e, 'pointercancel'), { passive: false });
+
     canvas.addEventListener('mousedown', e => {
         handleUp('mouse-new-down');
         const p = getMousePos(e), t = gameState === 'playing' ? _movingTargetAt(p) : null;
-        if (t) {
+        if (_beginLevelSelectGesture(p, 'mouse')) {
+            return;
+        } else if (_beginSceneGesture(p, 'mouse')) {
+            return;
+        } else if (t) {
             _mouseMovingTarget = t.obj;
             logStep('input','moving-element-hold',{kind:t.kind,id:t.obj.id,pointer:'mouse'});
         } else handleDown(p);
     });
-    canvas.addEventListener('mouseup', () => handleUp('canvas-mouseup'));
+    canvas.addEventListener('mousemove', e => {
+        const p = getMousePos(e);
+        if (!_moveLevelSelectGesture(p, 'mouse')) _moveSceneGesture(p, 'mouse');
+    });
+    canvas.addEventListener('mouseup', e => handleUp('canvas-mouseup', getMousePos(e)));
     canvas.addEventListener('mouseleave', () => handleUp('canvas-mouseleave'));
-    window.addEventListener('mouseup', () => handleUp('window-mouseup'));
+    window.addEventListener('mouseup', e => handleUp('window-mouseup', getMousePos(e)));
     function _touchPos(touch) {
         const rect = canvas.getBoundingClientRect();
         return { x: (touch.clientX - rect.left) * (W / rect.width), y: (touch.clientY - rect.top) * (H / rect.height) };
@@ -3387,6 +4376,8 @@
         for (const touch of Array.from(e.changedTouches)) {
             const p = _touchPos(touch);
             const moving = gameState === 'playing' ? _movingTargetAt(p) : null;
+            if(_beginLevelSelectGesture(p,touch.identifier))continue;
+            if(_beginSceneGesture(p,touch.identifier))continue;
             if(moving){_heldMovingTargets.set(touch.identifier,moving.obj);logStep('input','moving-element-hold',{kind:moving.kind,id:moving.obj.id,pointer:touch.identifier});continue;}
             const control = gameState === 'playing' ? _controlAt(p) : null;
             if (control) {
@@ -3399,9 +4390,19 @@
             }
         }
     }, { passive: false });
+    canvas.addEventListener('touchmove', e => {
+        e.preventDefault();
+        for(const touch of Array.from(e.changedTouches)){
+            const p=_touchPos(touch);
+            if(!_moveLevelSelectGesture(p,touch.identifier))_moveSceneGesture(p,touch.identifier);
+        }
+    }, { passive: false });
     function _releaseChangedTouches(e, reason) {
         e.preventDefault();
         for (const touch of Array.from(e.changedTouches)) {
+            const p=_touchPos(touch);
+            if(_endLevelSelectGesture(p,touch.identifier,reason))continue;
+            if(_endSceneGesture(p,touch.identifier,reason))continue;
             if(_heldMovingTargets.has(touch.identifier)){const obj=_heldMovingTargets.get(touch.identifier);_heldMovingTargets.delete(touch.identifier);logStep('input','moving-element-release',{id:obj&&obj.id,pointer:touch.identifier,reason});continue;}
             const control = _activeTouchControls.get(touch.identifier);
             if (!control) continue;
@@ -3428,9 +4429,8 @@
                 continue;
             }
             if (window.__wxMiniGame) {
-                // 小游戏包内只发布已完成关卡；未完成的 8–10 关保持锁定，不发起不存在的网页 fetch。
                 _cachedLevels[i] = _makeLevelFallback(i);
-                logStep('level-load', 'probe-missing-inline-level', { idx: i, source: 'wechat-package', available: false });
+                logStep('level-load', 'probe-missing-inline-level', { idx:i, source:'wechat-package', available:false });
                 continue;
             }
             try {
@@ -3487,7 +4487,17 @@
     function loadLevelByIndex(idx) {
         // v4.9.7a D类：从什么来源进入（选关页 / 通关自动跳 / 重来快捷键 / 死亡重来 / 死亡重来拦截）
         const _prev = gameState;
+        const samePersistentRestart = idx === currentLevelIndex && _persistentLevelActive
+            && (gameState === 'playing' || gameState === 'paused');
+        if (samePersistentRestart) {
+            const before = _persistentCrateCount;
+            _persistentCrateCount = Math.min(3, _persistentCrateCount + 1);
+            logStep('mechanic','persistent-reset-step',{before,after:_persistentCrateCount,levelIndex:idx});
+        } else {
+            _persistentCrateCount = 1;
+        }
         currentLevelIndex = idx;
+        _setLevelSelectPage(Math.floor(idx / LEVEL_SELECT_PAGE_SIZE), 'level-load-sync', { levelIndex:idx });
         const isAvail = _availableLevels.includes(idx);
         const isUnlocked = (idx+1) <= _progress.unlocked;
         // idx=0 例外（因为 fallback 也能用），其它没开发 = 提前打印 blocked 原因
@@ -3507,7 +4517,7 @@
     async function loadLevelData() {
         if (window.__wxMiniGame && window.__SMART_EGG_LEVELS__ && window.__SMART_EGG_LEVELS__[0]) {
             levelData = JSON.parse(JSON.stringify(window.__SMART_EGG_LEVELS__[0]));
-            logStep('level-load', 'loadLevelData-inline', { level: 0, source: 'levels.js' });
+            logStep('level-load', 'loadLevelData-inline', { level:0, source:'levels.js' });
             return;
         }
         try {
@@ -3537,6 +4547,13 @@
         }
     }
     function loadLevelAndStart() {
+        const helpWasVisible = helpVisible;
+        helpVisible = false;
+        logStep('state', 'help-default-closed', {
+            levelIndex: currentLevelIndex,
+            previousVisible: helpWasVisible,
+            reason: 'level-load'
+        });
         showSuccess = false; successTimer = SUCCESS_TOTAL; doorOpenT = 0; showDead = false;
         _validKnockCount = 0;
         _heldMovingTargets.clear();_mouseMovingTarget=null;_cameraX=0;_cameraY=0;
@@ -3587,12 +4604,103 @@
         player.jumpsLeft = levelData.double_jump ? 2 : 1;
         resetCratesFromLevel();
         resetKeysFromLevel();
+        _persistentLevelActive = _hasMechanic('persistent_reset');
+        _resetMainlineMechanicState();
         _questionBlocks = (levelData.question_blocks || []).map(b => ({ ...b, remaining: b.count, revealed: 0 }));
         _flowerBursts = [];
         _passwordDismissUntil = 0;
         // v4.9.6c 坏关卡保护：启动健康计数器（进入 playing 后 30 帧检查）
         _healthGuardFrames = 30;
         gameState = 'playing';
+        const dropTerrain = _fantasyGroundLayout(levelData);
+        logStep('render', 'drop-terrain-layout', {
+            style: 'vertical-shaft-v1',
+            levelIndex: idx,
+            groundCount: dropTerrain.grounds.length,
+            gapCount: dropTerrain.gaps.length,
+            gaps: dropTerrain.gaps.map(gap => ({
+                left: Math.round(gap.left),
+                right: Math.round(gap.right),
+                width: Math.round(gap.right - gap.left),
+                top: Math.round(gap.top)
+            })),
+            collisionGeometryChanged: false,
+            visualSidewalls: 'vertical',
+            extendsBelowViewport: true
+        });
+        if (levelData.infinite_horizontal) {
+            const mountainMotion = idx === 6 ? 'fixed' : 'stable-world-lattice';
+            logStep('render', 'infinite-parallax-config', {
+                levelIndex: idx,
+                cameraAnchorX: 420,
+                mountainMotion,
+                mountainFactors: mountainMotion === 'fixed' ? [0, 0, 0] : [0.06, 0.105, 0.15],
+                groundFeaturesWorldAnchored: true,
+                expectedDirection: mountainMotion === 'fixed'
+                    ? 'level-7: player-right => ground/grass-left, mountains-fixed'
+                    : 'player-right => ground/grass/mountains-left-without-seam-pop'
+            });
+        }
+        if (_hasMechanic('reverse_controls')) {
+            const ground = (levelData.platforms || []).find(platform => platform.kind === 'ground');
+            const steps = (levelData.platforms || [])
+                .filter(platform => /^reverse_step_\d+$/.test(platform.kind || ''))
+                .sort((a, b) => Number(a.kind.split('_').pop()) - Number(b.kind.split('_').pop()));
+            const goalStep = (levelData.platforms || []).find(platform => platform.kind === 'reverse_goal_step');
+            const route = [
+                {kind:'spawn',x:levelData.spawn.x,top:ground ? ground.y-ground.h/2 : null,w:HALF_W*2,h:0},
+                ...steps.map(platform => ({kind:platform.kind,x:platform.x,top:platform.y-platform.h/2,w:platform.w,h:platform.h})),
+                ...(goalStep ? [{kind:goalStep.kind,x:goalStep.x,top:goalStep.y-goalStep.h/2,w:goalStep.w,h:goalStep.h}] : [])
+            ];
+            const directions = route.slice(1).map((point, routeIndex) => {
+                const delta = point.x - route[routeIndex].x;
+                return delta < 0 ? 'left' : delta > 0 ? 'right' : 'vertical';
+            });
+            const headClearances = route.slice(1).map((point, routeIndex) =>
+                route[routeIndex].top - point.top - point.h - HALF_H * 2);
+            const horizontalGaps = route.slice(1).map((point, routeIndex) =>
+                Math.abs(point.x - route[routeIndex].x));
+            const segments = route.slice(1).map((point, routeIndex) => {
+                const from = route[routeIndex];
+                const centerSpan = Math.abs(point.x - from.x);
+                const edgeGap = Math.max(0, centerSpan - from.w / 2 - point.w / 2);
+                const timeToProjection = edgeGap / MOVE_SPEED;
+                const riseAtProjection = -(JUMP_VELOCITY * timeToProjection
+                    + GRAVITY * timeToProjection * timeToProjection / 2);
+                const rise = from.top - point.top;
+                return {
+                    from: from.kind,
+                    to: point.kind,
+                    rise,
+                    centerSpan,
+                    edgeGap,
+                    timeToProjection: Number(timeToProjection.toFixed(3)),
+                    riseAtProjection: Number(riseAtProjection.toFixed(1)),
+                    projectionClearance: Number((riseAtProjection - rise).toFixed(1))
+                };
+            });
+            const goalDoor = (levelData.doors || []).find(door => door.is_goal);
+            logStep('mechanic:direction', 'reverse-climb-route-config', {
+                levelIndex: idx,
+                sourceReviewId: levelData.source_review_id,
+                stepCount: steps.length,
+                route,
+                directions,
+                playerHeight: HALF_H * 2,
+                headClearances,
+                minHeadClearance: headClearances.length ? Math.min(...headClearances) : null,
+                horizontalGaps,
+                minHorizontalGap: horizontalGaps.length ? Math.min(...horizontalGaps) : null,
+                maxHorizontalGap: horizontalGaps.length ? Math.max(...horizontalGaps) : null,
+                motionConstants: { moveSpeed: MOVE_SPEED, jumpVelocity: JUMP_VELOCITY, gravity: GRAVITY },
+                segments,
+                minProjectionClearance: segments.length
+                    ? Math.min(...segments.map(segment => segment.projectionClearance))
+                    : null,
+                cameraMinY: _mapBounds(levelData).minY,
+                doorInitiallyVisible: !!goalDoor && goalDoor.y + goalDoor.h / 2 > 0
+            });
+        }
         logStep('state', 'enter-playing', {
             levelIndex: idx,
             hasLevelData: !!levelData,
@@ -3672,19 +4780,168 @@
     let last = performance.now();
     let _prevState = 'menu';
     function _fantasyLine(points,color='#17343a',width=5){ctx.beginPath();points.forEach((p,i)=>i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));ctx.strokeStyle=color;ctx.lineWidth=width;ctx.lineCap='round';ctx.lineJoin='round';ctx.stroke();}
+
+    // 只负责断崖视觉，不参与任何碰撞计算。所有顶面、断口宽度仍以 levelData.platforms 为准。
+    function _fantasyGroundLayout(lv){
+        const source=(lv&&lv.platforms||[]).filter(p=>(p.kind||'ground')==='ground');
+        const grounds=source.map(p=>({
+            x:p.x-p.w/2,
+            y:p.y-p.h/2,
+            w:p.w,
+            h:p.h
+        })).sort((a,b)=>a.x-b.x);
+        if(lv&&lv.infinite_horizontal&&grounds.length){
+            return {grounds:[{x:_cameraX-200,y:grounds[0].y,w:W+400,h:grounds[0].h}],gaps:[]};
+        }
+        const gaps=[];
+        for(let i=0;i<grounds.length-1;i++){
+            const leftGround=grounds[i];
+            const rightGround=grounds[i+1];
+            const left=leftGround.x+leftGround.w;
+            const right=rightGround.x;
+            if(right-left>20){
+                gaps.push({
+                    left,
+                    right,
+                    top:Math.min(leftGround.y,rightGround.y),
+                    leftTop:leftGround.y,
+                    rightTop:rightGround.y,
+                    depth:Math.max(leftGround.h,rightGround.h,360)
+                });
+            }
+        }
+        return {grounds,gaps};
+    }
+    window.__debug.getDropTerrainLayout=()=>JSON.parse(JSON.stringify(_fantasyGroundLayout(levelData)));
+
+    function drawFantasyDropTerrain(){
+        const layout=_fantasyGroundLayout(levelData);
+        for(const gap of layout.gaps){
+            const bottom=Math.max(H+_cameraY+140,gap.top+gap.depth);
+            const shade=ctx.createLinearGradient(0,gap.top,0,bottom);
+            shade.addColorStop(0,'rgba(24,47,49,.62)');
+            shade.addColorStop(.28,'rgba(23,40,43,.86)');
+            shade.addColorStop(1,'rgba(18,26,32,.97)');
+            ctx.save();
+            ctx.fillStyle=shade;
+            ctx.beginPath();
+            ctx.moveTo(gap.left,gap.leftTop+5);
+            ctx.lineTo(gap.right,gap.rightTop+5);
+            ctx.lineTo(gap.right,bottom);
+            ctx.lineTo(gap.left,bottom);
+            ctx.closePath();
+            ctx.fill();
+            ctx.clip();
+            const mist=ctx.createLinearGradient(0,gap.top+70,0,bottom);
+            mist.addColorStop(0,'rgba(202,217,187,0)');
+            mist.addColorStop(1,'rgba(202,217,187,.2)');
+            ctx.fillStyle=mist;
+            ctx.fillRect(gap.left,gap.top,gap.right-gap.left,bottom-gap.top);
+            ctx.strokeStyle='rgba(192,199,164,.15)';
+            ctx.lineWidth=10;
+            ctx.beginPath();
+            ctx.moveTo(gap.left+35,gap.top+120);
+            ctx.bezierCurveTo((gap.left+gap.right)/2,gap.top+90,(gap.left+gap.right)/2,gap.top+230,gap.right-35,gap.top+190);
+            ctx.stroke();
+            ctx.restore();
+        }
+    }
+
     function drawFantasyPlatforms(){
+        const layout=_fantasyGroundLayout(levelData);
         for(let i=0;i<(levelData&&levelData.platforms||[]).length;i++){
             const p=levelData.platforms[i],kind=p.kind||'ground';let x=p.x-p.w/2,w=p.w,y=p.y-p.h/2,h=p.h;if(levelData.infinite_horizontal&&kind==='ground'){x=_cameraX-200;w=W+400;}
             if(kind==='ground'){
-                // 玩家活动层是高处悬崖：薄草顶、明亮岩沿、向下延伸的峭壁
-                const cliff=ctx.createLinearGradient(0,y,0,y+h);cliff.addColorStop(0,'#777b63');cliff.addColorStop(.25,'#655f54');cliff.addColorStop(1,'#3e4442');ctx.fillStyle=cliff;ctx.fillRect(x,y,w,h);ctx.fillStyle='#83975e';ctx.fillRect(x,y,w,24);ctx.fillStyle='#d7bb6e';ctx.fillRect(x,y,w,8);_fantasyLine([[x,y],[x+w,y]],'#17343a',6);
-                if(x>1)_fantasyLine([[x,y],[x,y+h]],'#17343a',6);if(x+w<W-1)_fantasyLine([[x+w,y],[x+w,y+h]],'#17343a',6);
+                // 顶边与碰撞严格齐平；断口左右侧壁按用户标注垂直延伸到底部。
+                const leftCliff=layout.gaps.some(g=>Math.abs(g.right-x)<1);
+                const rightCliff=layout.gaps.some(g=>Math.abs(g.left-(x+w))<1);
+                const groundPath=()=>{
+                    ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+w,y);
+                    ctx.lineTo(x+w,y+h);
+                    ctx.lineTo(x,y+h);
+                    ctx.closePath();
+                };
+                const cliff=ctx.createLinearGradient(0,y,0,y+h);cliff.addColorStop(0,'#777b63');cliff.addColorStop(.25,'#655f54');cliff.addColorStop(1,'#3e4442');ctx.fillStyle=cliff;groundPath();ctx.fill();
+                ctx.save();groundPath();ctx.clip();ctx.fillStyle='#83975e';ctx.fillRect(x,y,w,24);ctx.fillStyle='#d7bb6e';ctx.fillRect(x,y,w,8);
                 const first=levelData.infinite_horizontal?Math.floor((_cameraX-150)/150)*150:x+60,last=levelData.infinite_horizontal?_cameraX+W+150:x+w-40;for(let gx=first;gx<last;gx+=150){_fantasyLine([[gx,y],[gx-5,y-15]],'#34483e',3);_fantasyLine([[gx,y],[gx+7,y-12]],'#34483e',3);}
-                ctx.strokeStyle='rgba(38,48,48,.72)';ctx.lineWidth=4;for(let rx=x+95,ri=0;rx<x+w-40;rx+=170,ri++){const len=50+(ri%3)*34;ctx.beginPath();ctx.moveTo(rx,y+38);ctx.lineTo(rx-12,y+38+len*.45);ctx.lineTo(rx+7,y+38+len);ctx.stroke();}
-                ctx.fillStyle='rgba(228,205,142,.18)';for(let sx=x+60; sx<x+w; sx+=210){ctx.beginPath();ctx.ellipse(sx,y+75,42,9,-.08,0,Math.PI*2);ctx.fill();}
+                const featureFirst=levelData.infinite_horizontal?Math.floor((_cameraX-250)/170)*170:x+95;
+                const featureLast=levelData.infinite_horizontal?_cameraX+W+250:x+w-40;
+                ctx.strokeStyle='rgba(38,48,48,.72)';ctx.lineWidth=4;for(let rx=featureFirst,ri=Math.floor(featureFirst/170);rx<featureLast;rx+=170,ri++){const len=50+(((ri%3)+3)%3)*34;ctx.beginPath();ctx.moveTo(rx,y+38);ctx.lineTo(rx-12,y+38+len*.45);ctx.lineTo(rx+7,y+38+len);ctx.stroke();}
+                const patchFirst=levelData.infinite_horizontal?Math.floor((_cameraX-250)/210)*210:x+60;
+                const patchLast=levelData.infinite_horizontal?_cameraX+W+250:x+w;
+                ctx.fillStyle='rgba(228,205,142,.18)';for(let sx=patchFirst;sx<patchLast;sx+=210){ctx.beginPath();ctx.ellipse(sx,y+75,42,9,-.08,0,Math.PI*2);ctx.fill();}
+                ctx.restore();
+                _fantasyLine([[x,y],[x+w,y]],'#17343a',6);
+                if(leftCliff)_fantasyLine([[x,y],[x,y+h]],'#17343a',7);
+                if(rightCliff)_fantasyLine([[x+w,y],[x+w,y+h]],'#17343a',7);
             }else{
                 ctx.save();ctx.fillStyle='#d9bd71';ctx.strokeStyle='#17343a';ctx.lineWidth=5;_roundPath(x,y,w,h,Math.min(15,h*.25));ctx.fill();ctx.stroke();ctx.fillStyle='#f3dc96';ctx.fillRect(x+12,y+9,w-24,Math.max(7,h*.22));ctx.strokeStyle='#9b7e42';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(x+w*.2,y+h*.67);ctx.lineTo(x+w*.42,y+h*.64);ctx.moveTo(x+w*.65,y+h*.7);ctx.lineTo(x+w*.8,y+h*.66);ctx.stroke();ctx.restore();
             }
+        }
+    }
+    function drawNewLevelMechanics(){
+        if(_hasMechanic('shadow_switch')){
+            const cfg=levelData.shadow_switch||{x:820};
+            const glow=ctx.createRadialGradient(_shadowSunX,220,12,_shadowSunX,220,108);
+            glow.addColorStop(0,'rgba(255,240,189,.95)');glow.addColorStop(1,'rgba(255,240,189,0)');
+            ctx.fillStyle=glow;ctx.beginPath();ctx.arc(_shadowSunX,220,110,0,Math.PI*2);ctx.fill();
+            ctx.fillStyle='#e7c767';ctx.strokeStyle='#17343a';ctx.lineWidth=6;ctx.beginPath();ctx.arc(_shadowSunX,220,54,0,Math.PI*2);ctx.fill();ctx.stroke();
+            // 影子抬离地面描边形成清晰梯形，缩小显示时仍能看出方向和长度。
+            ctx.save();ctx.fillStyle='rgba(23,52,58,.36)';ctx.strokeStyle='rgba(23,52,58,.62)';ctx.lineWidth=3;
+            ctx.beginPath();ctx.moveTo(player.x-25,866);ctx.lineTo(player.x+25,866);ctx.lineTo(_shadowTipX+34,842);ctx.lineTo(_shadowTipX-34,842);ctx.closePath();ctx.fill();ctx.stroke();ctx.restore();
+            ctx.fillStyle=_shadowUnlocked?'#e7c767':'#405653';ctx.strokeStyle='#17343a';ctx.lineWidth=5;_roundPath(cfg.x-58,846,116,24,8);ctx.fill();ctx.stroke();
+        }
+        if(_hasMechanic('still_door')&&_stillTime>.3){
+            const door=(levelData.doors||[]).find(d=>d.is_goal);
+            if(door){ctx.fillStyle='#fff0bd';ctx.font='800 42px sans-serif';ctx.textAlign='center';ctx.fillText('·'.repeat(Math.min(3,Math.floor(_stillTime))),door.x,door.y-door.h/2-36);}
+        }
+        if(_hasMechanic('word_bridge')){
+            const geometry=_wordBridgeGeometry();
+            if(_wordPlaced){
+                ctx.fillStyle='#17343a';ctx.font='900 82px "PingFang SC",sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('路',_wordDragPos.x,_wordDragPos.y);
+            }else if(_sceneDrag&&_sceneDrag.type==='word'){
+                ctx.save();ctx.globalAlpha=.38;ctx.strokeStyle='#e7c767';ctx.lineWidth=8;ctx.setLineDash([20,14]);
+                _roundPath(geometry.bridge.x-geometry.bridge.w/2,geometry.groundTop,geometry.bridge.w,geometry.bridge.h,12);ctx.stroke();ctx.restore();
+                ctx.save();ctx.fillStyle='#fff0bd';ctx.strokeStyle='#17343a';ctx.lineWidth=6;_roundPath(_wordDragPos.x-52,_wordDragPos.y-52,104,104,18);ctx.fill();ctx.stroke();
+                ctx.fillStyle='#17343a';ctx.font='900 66px "PingFang SC",sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('路',_wordDragPos.x,_wordDragPos.y);ctx.restore();
+            }
+        }
+        if(_hasMechanic('drag_world')){
+            ctx.save();ctx.translate(_dragWorldOffset,0);ctx.strokeStyle='#17343a';ctx.lineWidth=5;
+            for(let x=700;x<3900;x+=330){ctx.beginPath();ctx.moveTo(x,870);ctx.lineTo(x-12,844);ctx.moveTo(x,870);ctx.lineTo(x+17,850);ctx.stroke();}
+            ctx.restore();
+        }
+        if(_hasMechanic('dual_bridge')&&!_acceptedDualBuilt&&_acceptedDualHold>0){
+            const g=_acceptedBridgeGeometry('dual_bridge'),progress=_acceptedDualHold;
+            ctx.save();ctx.strokeStyle='#e7c767';ctx.lineWidth=16;ctx.lineCap='round';
+            ctx.beginPath();ctx.moveTo(g.left,g.top+5);ctx.quadraticCurveTo(g.left+90,g.top-145,g.left+(g.right-g.left)*.5*progress,g.top);
+            ctx.moveTo(g.right,g.top+5);ctx.quadraticCurveTo(g.right-90,g.top-145,g.right-(g.right-g.left)*.5*progress,g.top);ctx.stroke();ctx.restore();
+        }
+        if(_hasMechanic('ink_path')){
+            const visible=_acceptedInkBuilt||(_sceneDrag&&_sceneDrag.type==='accepted-ink')||performance.now()<_acceptedInkErrorUntil;
+            if(visible&&_acceptedInkPath.length>1){
+                ctx.save();ctx.globalAlpha=_acceptedInkBuilt ? 1 : (performance.now() < _acceptedInkErrorUntil ? .38 : .82);ctx.strokeStyle='#17343a';ctx.lineWidth=12;ctx.lineCap='round';ctx.lineJoin='round';ctx.beginPath();ctx.moveTo(_acceptedInkPath[0].x,_acceptedInkPath[0].y);for(let i=1;i<_acceptedInkPath.length;i++)ctx.lineTo(_acceptedInkPath[i].x,_acceptedInkPath[i].y);ctx.stroke();ctx.restore();
+            }
+        }
+        if(_hasMechanic('shrink_tunnel')){
+            ctx.save();ctx.fillStyle='#596957';ctx.strokeStyle='#17343a';ctx.lineWidth=7;_roundPath(700,585,630,100,12);ctx.fill();ctx.stroke();ctx.restore();
+        }
+        if(_hasMechanic('freeze_spikes')){
+            const frozen=_acceptedFreezeHeld();
+            for(let x=780;x<=1280;x+=70){const rise=frozen?12:30+(Math.sin(frameCount*.15+x)+1)*28;ctx.save();ctx.fillStyle=frozen?'#79c8d1':'#d94b54';ctx.strokeStyle='#17343a';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(x-25,870);ctx.lineTo(x,870-rise);ctx.lineTo(x+25,870);ctx.closePath();ctx.fill();ctx.stroke();ctx.restore();}
+        }
+        if(_hasMechanic('face_away')&&_acceptedFaceHold>0){
+            const door=_acceptedGoalDoor();if(door){ctx.save();ctx.fillStyle='rgba(255,240,189,.78)';ctx.beginPath();ctx.arc(door.x,door.y-door.h/2-34,12+24*_acceptedFaceHold/1.2,0,Math.PI*2);ctx.fill();ctx.restore();}
+        }
+        if(_hasMechanic('door_jumps')){
+            const door=_acceptedGoalDoor();if(door&&door.y<720&&!_acceptedDoorLocked){ctx.save();ctx.strokeStyle='rgba(231,199,103,.72)';ctx.lineWidth=6;ctx.beginPath();ctx.arc(door.x,door.y-door.h/2-28,20,0,Math.PI*2);ctx.stroke();ctx.restore();}
+        }
+        if(_hasMechanic('ground_swap')){
+            const grass=(x,active)=>{ctx.save();ctx.strokeStyle=active?'#e7c767':'#17343a';ctx.lineWidth=7;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(x,870);ctx.lineTo(x-24,816);ctx.moveTo(x,870);ctx.lineTo(x,803);ctx.moveTo(x,870);ctx.lineTo(x+27,822);ctx.stroke();ctx.restore();};
+            grass(665,_acceptedGroundPhase===0);grass(1240,_acceptedGroundPhase===1);
+        }
+        if(_hasMechanic('erase_wall')&&_acceptedWallErase<1){
+            ctx.save();ctx.globalAlpha=Math.max(.12,1-_acceptedWallErase);ctx.fillStyle='#655e76';ctx.strokeStyle='#17343a';ctx.lineWidth=8;_roundPath(900,410,120,460,10);ctx.fill();ctx.stroke();ctx.restore();
         }
     }
     function drawFantasyDoors(){
@@ -3705,7 +4962,8 @@
     function drawFantasyCrates(){for(let i=0;i<crates.length;i++){const c=crates[i],x=c.x-c.w/2,y=c.y-c.h/2;ctx.save();ctx.fillStyle='#9b653d';ctx.strokeStyle='#17343a';ctx.lineWidth=6;_roundPath(x,y,c.w,c.h,9);ctx.fill();ctx.stroke();ctx.fillStyle='#c78a4d';ctx.fillRect(x+13,y+13,c.w-26,c.h-26);ctx.strokeRect(x+13,y+13,c.w-26,c.h-26);_fantasyLine([[x+18,y+18],[x+c.w-18,y+c.h-18]],'#70452f',7);_fantasyLine([[x+c.w-18,y+18],[x+18,y+c.h-18]],'#70452f',7);ctx.fillStyle='#e0ba61';ctx.fillRect(x-3,y+8,c.w+6,13);ctx.fillRect(x-3,y+c.h-21,c.w+6,13);ctx.restore();}}
     function drawFantasyPlayer(){
         let ax=player.x,ay=player.y,scale=1;if(showSuccess){const e=SUCCESS_TOTAL-successTimer;if(e>=40&&e<100){const t=(e-40)/60,q=t*t;ax=_animStartX+(_animTargetX-_animStartX)*q;ay=_animStartY+(_animTargetY-_animStartY)*q;scale=1-q;}else if(e>=100)return;}
-        const air=!player.onGround,walking=player.onGround&&Math.abs(player.vx)>10,rising=air&&player.vy<0,clock=performance.now()*.001,dir=player.vx<0?-1:1,bob=walking?-Math.max(0,Math.sin(player.walkT))*5:0;
+        if(_hasMechanic('shrink_tunnel')&&_acceptedPlayerSmall){ay+=(1-.62)*84;scale*=.62;}
+        const air=!player.onGround,walking=player.onGround&&Math.abs(player.vx)>10,rising=air&&player.vy<0,clock=performance.now()*.001,dir=player.vx<0?-1:(player.vx>0?1:_acceptedFacing),bob=walking?-Math.max(0,Math.sin(player.walkT))*5:0;
         ctx.save();ctx.translate(ax,ay-24+bob);ctx.scale(dir*scale,scale);const run=walking?1:0,lift=air?1:0,wave=Math.sin(clock*14)*6*run+Math.sin(clock*8)*3*lift;
         ctx.fillStyle='#b54043';ctx.beginPath();ctx.moveTo(-7,-31);ctx.bezierCurveTo(-31-run*20-lift*12,-15-wave,-50-run*28,24-wave*.5-lift*10,-36-run*20,50-lift*14);ctx.quadraticCurveTo(-6,39-wave*.2,15,31);ctx.closePath();ctx.fill();ctx.strokeStyle='#17343a';ctx.lineWidth=5;ctx.stroke();
         ctx.fillStyle='#f2d18c';ctx.beginPath();ctx.ellipse(0,-34,27,30,0,0,Math.PI*2);ctx.fill();ctx.stroke();
@@ -3721,6 +4979,7 @@
         if (dt > 0.05) dt = 0.05;
         last = now;
         frameCount++;
+        _enforceCreatorModeOffline('frame-guard');
         if (frameCount % 60 === 0) {
             logStep('snapshot', 'one-second-state', {
                 gameState, levelIndex: currentLevelIndex, showSuccess, showDead,
@@ -3787,14 +5046,22 @@
                 const nxt = idx + 1;
                 const overflow  = nxt >= TOTAL_LEVELS;
                 const nAvail    = _availableLevels.includes(nxt);
-                const nUnlocked = (nxt + 1) <= _progress.unlocked;
-                const hasNext   = !overflow && nAvail && nUnlocked;
+                const unlockedBefore = _progress.unlocked;
                 if (!_progress.completed.includes(idx)) _progress.completed.push(idx);
                 const nextUnlock = Math.min(TOTAL_LEVELS, Math.max(_progress.unlocked, idx + 2));
                 _progress.unlocked = nextUnlock;
+                const nUnlocked = (nxt + 1) <= _progress.unlocked;
+                const hasNext   = !overflow && nAvail && nUnlocked;
                 saveProgress();
                 logStep('state', 'progress-saved', { levelIndex: idx, completed: _progress.completed, unlocked: _progress.unlocked });
+                logStep('state', 'mainline-auto-next-decision', {
+                    idx, nxt, hasNext, overflow, nxt_available: nAvail, nxt_unlocked: nUnlocked,
+                    unlocked_before: unlockedBefore, unlocked_after: _progress.unlocked
+                });
                 const labelSec = (GOAL_HIT_JUMP_MS / 1000).toFixed(2) + 's';
+                _goalHitJumped = true;
+                _goalHitStartMs = 0;
+                _goalHitLevelIndex = -1;
                 if (hasNext) {
                     logStep('state', 'goalHit(' + labelSec + ')→next', {
                         idx, nxt, elapsed_ms: Math.round(elapsed), target_ms: GOAL_HIT_JUMP_MS, fps: Math.round(_fpsSmoothed)
@@ -3807,7 +5074,7 @@
                     currentLevelIndex = nxt;
                     loadLevelByIndex(nxt);
                 } else {
-                    logStep('state', 'goalHit(' + labelSec + ')→levelSelect', {
+                    logStep('state', 'goalHit(' + labelSec + ')→complete', {
                         idx, nxt, overflow, nxt_available: nAvail, nxt_unlocked: nUnlocked,
                         reason: overflow ? '最后一关' : (!nAvail ? '下一关未开发' : '下一关未解锁'),
                         elapsed_ms: Math.round(elapsed), target_ms: GOAL_HIT_JUMP_MS, fps: Math.round(_fpsSmoothed),
@@ -3815,11 +5082,9 @@
                     });
                     showSuccess = false;
                     showDead = false;
-                    gameState = 'levelSelect';
+                    gameState = 'complete';
+                    _completeTimer = 0;
                 }
-                _goalHitJumped = true;
-                _goalHitStartMs = 0;
-                _goalHitLevelIndex = -1;
             }
         }
 
@@ -3926,7 +5191,14 @@
         }
 
         try {
-            drawGrid();
+            const gameplayWorldVisible = !['menu','levelSelect','creatorList','creatorEdit','complete','completeIntro'].includes(gameState);
+            const mountainParallaxX = gameplayWorldVisible && levelData && levelData.infinite_horizontal
+                ? (currentLevelIndex === 6 ? 0 : _cameraX)
+                : 0;
+            drawGrid({
+                mountainParallaxX,
+                hideSun: gameplayWorldVisible && _hasMechanic('shadow_switch')
+            });
             if (gameState === 'menu') drawMenu();
             else if (gameState === 'levelSelect') drawLevelSelect();
             else if (gameState === 'creatorList') drawCreatorList();
@@ -3934,7 +5206,9 @@
             else if (gameState === 'complete' || gameState === 'completeIntro') drawComplete();
             else {
                 ctx.save();ctx.translate(-_cameraX,-_cameraY);
+                drawFantasyDropTerrain();
                 drawFantasyPlatforms();
+                drawNewLevelMechanics();
                 drawDecor();
                 drawFantasyCrates();
                 drawKeys();
@@ -4141,10 +5415,23 @@
     (async function main() {
         resize();
         logStep('lifecycle', 'session-start', _runtimeSnapshot());
+        logStep('feature', 'creator-mode-status', { enabled:CREATOR_MODE_ENABLED, localData:'preserved', storageKey:CREATOR_LS_KEY });
         // v4.9.6 启动时探测所有可用关卡
         await probeAvailableLevels();
         // 预加载第 0 关数据（菜单页背景用不到，只是启动热身）
         await loadLevelData();
+        const requestedScreen = new URLSearchParams(location.search).get('screen');
+        if (requestedScreen === 'levelSelect') {
+            gameState = 'levelSelect';
+            _setLevelSelectPage(0, 'startup-route');
+            logStep('state', 'startup-route', { requested: requestedScreen, resolved: gameState });
+        } else if (requestedScreen === 'menu') {
+            gameState = 'menu';
+            logStep('state', 'startup-route', { requested: requestedScreen, resolved: gameState });
+        } else if (!CREATOR_MODE_ENABLED && (requestedScreen === 'creatorList' || requestedScreen === 'creatorEdit')) {
+            gameState = 'menu';
+            logStep('feature', 'creator-mode-route-blocked', { source:'startup-route', requested:requestedScreen, resolved:gameState });
+        }
         if (new URLSearchParams(location.search).get('inputtest') === '1') {
             setTimeout(() => {
                 _runInputRegressionTests().catch(error => {

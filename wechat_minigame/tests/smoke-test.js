@@ -1,6 +1,25 @@
 'use strict';
 
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+
+const projectRoot = path.resolve(__dirname, '../..');
+assert.strictEqual(
+  fs.readFileSync(path.join(projectRoot, 'wechat_minigame/js/levels.js'), 'utf8'),
+  fs.readFileSync(path.join(projectRoot, 'godot_project/levels/levels_bundle.js'), 'utf8'),
+  '微信关卡包必须与网页20关离线包逐字一致'
+);
+assert.strictEqual(
+  fs.readFileSync(path.join(projectRoot, 'wechat_minigame/js/physics-collision.js'), 'utf8'),
+  fs.readFileSync(path.join(projectRoot, 'web_preview/physics-collision.js'), 'utf8'),
+  '微信碰撞模块必须与网页同源'
+);
+assert.strictEqual(
+  fs.readFileSync(path.join(projectRoot, 'wechat_minigame/js/accepted-mechanics.js'), 'utf8'),
+  fs.readFileSync(path.join(projectRoot, 'web_preview/accepted-mechanics.js'), 'utf8'),
+  '微信评审机制模块必须与网页同源'
+);
 
 function contextStub() {
   return new Proxy({
@@ -28,6 +47,13 @@ function canvasStub() {
 }
 
 const callbacks = {};
+const storageCalls = { set:[], remove:[], clear:0 };
+let clipboardWrites = 0;
+let clipboardReads = 0;
+let keyboardShows = 0;
+let modalShows = 0;
+let lastFileWrite = null;
+let clipboardWriteFails = false;
 const hostDocumentListeners = Object.create(null);
 global.GameGlobal = global;
 const readonlyHostDocument = Object.freeze({
@@ -105,9 +131,9 @@ global.wx = {
   getAppBaseInfo: () => ({ SDKVersion: 'test', language: 'zh_CN' }),
   getDeviceInfo: () => ({ platform: 'devtools' }),
   getStorageSync: () => '',
-  setStorageSync: () => {},
-  removeStorageSync: () => {},
-  clearStorageSync: () => {},
+  setStorageSync: (key, value) => { storageCalls.set.push({ key, value }); },
+  removeStorageSync: key => { storageCalls.remove.push(key); },
+  clearStorageSync: () => { storageCalls.clear += 1; },
   onTouchStart: fn => { callbacks.touchstart = fn; },
   onTouchMove: fn => { callbacks.touchmove = fn; },
   onTouchEnd: fn => { callbacks.touchend = fn; },
@@ -122,16 +148,27 @@ global.wx = {
   onKeyboardComplete: () => {},
   offKeyboardConfirm: () => {},
   offKeyboardComplete: () => {},
-  showKeyboard: () => {},
+  showKeyboard: () => { keyboardShows += 1; },
   hideKeyboard: () => {},
-  getClipboardData: options => options.fail(),
-  setClipboardData: options => options.success && options.success(),
+  getClipboardData: options => { clipboardReads += 1; options.fail(); },
+  setClipboardData: options => {
+    clipboardWrites += 1;
+    if (clipboardWriteFails) options.fail && options.fail({ errMsg:'simulated-clipboard-failure' });
+    else options.success && options.success();
+  },
   showToast: () => {},
-  showModal: () => {},
-  getFileSystemManager: () => ({ writeFile: options => options.success() }),
+  showModal: () => { modalShows += 1; },
+  getFileSystemManager: () => ({
+    writeFile: options => {
+      lastFileWrite = { filePath:options.filePath, data:options.data, encoding:options.encoding };
+      options.success();
+    }
+  }),
   env: { USER_DATA_PATH: '/tmp' }
 };
 
+const nativeObjectFromEntries = Object.fromEntries;
+Object.fromEntries = undefined;
 require('../game.js');
 
 setTimeout(async () => {
@@ -150,19 +187,149 @@ setTimeout(async () => {
   assert.notStrictEqual(gameWindow, global, 'game browser shims must live on an isolated compatibility window');
   assert.ok(gameWindow.document.getElementById('game-canvas'));
   assert.strictEqual(gameWindow.navigator.userAgent, 'WeChatMiniGame/test');
-  assert.strictEqual(global.__SMART_EGG_WECHAT_BRIDGE__.version, 163);
-  assert.strictEqual(Object.keys(global.__SMART_EGG_LEVELS__).length, 7);
+  assert.strictEqual(global.__SMART_EGG_WECHAT_BRIDGE__.version, 183);
+  assert.strictEqual(Object.keys(global.__SMART_EGG_LEVELS__).length, 20);
+  assert.deepStrictEqual(Object.keys(global.__SMART_EGG_LEVELS__).map(Number), Array.from({ length:20 }, (_, index) => index));
   assert.ok(gameWindow.__debug, 'game debug API should be installed');
+  assert.strictEqual(gameWindow.__debug.VERSION, 183);
   assert.strictEqual(gameWindow.__debug.getState(), 'menu');
+  assert.deepStrictEqual(gameWindow.__debug.getFeatures(), { creatorMode:{ enabled:false, localData:'preserved' } });
+  assert.strictEqual(gameWindow.__debug.setState('creatorList'), 'menu', 'disabled creator route must be blocked');
+  assert.strictEqual(gameWindow.__debug.getState(), 'menu');
+  assert.strictEqual(gameWindow.__wxPromptLevelCode, undefined,
+    'disabled creator mode must not register the clipboard/keyboard level-code bridge');
+  assert.strictEqual(clipboardReads, 0, 'disabled creator mode must not read clipboard data');
+  assert.strictEqual(keyboardShows, 0, 'disabled creator mode must not open the level-code keyboard');
+  assert.strictEqual(storageCalls.remove.includes('smart_egg_creator_levels_v1'), false, 'creator data must not be deleted');
+  assert.strictEqual(storageCalls.clear, 0, 'offline mode must not clear storage');
+  const adapterLogControl = gameWindow.__SMART_EGG_ADAPTER_LOG_CONFIG__;
+  assert.ok(adapterLogControl && adapterLogControl.getModules().export,
+    'wechat adapter logs must expose independent module controls');
+  assert.ok(/^se-wx-/.test(adapterLogControl.sessionId),
+    'wechat adapter logs must expose a per-run session id');
+  assert.strictEqual(adapterLogControl.getModules().input, false,
+    'high-frequency adapter input logs must be disabled in production');
+  assert.strictEqual(adapterLogControl.getModules().audio, false,
+    'verbose adapter audio logs must be disabled in production');
+  const adapterRuntimeLogs = adapterLogControl.find('runtime', '');
+  assert.ok(adapterRuntimeLogs.some(entry => entry.event === 'adapter-session-start')
+    && adapterRuntimeLogs.some(entry => entry.event === 'adapter-ready'),
+    'adapter runtime module must diagnose the session start and ready path');
+  assert.ok(adapterRuntimeLogs.every((entry, index, entries) =>
+    entry.sessionId === adapterLogControl.sessionId
+    && Number.isInteger(entry.seq)
+    && (index === 0 || entry.seq > entries[index - 1].seq)
+  ), 'adapter diagnostics must carry one session id and increasing sequence numbers');
+  assert.deepStrictEqual(adapterLogControl.redact({ nested:{ secret:'hide', cookie:'hide', safe:3 } }),
+    { nested:{ secret:'[REDACTED]', cookie:'[REDACTED]', safe:3 } },
+    'wechat adapter logs must recursively redact sensitive fields');
+  const adapterSensitiveMatrix = adapterLogControl.redact({
+    token:'leak-token', access_token:'leak-access', appSecret:'leak-app', apiKey:'leak-api',
+    private_key:'leak-private', authorizationHeader:'Basic leak-basic', safe:'visible'
+  });
+  for (const key of ['token','access_token','appSecret','apiKey','private_key','authorizationHeader']) {
+    assert.strictEqual(adapterSensitiveMatrix[key], '[REDACTED]', `adapter sensitive key ${key} must be redacted`);
+  }
+  assert.strictEqual(adapterSensitiveMatrix.safe, 'visible');
+  const adapterSensitiveMessage = adapterLogControl.redact({
+    message:'token: leak-colon Cookie: sid=leak-cookie\nAuthorization: Basic leak-basic\n{"access_token":"leak-json"}\n-----BEGIN PRIVATE KEY-----\nleak-pem\n-----END PRIVATE KEY-----'
+  }).message;
+  for (const secret of ['leak-colon','leak-cookie','leak-basic','leak-json','leak-pem']) {
+    assert.ok(!adapterSensitiveMessage.includes(secret), `adapter error string must redact ${secret}`);
+  }
+  const adapterExportLogsBeforeMute = adapterLogControl.find('export', '').length;
+  adapterLogControl.setModule('export', false);
+  gameWindow.AndroidLogExporter.exportLog('muted-export-test.json', '{}');
+  assert.strictEqual(adapterLogControl.find('export', '').length, adapterExportLogsBeforeMute,
+    'muted adapter export module must suppress only export diagnostics');
+  assert.strictEqual(adapterLogControl.setModule('export', true).enabled, true,
+    'adapter export diagnostics must be independently restorable');
+  gameWindow.localStorage.setItem('diagnostic-test', 'ok');
+  assert.ok(adapterLogControl.find('storage', 'write-success').some(entry =>
+    entry.context.key === 'diagnostic-test' && entry.context.bytes === 2
+  ), 'adapter storage module must diagnose non-sensitive mutation metadata');
+  gameWindow.localStorage.removeItem('diagnostic-test');
+  assert.ok(adapterLogControl.find('storage', 'remove-success').some(entry =>
+    entry.context.key === 'diagnostic-test'
+  ), 'adapter storage module must diagnose removal without recording values');
+  const normalStorageSetter = global.wx.setStorageSync;
+  global.wx.setStorageSync = () => { throw new Error('simulated-storage-write-failure'); };
+  assert.throws(() => gameWindow.localStorage.setItem('diagnostic-failure', 'value'), /simulated-storage-write-failure/,
+    'storage failures must remain visible to the caller');
+  assert.ok(adapterLogControl.find('storage', 'write-failed').some(entry =>
+    entry.context.key === 'diagnostic-failure' && entry.level === 'error'
+  ), 'adapter storage failure must produce an actionable diagnostic');
+  global.wx.setStorageSync = normalStorageSetter;
+  adapterLogControl.setModule('audio', true);
+  const adapterAudio = new gameWindow.AudioContext();
+  assert.ok(adapterAudio && adapterLogControl.find('audio', 'context-created').length > 0,
+    'adapter audio module must diagnose implementation selection when enabled');
+  adapterLogControl.setModule('audio', false);
+  callbacks.hide();
+  callbacks.show();
+  const networkLogsBeforeMute = adapterLogControl.find('network', 'status-change').length;
+  adapterLogControl.setModule('network', false);
+  callbacks.network({ isConnected:false, networkType:'none' });
+  assert.strictEqual(adapterLogControl.find('network', 'status-change').length, networkLogsBeforeMute,
+    'disabled adapter network module must suppress only network diagnostics');
+  adapterLogControl.setModule('network', true);
+  callbacks.network({ isConnected:true, networkType:'wifi' });
+  assert.ok(adapterLogControl.find('runtime', 'app-hide').length > 0
+    && adapterLogControl.find('runtime', 'app-show').length > 0
+    && adapterLogControl.find('network', 'status-change').length === networkLogsBeforeMute + 1,
+    'adapter runtime and network modules must independently diagnose lifecycle and connectivity');
+  const paging = gameWindow.__debug.getLevelSelectPaging();
+  assert.strictEqual(paging.pageSize, 8);
+  assert.strictEqual(paging.pageCount, 3);
+  const logModules = gameWindow.__debug.getLogModules();
+  assert.strictEqual(logModules.feature, true);
+  assert.strictEqual(logModules['level-load'], true);
+  assert.strictEqual(logModules.physics, false, 'verbose physics logs must stay disabled in production');
+  const blockedFeatureLogs = () => gameWindow._findLogs('creator-mode-route-blocked', 'feature').length;
+  const featureBeforeDisabledProbe = blockedFeatureLogs();
+  gameWindow.__debug.setLogModule('feature', false);
+  gameWindow.__debug.setState('creatorList');
+  assert.strictEqual(blockedFeatureLogs(), featureBeforeDisabledProbe,
+    'disabled feature module must suppress only feature diagnostics');
+  gameWindow.__debug.setLogModule('feature', true);
+  gameWindow.__debug.setState('creatorList');
+  assert.strictEqual(blockedFeatureLogs(), featureBeforeDisabledProbe + 1,
+    're-enabled feature module must resume feature diagnostics');
+  const redacted = gameWindow.__debug.redactLogContext({
+    safe:'visible', nested:{
+      password:'do-not-log', accessToken:'do-not-log', token:'do-not-log', access_token:'do-not-log',
+      appSecret:'do-not-log', apiKey:'do-not-log', private_key:'do-not-log', authorizationHeader:'do-not-log', count:2
+    }
+  });
+  assert.deepStrictEqual(redacted, {
+    safe:'visible', nested:{
+      password:'[REDACTED]', accessToken:'[REDACTED]', token:'[REDACTED]', access_token:'[REDACTED]',
+      appSecret:'[REDACTED]', apiKey:'[REDACTED]', private_key:'[REDACTED]', authorizationHeader:'[REDACTED]', count:2
+    }
+  }, 'nested sensitive fields must be redacted without hiding safe context');
+  const runtimeSensitiveMessage = gameWindow.__debug.redactLogContext({
+    message:'token: leak-runtime Cookie: sid=leak-cookie\nAuthorization: Basic leak-basic\n{"apiKey":"leak-json"}'
+  }).message;
+  for (const secret of ['leak-runtime','leak-cookie','leak-basic','leak-json']) {
+    assert.ok(!runtimeSensitiveMessage.includes(secret), `runtime error string must redact ${secret}`);
+  }
+  assert.strictEqual(gameWindow._findLogs('', 'fatal').length, 0, 'normal cold start must not emit fatal logs');
+  const probeLog = gameWindow._findLogs('probe-available-levels', 'level-load').at(-1);
+  assert.ok(probeLog && probeLog.kv.available_count === 20 && probeLog.kv.missing_count === 0,
+    'cold start must discover all 20 inline levels');
   assert.ok(callbacks.touchstart && callbacks.touchend && callbacks.touchcancel);
   assert.ok(callbacks.raf, 'game should schedule its first frame');
   callbacks.raf(Date.now());
+  adapterLogControl.setModule('input', true);
   callbacks.touchstart({
-    touches: [{ identifier: 1, clientX: 437, clientY: 463 }],
-    changedTouches: [{ identifier: 1, clientX: 437, clientY: 463 }]
+    touches: [{ identifier: 1, clientX: 640, clientY: 463 }],
+    changedTouches: [{ identifier: 1, clientX: 640, clientY: 463 }]
   });
-  callbacks.touchend({ touches: [], changedTouches: [{ identifier: 1, clientX: 437, clientY: 463 }] });
+  callbacks.touchend({ touches: [], changedTouches: [{ identifier: 1, clientX: 640, clientY: 463 }] });
   assert.strictEqual(gameWindow.__debug.getState(), 'levelSelect', 'screen touch should map to the start button');
+  assert.ok(adapterLogControl.find('input', 'touchstart').length > 0
+    && adapterLogControl.find('input', 'touchend').length > 0,
+    'adapter input module must diagnose touch actions when explicitly enabled');
   gameWindow.__debug.setState('playing');
   const hostKey = (type, init) => {
     const event = Object.assign({ type, preventDefault: () => {} }, init);
@@ -179,9 +346,75 @@ setTimeout(async () => {
   hostKey('keyup', { code: 'KeyD', key: 'd' });
   desktopInput = gameWindow.__debug.getInputSnapshot();
   assert.ok(!desktopInput.input.right, 'releasing host KeyD should stop right movement');
+  hostKey('keydown', { key: 'Shift', keyCode: 16 });
+  assert.strictEqual(gameWindow.__debug.getMechanicState().acceptedReview.frozen, true,
+    'host Shift must support desktop testing of the freeze mechanic');
+  hostKey('keyup', { key: 'Shift', keyCode: 16 });
+  assert.strictEqual(gameWindow.__debug.getMechanicState().acceptedReview.frozen, false);
+  assert.ok(adapterLogControl.find('input', 'keyboard-keydown').some(entry => entry.context.code === 'KeyD')
+    && adapterLogControl.find('input', 'keyboard-keyup').some(entry => entry.context.code === 'KeyD'),
+    'adapter input module must diagnose desktop key transitions when explicitly enabled');
+  adapterLogControl.setModule('input', false);
   gameWindow.__debug.setState('menu');
   const inputResults = await gameWindow.__debug.runInputRegressionTests();
   assert.strictEqual(inputResults.filter(result => result.status !== 'PASS').length, 0);
-  console.log('微信小游戏冒烟测试通过：适配层、7关数据、A/D/空格实体键盘与 10 项输入回归均正常。');
+  const normalFileSystemManager = global.wx.getFileSystemManager;
+  global.wx.getFileSystemManager = () => ({
+    writeFile: options => options.fail({ errMsg:'simulated-write-failure' })
+  });
+  gameWindow.AndroidLogExporter.exportLog('diagnostic-failure-test.json', '{}');
+  assert.ok(modalShows > 0, 'native export failure must be visible to the tester');
+  const adapterFailure = gameWindow.__SMART_EGG_ADAPTER_DIAGNOSTICS__.find(entry =>
+    entry.module === 'wechat-adapter:export' && entry.event === 'write-failed'
+  );
+  assert.ok(adapterFailure && adapterFailure.level === 'error',
+    'native export failure must produce an actionable adapter diagnostic');
+  global.wx.getFileSystemManager = normalFileSystemManager;
+
+  global.wx.shareFileMessage = options => options.fail({ errMsg:'simulated-share-failure' });
+  gameWindow.AndroidLogExporter.exportLog('diagnostic-share-failure-test.json', '{}');
+  assert.ok(adapterLogControl.find('export', 'share-failed').length > 0,
+    'share failure must be diagnosed');
+  assert.ok(adapterLogControl.find('export', 'clipboard-fallback-success').some(entry =>
+    entry.context.reason === 'share-failed'
+  ), 'share failure must fall back to clipboard with a reason');
+  delete global.wx.shareFileMessage;
+
+  clipboardWriteFails = true;
+  gameWindow.AndroidLogExporter.exportLog('diagnostic-clipboard-failure-test.json', '{}');
+  assert.ok(adapterLogControl.find('export', 'clipboard-fallback-failed').length > 0,
+    'clipboard write failure must be diagnosed');
+  clipboardWriteFails = false;
+
+  const normalClipboardWriter = global.wx.setClipboardData;
+  delete global.wx.setClipboardData;
+  gameWindow.AndroidLogExporter.exportLog('diagnostic-no-clipboard-api-test.json', '{}');
+  assert.ok(adapterLogControl.find('export', 'clipboard-fallback-unavailable').length > 0,
+    'missing clipboard API must be diagnosed');
+  global.wx.setClipboardData = normalClipboardWriter;
+
+  const clipboardWritesBeforeFinalExport = clipboardWrites;
+  gameWindow.__debug.exportLog();
+  assert.strictEqual(clipboardWrites, clipboardWritesBeforeFinalExport + 1,
+    '当前这次日志导出必须完成微信剪贴板后备');
+  assert.ok(lastFileWrite && lastFileWrite.encoding === 'utf8'
+    && /smart-egg-log-v183-/.test(lastFileWrite.filePath),
+  '当前这次日志必须写入微信用户目录');
+  const exportedReport = JSON.parse(lastFileWrite.data);
+  assert.ok(Array.isArray(exportedReport.adapterLogs) && exportedReport.adapterLogs.length > 0,
+    '导出的诊断包必须包含微信适配层日志');
+  assert.ok(exportedReport.adapterLogs.some(entry => entry.event === 'write-request')
+    && exportedReport.adapterLogs.some(entry => entry.event === 'write-success'),
+    '最终写入的诊断包必须包含本次导出的请求和文件写入成功事件');
+  const exportLog = gameWindow._findLogs('native-export-dispatched', 'export').at(-1);
+  assert.ok(exportLog && exportLog.kv.platform === 'wechat-minigame');
+  const sequenceBeforeRetentionProbe = gameWindow.__SMART_EGG_ADAPTER_DIAGNOSTICS__.at(-1).seq;
+  for (let index = 0; index < 220; index++) gameWindow.localStorage.getItem('ring-retention-probe');
+  assert.strictEqual(gameWindow.__SMART_EGG_ADAPTER_DIAGNOSTICS__.length, 200,
+    'adapter diagnostics must retain only the newest 200 entries');
+  assert.ok(gameWindow.__SMART_EGG_ADAPTER_DIAGNOSTICS__[0].seq > sequenceBeforeRetentionProbe,
+    'adapter diagnostics ring must evict old entries rather than growing without bound');
+  Object.fromEntries = nativeObjectFromEntries;
+  console.log('微信小游戏冒烟测试通过：v183适配层、20关、创造秘境下线、A/D/空格/Shift、日志导出与输入回归均正常。');
   process.exit(0);
 }, 80);

@@ -84,7 +84,7 @@ assert.strictEqual(topContact.reason, 'top-surface-contact');
 assert.match(gameSource, /horizontal-snap-prevented/);
 assert.match(gameSource, /horizontal-platform-block/);
 assert.match(gameSource, /resolveHorizontalPlatformCollision/);
-assert.match(indexSource, /physics-collision\.js\?v=182/);
+assert.match(indexSource, /physics-collision\.js\?v=183/);
 assert.match(debugGuide, /horizontal-snap-prevented/);
 
 console.log('第二关箱子旁横向碰撞回归测试通过：旧的 x=-40 瞬移已被阻止，真实侧墙仍会阻挡。');

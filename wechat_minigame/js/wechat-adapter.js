@@ -1,7 +1,7 @@
 'use strict';
 
 /*
- * Smart Egg 微信小游戏兼容层 v163
+ * 怪奇之原微信小游戏兼容层 v183
  *
  * 游戏本体只在一个 1920×1080 Canvas 上绘制。本文件把微信小游戏的
  * Canvas、触摸、存储、音频、生命周期、键盘和日志文件接口映射成游戏
@@ -13,6 +13,7 @@
   }
 
   const gameGlobal = typeof GameGlobal !== 'undefined' ? GameGlobal : globalThis;
+  const CREATOR_MODE_ENABLED = false;
 
   function readProperty(target, key) {
     try { return target && target[key]; }
@@ -111,6 +112,92 @@
   installOwnProperty(browserWindow, 'setInterval', function () { return setInterval.apply(null, arguments); });
   installOwnProperty(browserWindow, 'clearInterval', function () { return clearInterval.apply(null, arguments); });
 
+  const ADAPTER_LOG_MAX = 200;
+  const ADAPTER_LOG_SESSION_ID = 'se-wx-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+  const ADAPTER_LOG_STARTED_AT = new Date().toISOString();
+  let adapterLogSequence = 0;
+  const adapterDiagnostics = [];
+  const adapterLogModules = new Map([
+    ['runtime', true], ['feature', true], ['input', false],
+    ['audio', false], ['storage', true], ['network', true], ['export', true]
+  ]);
+  function mapEntriesToObject(map) {
+    const out = {};
+    map.forEach(function (value, key) { out[key] = value; });
+    return out;
+  }
+  function isSensitiveAdapterKey(key) {
+    const normalized = String(key || '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+    return /(password|passphrase|secret|token|authorization|cookie|privatekey|apikey|clientsecret|appsecret)/.test(normalized);
+  }
+  function redactAdapterString(value) {
+    return String(value)
+      .replace(/-----BEGIN [^-\r\n]*PRIVATE KEY-----[\s\S]*?-----END [^-\r\n]*PRIVATE KEY-----/gi, '[REDACTED_PEM]')
+      .replace(/((?:authorization|cookie)\s*[:=]\s*)(?:Basic|Bearer)?\s*[^\r\n]+/gi, '$1[REDACTED]')
+      .replace(/((?:"|'|\b)?(?:access[_-]?token|refresh[_-]?token|id[_-]?token|token|password|passphrase|secret|app[_-]?secret|client[_-]?secret|api[_-]?key|private[_-]?key)(?:"|'|\b)?\s*[:=]\s*["']?)[^"'&,}\s]+/gi, '$1[REDACTED]')
+      .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, '[REDACTED_JWT]');
+  }
+  function redactAdapterContext(value, depth) {
+    const level = depth || 0;
+    if (level > 5) return '[depth-limited]';
+    if (Array.isArray(value)) return value.slice(0, 100).map(function (item) { return redactAdapterContext(item, level + 1); });
+    if (typeof value === 'string') return redactAdapterString(value);
+    if (!value || typeof value !== 'object') return value;
+    const clean = {};
+    Object.keys(value).forEach(function (key) {
+      clean[key] = isSensitiveAdapterKey(key) ? '[REDACTED]' : redactAdapterContext(value[key], level + 1);
+    });
+    return clean;
+  }
+  function adapterLog(moduleName, eventName, context, level) {
+    const normalizedModule = String(moduleName || 'runtime');
+    if (adapterLogModules.get(normalizedModule) === false) return null;
+    const entry = {
+      seq: ++adapterLogSequence,
+      at: new Date().toISOString(),
+      sessionId: ADAPTER_LOG_SESSION_ID,
+      module: 'wechat-adapter:' + normalizedModule,
+      level: level || 'info',
+      event: String(eventName || 'event'),
+      context: redactAdapterContext(context || {}, 0)
+    };
+    adapterDiagnostics.push(entry);
+    if (adapterDiagnostics.length > ADAPTER_LOG_MAX) adapterDiagnostics.shift();
+    if (entry.level === 'error') console.error('[wechat-adapter]', JSON.stringify(entry));
+    return entry;
+  }
+  installOwnProperty(browserWindow, '__SMART_EGG_ADAPTER_DIAGNOSTICS__', adapterDiagnostics);
+  installOwnProperty(browserWindow, '__SMART_EGG_ADAPTER_LOG_CONFIG__', {
+    maxEntries: ADAPTER_LOG_MAX,
+    productionVerbose: false,
+    sessionId: ADAPTER_LOG_SESSION_ID,
+    startedAt: ADAPTER_LOG_STARTED_AT,
+    getModules: function () { return mapEntriesToObject(adapterLogModules); },
+    setModule: function (moduleName, enabled) {
+      const normalizedModule = String(moduleName || 'runtime');
+      if (!adapterLogModules.has(normalizedModule)) return { module:normalizedModule, enabled:false, known:false };
+      adapterLogModules.set(normalizedModule, !!enabled);
+      return { module:normalizedModule, enabled:!!enabled, known:true };
+    },
+    find: function (moduleName, keyword) {
+      const moduleFilter = moduleName ? 'wechat-adapter:' + String(moduleName) : '';
+      const query = String(keyword || '').toLowerCase();
+      return adapterDiagnostics.filter(function (entry) {
+        if (moduleFilter && entry.module !== moduleFilter) return false;
+        if (!query) return true;
+        return entry.event.toLowerCase().indexOf(query) >= 0
+          || JSON.stringify(entry.context || {}).toLowerCase().indexOf(query) >= 0;
+      });
+    },
+    redact: function (context) { return redactAdapterContext(context, 0); }
+  });
+  adapterLog('runtime', 'adapter-session-start', {
+    version: 183,
+    creatorMode: CREATOR_MODE_ENABLED,
+    retention: { type: 'memory-ring', maxEntries: ADAPTER_LOG_MAX },
+    productionDefaults: mapEntriesToObject(adapterLogModules)
+  });
+
   const screenCanvas = wx.createCanvas();
   const screenContext = screenCanvas.getContext('2d');
   const gameCanvas = wx.createCanvas();
@@ -154,6 +241,11 @@
       left, top, width: drawWidth, height: drawHeight,
       right: left + drawWidth, bottom: top + drawHeight
     };
+    adapterLog('runtime', 'viewport-updated', {
+      width, height, dpr,
+      safeArea: { left:safeLeft, top:safeTop, width:safeWidth, height:safeHeight },
+      displayRect: { left, top, width:drawWidth, height:drawHeight }
+    });
   }
 
   gameCanvas.getBoundingClientRect = function () {
@@ -287,16 +379,58 @@
   };
   installOwnProperty(browserWindow, 'navigator', navigatorObject);
 
+  function storageKeyForLog(key) {
+    const normalized = String(key);
+    return isSensitiveAdapterKey(normalized) ? '[REDACTED_KEY]' : normalized.slice(0, 120);
+  }
   const localStorageObject = {
     getItem: function (key) {
       try {
         const value = wx.getStorageSync(String(key));
-        return value === '' || typeof value === 'undefined' ? null : String(value);
-      } catch (_) { return null; }
+        const normalized = value === '' || typeof value === 'undefined' ? null : String(value);
+        adapterLog('storage', 'read', {
+          key: storageKeyForLog(key), found: normalized !== null, bytes: normalized === null ? 0 : normalized.length
+        });
+        return normalized;
+      } catch (error) {
+        adapterLog('storage', 'read-failed', {
+          key: storageKeyForLog(key), message: String(error && error.message || error)
+        }, 'error');
+        return null;
+      }
     },
-    setItem: function (key, value) { wx.setStorageSync(String(key), String(value)); },
-    removeItem: function (key) { wx.removeStorageSync(String(key)); },
-    clear: function () { wx.clearStorageSync(); }
+    setItem: function (key, value) {
+      const normalizedValue = String(value);
+      try {
+        wx.setStorageSync(String(key), normalizedValue);
+        adapterLog('storage', 'write-success', { key: storageKeyForLog(key), bytes: normalizedValue.length });
+      } catch (error) {
+        adapterLog('storage', 'write-failed', {
+          key: storageKeyForLog(key), bytes: normalizedValue.length, message: String(error && error.message || error)
+        }, 'error');
+        throw error;
+      }
+    },
+    removeItem: function (key) {
+      try {
+        wx.removeStorageSync(String(key));
+        adapterLog('storage', 'remove-success', { key: storageKeyForLog(key) });
+      } catch (error) {
+        adapterLog('storage', 'remove-failed', {
+          key: storageKeyForLog(key), message: String(error && error.message || error)
+        }, 'error');
+        throw error;
+      }
+    },
+    clear: function () {
+      try {
+        wx.clearStorageSync();
+        adapterLog('storage', 'clear-success', {});
+      } catch (error) {
+        adapterLog('storage', 'clear-failed', { message: String(error && error.message || error) }, 'error');
+        throw error;
+      }
+    },
   };
   installOwnProperty(browserWindow, 'localStorage', localStorageObject);
 
@@ -396,8 +530,16 @@
   Object.defineProperty(FallbackAudioContext.prototype, 'currentTime', {
     get: function () { return Date.now() / 1000; }
   });
-  FallbackAudioContext.prototype.resume = function () { this.state = 'running'; return Promise.resolve(); };
-  FallbackAudioContext.prototype.suspend = function () { this.state = 'suspended'; return Promise.resolve(); };
+  FallbackAudioContext.prototype.resume = function () {
+    this.state = 'running';
+    adapterLog('audio', 'context-resumed', { implementation:'inner-audio-fallback' });
+    return Promise.resolve();
+  };
+  FallbackAudioContext.prototype.suspend = function () {
+    this.state = 'suspended';
+    adapterLog('audio', 'context-suspended', { implementation:'inner-audio-fallback' });
+    return Promise.resolve();
+  };
   FallbackAudioContext.prototype.createGain = function () {
     return {
       gain: new AudioParam(0.0001),
@@ -414,7 +556,14 @@
       connect: function (target) { this._gain = target; return target; },
       start: function (when) { this._startAt = Number(when) || context.currentTime; },
       stop: function (when) {
-        if (context.state !== 'running' || typeof wx.createInnerAudioContext !== 'function') return;
+        if (context.state !== 'running') {
+          adapterLog('audio', 'tone-skipped', { reason:'context-not-running', state:context.state });
+          return;
+        }
+        if (typeof wx.createInnerAudioContext !== 'function') {
+          adapterLog('audio', 'tone-skipped', { reason:'inner-audio-api-unavailable' }, 'warn');
+          return;
+        }
         const frequency = Math.max(55, this.frequency.peak || this.frequency.value || 440);
         const bases = [110, 440, 880];
         let base = bases[0];
@@ -424,28 +573,67 @@
         const delay = Math.max(0, (this._startAt - context.currentTime) * 1000);
         const duration = Math.max(40, ((Number(when) || this._startAt + 0.2) - this._startAt) * 1000);
         const gain = this._gain && this._gain.gain ? this._gain.gain.peak : 0.05;
+        adapterLog('audio', 'tone-scheduled', {
+          frequency:Math.round(frequency), base, delayMs:Math.round(delay), durationMs:Math.round(duration), gain:Number(gain.toFixed(4))
+        });
         setTimeout(function () {
-          const audio = wx.createInnerAudioContext();
-          audio.autoplay = false;
-          audio.loop = false;
-          audio.obeyMuteSwitch = true;
-          audio.volume = Math.max(0, Math.min(1, gain * 2.2));
-          audio.playbackRate = Math.max(0.5, Math.min(2, frequency / base));
-          audio.src = 'assets/tone-' + base + '.wav';
-          if (typeof audio.onCanplay === 'function') {
+          try {
+            const audio = wx.createInnerAudioContext();
+            audio.autoplay = false;
+            audio.loop = false;
+            audio.obeyMuteSwitch = true;
+            audio.volume = Math.max(0, Math.min(1, gain * 2.2));
+            audio.playbackRate = Math.max(0.5, Math.min(2, frequency / base));
+            const asset = 'assets/tone-' + base + '.wav';
+            audio.src = asset;
             let started = false;
-            audio.onCanplay(function () { if (!started) { started = true; audio.play(); } });
-          } else audio.play();
-          setTimeout(function () {
-            try { audio.stop(); audio.destroy(); } catch (_) {}
-          }, duration + 80);
+            const play = function () {
+              if (started) return;
+              started = true;
+              audio.play();
+              adapterLog('audio', 'tone-play', { asset, playbackRate:Number(audio.playbackRate.toFixed(3)) });
+            };
+            if (typeof audio.onError === 'function') {
+              audio.onError(function (error) {
+                adapterLog('audio', 'tone-failed', {
+                  asset, message:String(error && error.errMsg || error)
+                }, 'error');
+              });
+            }
+            if (typeof audio.onCanplay === 'function') audio.onCanplay(play);
+            else play();
+            setTimeout(function () {
+              try {
+                audio.stop();
+                audio.destroy();
+                adapterLog('audio', 'tone-destroyed', { asset });
+              } catch (error) {
+                adapterLog('audio', 'tone-cleanup-failed', {
+                  asset, message:String(error && error.message || error)
+                }, 'error');
+              }
+            }, duration + 80);
+          } catch (error) {
+            adapterLog('audio', 'tone-create-failed', { message:String(error && error.message || error) }, 'error');
+          }
         }, delay);
       }
     };
   };
 
   function WechatAudioContext() {
-    if (typeof wx.createWebAudioContext === 'function') return wx.createWebAudioContext();
+    if (typeof wx.createWebAudioContext === 'function') {
+      try {
+        const context = wx.createWebAudioContext();
+        adapterLog('audio', 'context-created', { implementation:'web-audio' });
+        return context;
+      } catch (error) {
+        adapterLog('audio', 'context-create-failed', {
+          implementation:'web-audio', message:String(error && error.message || error), fallback:'inner-audio'
+        }, 'error');
+      }
+    }
+    adapterLog('audio', 'context-created', { implementation:'inner-audio-fallback' });
     return new FallbackAudioContext();
   }
   installOwnProperty(browserWindow, 'AudioContext', WechatAudioContext);
@@ -463,6 +651,14 @@
   function forwardTouch(type, nativeEvent) {
     const touches = Array.from(nativeEvent.touches || []).map(normalizeTouch);
     const changedTouches = Array.from(nativeEvent.changedTouches || nativeEvent.touches || []).map(normalizeTouch);
+    if (adapterLogModules.get('input') !== false) {
+      adapterLog('input', type, {
+        activeCount:touches.length,
+        changed:changedTouches.slice(0, 5).map(function (touch) {
+          return { id:touch.identifier, x:touch.clientX, y:touch.clientY };
+        })
+      });
+    }
     const event = new MiniEvent(type, { touches, changedTouches, timeStamp: Date.now() });
     gameCanvas.dispatchEvent(event);
     if (type === 'touchstart') documentObject.dispatchEvent(new MiniEvent('pointerdown', { touches, changedTouches }));
@@ -484,16 +680,17 @@
     if (lowerKey === 'a') return 'KeyA';
     if (lowerKey === 'd') return 'KeyD';
     if (lowerKey === 'w') return 'KeyW';
+    if (key === 'Shift') return 'ShiftLeft';
     if (key === ' ' || key === 'Spacebar' || key === 'Space') return 'Space';
     if (key === 'ArrowLeft' || key === 'Left') return 'ArrowLeft';
     if (key === 'ArrowRight' || key === 'Right') return 'ArrowRight';
     if (key === 'ArrowUp' || key === 'Up') return 'ArrowUp';
     const keyCode = Number(nativeEvent && (nativeEvent.keyCode || nativeEvent.which));
-    return ({ 32: 'Space', 37: 'ArrowLeft', 38: 'ArrowUp', 39: 'ArrowRight', 65: 'KeyA', 68: 'KeyD', 87: 'KeyW' })[keyCode] || '';
+    return ({ 16: 'ShiftLeft', 32: 'Space', 37: 'ArrowLeft', 38: 'ArrowUp', 39: 'ArrowRight', 65: 'KeyA', 68: 'KeyD', 87: 'KeyW' })[keyCode] || '';
   }
   function keyboardKeyFromCode(code, nativeEvent) {
     if (nativeEvent && nativeEvent.key != null) return String(nativeEvent.key);
-    return ({ KeyA: 'a', KeyD: 'd', KeyW: 'w', Space: ' ', ArrowLeft: 'ArrowLeft', ArrowRight: 'ArrowRight', ArrowUp: 'ArrowUp' })[code] || code;
+    return ({ KeyA: 'a', KeyD: 'd', KeyW: 'w', ShiftLeft: 'Shift', ShiftRight: 'Shift', Space: ' ', ArrowLeft: 'ArrowLeft', ArrowRight: 'ArrowRight', ArrowUp: 'ArrowUp' })[code] || code;
   }
   function forwardKeyboard(type, nativeEvent) {
     if (!nativeEvent) nativeEvent = {};
@@ -517,6 +714,12 @@
       cancelable: true,
       timeStamp: Number(nativeEvent.timeStamp) || Date.now()
     });
+    if (adapterLogModules.get('input') !== false) {
+      adapterLog('input', 'keyboard-' + type, {
+        code, repeat:event.repeat,
+        modifiers:{ alt:event.altKey, ctrl:event.ctrlKey, meta:event.metaKey, shift:event.shiftKey }
+      });
+    }
     event.preventDefault = function () {
       this.defaultPrevented = true;
       if (typeof nativeEvent.preventDefault === 'function') nativeEvent.preventDefault();
@@ -543,6 +746,7 @@
   function setVisibility(hidden) {
     documentObject.hidden = hidden;
     documentObject.visibilityState = hidden ? 'hidden' : 'visible';
+    adapterLog('runtime', hidden ? 'app-hide' : 'app-show', { visibilityState:documentObject.visibilityState });
     documentObject.dispatchEvent(new MiniEvent('visibilitychange'));
     if (hidden) browserWindow.dispatchEvent(new MiniEvent('blur'));
   }
@@ -557,16 +761,23 @@
   if (typeof wx.onNetworkStatusChange === 'function') {
     wx.onNetworkStatusChange(function (result) {
       navigatorObject.onLine = !!result.isConnected;
+      adapterLog('network', 'status-change', {
+        connected:navigatorObject.onLine, networkType:String(result.networkType || 'unknown')
+      });
       browserWindow.dispatchEvent(new MiniEvent(result.isConnected ? 'online' : 'offline'));
     });
   }
   if (typeof wx.onError === 'function') {
     wx.onError(function (message) {
+      adapterLog('runtime', 'host-error', { message:String(message) }, 'error');
       browserWindow.dispatchEvent(new MiniEvent('error', { message: String(message), filename: '', lineno: 0, colno: 0 }));
     });
   }
   if (typeof wx.onUnhandledRejection === 'function') {
     wx.onUnhandledRejection(function (event) {
+      adapterLog('runtime', 'host-unhandled-rejection', {
+        message:String(event && event.reason && (event.reason.message || event.reason) || 'unknown')
+      }, 'error');
       browserWindow.dispatchEvent(new MiniEvent('unhandledrejection', { reason: event && event.reason }));
     });
   }
@@ -619,28 +830,111 @@
       });
     } else openKeyboard();
   };
-  installOwnProperty(browserWindow, '__wxPromptLevelCode', promptLevelCode);
+  if (CREATOR_MODE_ENABLED) {
+    installOwnProperty(browserWindow, '__wxPromptLevelCode', promptLevelCode);
+  } else {
+    adapterLog('feature', 'creator-code-input-bridge-disabled', {
+      enabled: false,
+      clipboardReadRegistered: false,
+      keyboardRegistered: false,
+      localData: 'preserved'
+    });
+  }
 
   const androidLogExporter = {
     exportLog: function (filename, text) {
       const fs = wx.getFileSystemManager();
       const base = wx.env && wx.env.USER_DATA_PATH ? wx.env.USER_DATA_PATH : '';
       const path = base + '/' + String(filename).replace(/[\\/:*?"<>|]/g, '-');
+      const sourceText = String(text);
+      const bytes = sourceText.length;
+      let mergeFailureLogged = false;
+      function mergeCurrentAdapterLogs() {
+        try {
+          const report = JSON.parse(sourceText);
+          if (report && report.format === 'smart-egg-diagnostic-log') {
+            report.adapterLogs = adapterDiagnostics.slice();
+            return JSON.stringify(report, null, 2);
+          }
+        } catch (error) {
+          if (!mergeFailureLogged) {
+            mergeFailureLogged = true;
+            adapterLog('export', 'diagnostic-merge-skipped', {
+              filename:filename, reason:'invalid-json', message:String(error && error.message || error)
+            }, 'warn');
+          }
+        }
+        return sourceText;
+      }
+      adapterLog('export', 'write-request', { filename: filename, bytes: bytes });
+      function copyFallback(reason) {
+        if (typeof wx.setClipboardData !== 'function') {
+          adapterLog('export', 'clipboard-fallback-unavailable', { filename: filename, reason: reason }, 'error');
+          return;
+        }
+        adapterLog('export', 'clipboard-fallback-start', { filename:filename, reason:reason });
+        const clipboardText = mergeCurrentAdapterLogs();
+        wx.setClipboardData({
+          data: clipboardText,
+          success: function () {
+            adapterLog('export', 'clipboard-fallback-success', { filename: filename, bytes: clipboardText.length, reason: reason });
+            wx.showToast({ title: '日志已复制', icon: 'success' });
+          },
+          fail: function (error) {
+            adapterLog('export', 'clipboard-fallback-failed', {
+              filename: filename,
+              reason: reason,
+              message: String(error && error.errMsg || error)
+            }, 'error');
+          }
+        });
+      }
+      function shareOrFallback() {
+        if (typeof wx.shareFileMessage === 'function') {
+          wx.shareFileMessage({
+            filePath: path,
+            fileName: filename,
+            success: function () { adapterLog('export', 'share-success', { filename: filename }); },
+            fail: function (error) {
+              adapterLog('export', 'share-failed', {
+                filename: filename,
+                message: String(error && error.errMsg || error)
+              }, 'error');
+              copyFallback('share-failed');
+            }
+          });
+        } else {
+          copyFallback('share-api-unavailable');
+        }
+      }
+      const firstWriteText = mergeCurrentAdapterLogs();
       fs.writeFile({
         filePath: path,
-        data: String(text),
+        data: firstWriteText,
         encoding: 'utf8',
         success: function () {
-          if (typeof wx.shareFileMessage === 'function') {
-            wx.shareFileMessage({ filePath: path, fileName: filename });
-          } else {
-            wx.setClipboardData({
-              data: String(text),
-              success: function () { wx.showToast({ title: '日志已复制', icon: 'success' }); }
-            });
-          }
+          adapterLog('export', 'write-success', { filename: filename, bytes: bytes });
+          const finalizedText = mergeCurrentAdapterLogs();
+          fs.writeFile({
+            filePath:path,
+            data:finalizedText,
+            encoding:'utf8',
+            success:shareOrFallback,
+            fail:function (error) {
+              adapterLog('export', 'write-finalize-failed', {
+                filename:filename, bytes:finalizedText.length, message:String(error && error.errMsg || error)
+              }, 'error');
+              shareOrFallback();
+            }
+          });
         },
         fail: function (error) {
+          adapterLog('export', 'write-failed', {
+            filename: filename,
+            bytes: bytes,
+            message: String(error && error.errMsg || error)
+          }, 'error');
+          copyFallback('write-failed');
           wx.showModal({ title: '日志导出失败', content: String(error && error.errMsg || error), showCancel: false });
         }
       });
@@ -671,7 +965,7 @@
   installOwnProperty(browserWindow, '__SMART_EGG_WECHAT_ENV__', wechatEnvironment);
 
   const wechatBridge = {
-    version: 163,
+    version: 183,
     screenCanvas,
     gameCanvas,
     getDisplayRect: function () { return Object.assign({}, displayRect); },
@@ -680,4 +974,10 @@
   };
   installOwnProperty(root, '__SMART_EGG_WECHAT_BRIDGE__', wechatBridge);
   installOwnProperty(browserWindow, '__SMART_EGG_WECHAT_BRIDGE__', wechatBridge);
+  adapterLog('runtime', 'adapter-ready', {
+    version:wechatBridge.version,
+    displayRect:wechatBridge.getDisplayRect(),
+    input:{ touch:true, keyboard:true },
+    creatorMode:CREATOR_MODE_ENABLED
+  });
 })();

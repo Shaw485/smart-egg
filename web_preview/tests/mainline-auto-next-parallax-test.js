@@ -11,8 +11,8 @@ const guide = fs.readFileSync(path.join(root, 'web_preview/README.md'), 'utf8');
 const level7 = JSON.parse(fs.readFileSync(path.join(root, 'godot_project/levels/level_6.json'), 'utf8'));
 const level8 = JSON.parse(fs.readFileSync(path.join(root, 'godot_project/levels/level_7.json'), 'utf8'));
 
-assert.match(game, /const GAME_CODE_VERSION = 182/);
-assert.match(index, /game\.js\?v=182/);
+assert.match(game, /const GAME_CODE_VERSION = 183/);
+assert.match(index, /game\.js\?v=183/);
 assert.strictEqual(level7.infinite_horizontal, true, '第7关应保持无限横向');
 assert.ok(level7.mechanics.includes('hold_to_stop'), '第7关应保留按住门停止机制');
 assert.ok(level8.mechanics.includes('shadow_switch'), '第8关应保留光影机关');
