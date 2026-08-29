@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 181;   // 跟 index.html 的 ?v=181 保持一致
+    const GAME_CODE_VERSION = 182;   // 跟 index.html 的 ?v=182 保持一致
     const GAME_TITLE = '怪奇之原';
     try {
         const LAST_KNOWN_KEY = 'big_clever_code_v_last_seen_v1';
@@ -4522,13 +4522,36 @@
                 .sort((a, b) => Number(a.kind.split('_').pop()) - Number(b.kind.split('_').pop()));
             const goalStep = (levelData.platforms || []).find(platform => platform.kind === 'reverse_goal_step');
             const route = [
-                {kind:'spawn',x:levelData.spawn.x,top:ground ? ground.y-ground.h/2 : null},
-                ...steps.map(platform => ({kind:platform.kind,x:platform.x,top:platform.y-platform.h/2})),
-                ...(goalStep ? [{kind:goalStep.kind,x:goalStep.x,top:goalStep.y-goalStep.h/2}] : [])
+                {kind:'spawn',x:levelData.spawn.x,top:ground ? ground.y-ground.h/2 : null,w:HALF_W*2,h:0},
+                ...steps.map(platform => ({kind:platform.kind,x:platform.x,top:platform.y-platform.h/2,w:platform.w,h:platform.h})),
+                ...(goalStep ? [{kind:goalStep.kind,x:goalStep.x,top:goalStep.y-goalStep.h/2,w:goalStep.w,h:goalStep.h}] : [])
             ];
             const directions = route.slice(1).map((point, routeIndex) => {
                 const delta = point.x - route[routeIndex].x;
                 return delta < 0 ? 'left' : delta > 0 ? 'right' : 'vertical';
+            });
+            const headClearances = route.slice(1).map((point, routeIndex) =>
+                route[routeIndex].top - point.top - point.h - HALF_H * 2);
+            const horizontalGaps = route.slice(1).map((point, routeIndex) =>
+                Math.abs(point.x - route[routeIndex].x));
+            const segments = route.slice(1).map((point, routeIndex) => {
+                const from = route[routeIndex];
+                const centerSpan = Math.abs(point.x - from.x);
+                const edgeGap = Math.max(0, centerSpan - from.w / 2 - point.w / 2);
+                const timeToProjection = edgeGap / MOVE_SPEED;
+                const riseAtProjection = -(JUMP_VELOCITY * timeToProjection
+                    + GRAVITY * timeToProjection * timeToProjection / 2);
+                const rise = from.top - point.top;
+                return {
+                    from: from.kind,
+                    to: point.kind,
+                    rise,
+                    centerSpan,
+                    edgeGap,
+                    timeToProjection: Number(timeToProjection.toFixed(3)),
+                    riseAtProjection: Number(riseAtProjection.toFixed(1)),
+                    projectionClearance: Number((riseAtProjection - rise).toFixed(1))
+                };
             });
             const goalDoor = (levelData.doors || []).find(door => door.is_goal);
             logStep('mechanic:direction', 'reverse-climb-route-config', {
@@ -4537,6 +4560,17 @@
                 stepCount: steps.length,
                 route,
                 directions,
+                playerHeight: HALF_H * 2,
+                headClearances,
+                minHeadClearance: headClearances.length ? Math.min(...headClearances) : null,
+                horizontalGaps,
+                minHorizontalGap: horizontalGaps.length ? Math.min(...horizontalGaps) : null,
+                maxHorizontalGap: horizontalGaps.length ? Math.max(...horizontalGaps) : null,
+                motionConstants: { moveSpeed: MOVE_SPEED, jumpVelocity: JUMP_VELOCITY, gravity: GRAVITY },
+                segments,
+                minProjectionClearance: segments.length
+                    ? Math.min(...segments.map(segment => segment.projectionClearance))
+                    : null,
                 cameraMinY: _mapBounds(levelData).minY,
                 doorInitiallyVisible: !!goalDoor && goalDoor.y + goalDoor.h / 2 > 0
             });
