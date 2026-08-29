@@ -75,24 +75,50 @@ assert.match(game, /for \(const d of doors\) \{\s+const dx = d\.x - d\.w \/ 2, d
   '门跳跃的通关距离必须在实际判定循环内计算，不能引用前一轮循环的局部变量');
 assert.match(game, /ground_swap/);
 assert.match(game, /erase_wall/);
-assert.match(index, /accepted-mechanics\.js\?v=180/);
+assert.match(index, /accepted-mechanics\.js\?v=181/);
 
 const reverseLevel = bundle[13];
 assert.strictEqual(reverseLevel.source_review_id, 17, '原第15关必须顺排为新的第14关');
-assert.strictEqual(reverseLevel.platforms.filter(platform => platform.kind.startsWith('reverse_step_')).length, 3,
-  '反向控制关必须增加三层阶梯');
-assert.ok(reverseLevel.doors[0].y < 500, '终点门必须放在右上方阶梯上');
-const reverseRoute = reverseLevel.platforms
-  .filter(platform => platform.kind === 'ground' || platform.kind.startsWith('reverse_'))
-  .map(platform => ({ ...platform, top: platform.y - platform.h / 2 }))
-  .sort((a, b) => b.top - a.top);
+const reverseSteps = reverseLevel.platforms
+  .filter(platform => /^reverse_step_\d+$/.test(platform.kind))
+  .sort((a, b) => Number(a.kind.split('_').pop()) - Number(b.kind.split('_').pop()));
+assert.strictEqual(reverseSteps.length, 10, '反向控制关必须包含十层左右交错阶梯');
+assert.strictEqual(reverseLevel.expand_up, true, '高塔路线必须启用纵向镜头');
+assert.strictEqual(reverseLevel.map_extent.up, 2, '高塔路线必须开放两屏上方地图');
+assert.strictEqual(reverseLevel.world_size.h, 3240, '高塔路线世界高度必须扩展为三屏');
+const reverseGround = reverseLevel.platforms.find(platform => platform.kind === 'ground');
+const reverseGoal = reverseLevel.platforms.find(platform => platform.kind === 'reverse_goal_step');
+const reverseRoute = [reverseGround, ...reverseSteps, reverseGoal]
+  .map(platform => ({ ...platform, top: platform.y - platform.h / 2 }));
 for (let index = 1; index < reverseRoute.length; index += 1) {
-  assert.ok(reverseRoute[index - 1].top - reverseRoute[index].top <= 130,
+  const rise = reverseRoute[index - 1].top - reverseRoute[index].top;
+  assert.ok(rise > 0 && rise <= 165,
     `反向阶梯第${index}段的高度差必须在单次跳跃范围内`);
 }
+const horizontalDirections = reverseRoute.slice(2).map((platform, index) =>
+  platform.x < reverseRoute[index + 1].x ? 'left' : 'right');
+assert.deepStrictEqual(horizontalDirections, ['left','right','left','right','left','right','left','right','left','right'],
+  '从第一层开始必须严格左右交错跳跃');
+const maxJumpRise = (1080 * 1080) / (2 * 2000);
+assert.ok(165 < maxJumpRise && 330 > maxJumpRise,
+  '每层165像素应可单跳到达，同时不能直接跳过两层');
+assert.ok(reverseLevel.doors[0].y + reverseLevel.doors[0].h / 2 <= 0,
+  '终点门必须完全位于初始首屏上方');
+const cameraMinY = -reverseLevel.map_extent.up * 1080;
+const cameraAtTop = platformTop => Math.max(cameraMinY, Math.min(0, (platformTop - 60) - 810));
+const doorBottom = reverseLevel.doors[0].y + reverseLevel.doors[0].h / 2;
+assert.ok(doorBottom - cameraAtTop(reverseSteps[4].y - reverseSteps[4].h / 2) <= 0,
+  '完成前五层时仍不能看到终点门');
+assert.ok(doorBottom - cameraAtTop(reverseSteps[5].y - reverseSteps[5].h / 2) > 0,
+  '完成第六层后终点门才应开始进入画面');
 const finalStep = reverseRoute[reverseRoute.length - 1];
 assert.strictEqual(reverseLevel.doors[0].y + reverseLevel.doors[0].h / 2, finalStep.top,
   '终点门底部必须贴合最高平台顶面');
+const finalPlayerY = finalStep.top - 60;
+const finalCameraY = Math.max(cameraMinY, Math.min(0, finalPlayerY - 810));
+assert.ok(reverseLevel.doors[0].y - finalCameraY > 0 && reverseLevel.doors[0].y - finalCameraY < 1080,
+  '登上高层后纵向镜头必须能看见终点门');
+assert.match(game, /reverse-climb-route-config/);
 assert.ok(!Object.values(bundle).some(level => level.source_review_id === 15), '评审编号15对应的原第14关必须从主线删除');
 
 for (const moduleName of [
@@ -105,4 +131,4 @@ for (const moduleName of [
 assert.match(game, /reviewSourceId/);
 assert.match(game, /total_levels: TOTAL_LEVELS/);
 
-console.log('评审关卡调整测试通过：原第14关已删除，其余8关连续重排，新的第14关包含三层反向操作阶梯。');
+console.log('评审关卡调整测试通过：原第14关已删除，其余8关连续重排，新的第14关包含十层左右交错高塔阶梯。');
