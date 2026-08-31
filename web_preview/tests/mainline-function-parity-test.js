@@ -62,7 +62,10 @@ assert.match(game, /style: 'vertical-shaft-v1'/, '主线断崖必须使用垂直
 assert.match(game, /ctx\.lineTo\(gap\.right,bottom\)[\s\S]*ctx\.lineTo\(gap\.left,bottom\)/, '坑体左右边界必须垂直延伸到底部');
 assert.match(game, /\[\[x,y\],\[x,y\+h\]\]/, '左侧断崖必须使用垂直黑色轮廓');
 assert.match(game, /\[\[x\+w,y\],\[x\+w,y\+h\]\]/, '右侧断崖必须使用垂直黑色轮廓');
-assert.match(game, /collisionGeometryChanged:\s*false/, '视觉升级必须明确声明没有修改碰撞几何');
+assert.match(game, /collisionGeometryChanged:\s*!!levelData\._adaptiveViewportApplied/,
+  '断崖日志必须区分固定网页几何与微信宽屏外缘扩展');
+assert.match(game, /collisionGeometryScope:\s*levelData\._adaptiveViewportApplied \? 'outer-ground-edges-only' : 'none'/,
+  '宽屏适配只能声明修改最外侧地面边界，不能误报内部坑形变化');
 assert.match(game, /visualSidewalls:\s*'vertical'/, '日志必须记录断崖侧壁为垂直样式');
 assert.match(game, /extendsBelowViewport:\s*true/, '日志必须记录坑体延伸到视口外');
 

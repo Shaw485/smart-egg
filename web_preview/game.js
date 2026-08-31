@@ -6,9 +6,9 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 184;   // 跟 index.html 的 ?v=184 保持一致
+    const GAME_CODE_VERSION = 185;   // 跟 index.html 的 ?v=185 保持一致
     const GAME_TITLE = '怪奇之原';
-    // v184 真机稳定性：保留创造秘境代码与本地存档，只关闭正式入口和运行路径。
+    // v185 小程序宽屏适配：保留创造秘境代码与本地存档，只关闭正式入口和运行路径。
     // 重新开放时需恢复此运行时开关，并同步恢复平台适配构建开关；旧存档不会丢失。
     const CREATOR_MODE_ENABLED = false;
     try {
@@ -31,7 +31,14 @@
     // v14.0 自动测试模式标记：URL 含 ?autotest → 全程画面左上红底白字警告
     const IS_AUTOTEST_MODE = location.search.includes('autotest') || location.hash.includes('autotest');
 
-    const W = 1920, H = 1080;
+    const BASE_WORLD_W = 1920, H = 1080;
+    const WECHAT_VIEWPORT = window.__wxMiniGame && window.__SMART_EGG_VIEWPORT__
+        ? window.__SMART_EGG_VIEWPORT__ : null;
+    // 只在微信小游戏中按安全区比例横向扩展逻辑地图；网页与 Android 继续保持 1920×1080。
+    // 宽度只增加可见世界，不缩放人物、门、平台和操作按钮。
+    const W = WECHAT_VIEWPORT && Number.isFinite(Number(WECHAT_VIEWPORT.logicalWidth))
+        ? Math.max(BASE_WORLD_W, Number(WECHAT_VIEWPORT.logicalWidth)) : BASE_WORLD_W;
+    const VIEWPORT_SIDE_PAD = Math.max(0, (W - BASE_WORLD_W) / 2);
     const FANTASY_TITLES = [
         '风起之门', '云阶试炼', '锁语遗迹', '断崖双跃',
         '守门人的礼仪', '花之暗号', '逃走的门',
@@ -387,7 +394,9 @@
         _sceneDrag.lastPoint = p;
         const world = {x:p.x+_cameraX,y:p.y+_cameraY};
         if (_sceneDrag.type === 'sun') {
-            const nextSunX = Math.max(90,Math.min(1510,world.x));
+            const sunMin=Number(levelData&&levelData.sun&&levelData.sun.min_x);
+            const sunMax=Number(levelData&&levelData.sun&&levelData.sun.max_x);
+            const nextSunX = Math.max(Number.isFinite(sunMin)?sunMin:90,Math.min(Number.isFinite(sunMax)?sunMax:1510,world.x));
             if (!_shadowSunMoved && Math.abs(nextSunX-_sceneDrag.startSunX)>=12) {
                 _shadowSunMoved = true;
                 logStep('mechanic','shadow-drag-armed',{pointerId,startSunX:Math.round(_sceneDrag.startSunX),sunX:Math.round(nextSunX),minimumDelta:12});
@@ -581,7 +590,51 @@
         const e=(lv&&lv.map_extent)||{};
         return {left:Math.max(0,Math.floor(e.left||0)),right:Math.max(0,Math.floor(e.right||0)),up:Math.max(0,Math.floor(e.up||0))};
     }
-    function _mapBounds(lv){const e=_mapExtent(lv);return{minX:-e.left*W,maxX:(e.right+1)*W,minY:-e.up*H,maxY:H,e};}
+    function _isSingleHorizontalMap(lv) {
+        if (!lv || lv.infinite_horizontal) return false;
+        if (lv._adaptiveViewportApplied && lv._adaptiveViewportApplied.strategy === 'extend-horizontal-v1') return true;
+        const e = _mapExtent(lv);
+        const declaredWidth = Number(lv.world_size && lv.world_size.w) || BASE_WORLD_W;
+        return e.left === 0 && e.right === 0 && declaredWidth <= BASE_WORLD_W + 1;
+    }
+    function _mapBounds(lv){
+        const e=_mapExtent(lv);
+        // map_extent 的一格永远是设计宽 1920，不能随着手机视口变宽；否则三屏关会被误算成更长。
+        const single=_isSingleHorizontalMap(lv);
+        const minX=-e.left*BASE_WORLD_W-(single?VIEWPORT_SIDE_PAD:0);
+        const maxX=(e.right+1)*BASE_WORLD_W+(single?VIEWPORT_SIDE_PAD:0);
+        return{minX,maxX,minY:-e.up*H,maxY:H,e,singleHorizontal:single,viewWidth:W,baseWidth:BASE_WORLD_W};
+    }
+    function _adaptLevelEdgesForViewport(lv) {
+        if (!lv || VIEWPORT_SIDE_PAD <= 0 || !_isSingleHorizontalMap(lv) || lv._adaptiveViewportApplied) return lv;
+        const e=_mapExtent(lv);
+        const canonicalMin=-e.left*BASE_WORLD_W;
+        const canonicalMax=(e.right+1)*BASE_WORLD_W;
+        const changed=[];
+        for (const platform of lv.platforms || []) {
+            if ((platform.kind || 'ground') !== 'ground') continue;
+            const oldLeft=platform.x-platform.w/2;
+            const oldRight=platform.x+platform.w/2;
+            let nextLeft=oldLeft,nextRight=oldRight;
+            if (oldLeft <= canonicalMin + 1) nextLeft=canonicalMin-VIEWPORT_SIDE_PAD;
+            if (oldRight >= canonicalMax - 1) nextRight=canonicalMax+VIEWPORT_SIDE_PAD;
+            if (nextLeft!==oldLeft || nextRight!==oldRight) {
+                platform.x=(nextLeft+nextRight)/2;
+                platform.w=nextRight-nextLeft;
+                changed.push({kind:platform.kind||'ground',oldLeft,oldRight,left:nextLeft,right:nextRight});
+            }
+        }
+        if (!lv.world_size) lv.world_size={w:BASE_WORLD_W,h:H};
+        lv.world_size.w=BASE_WORLD_W+VIEWPORT_SIDE_PAD*2;
+        lv._adaptiveViewportApplied={
+            strategy:'extend-horizontal-v1',baseWidth:BASE_WORLD_W,viewWidth:W,
+            sidePad:VIEWPORT_SIDE_PAD,extendedGrounds:changed
+        };
+        return lv;
+    }
+    function _initialCameraX(lv) {
+        return _isSingleHorizontalMap(lv) ? -VIEWPORT_SIDE_PAD : 0;
+    }
     function _isMovingHeld(obj) { return Array.from(_heldMovingTargets.values()).includes(obj) || _mouseMovingTarget === obj; }
     function _movingTargets() {
         if (!levelData) return [];
@@ -643,6 +696,43 @@
         return gameState;
       },
       getFeatures: () => ({ creatorMode: { enabled:CREATOR_MODE_ENABLED, localData:'preserved' } }),
+      getViewportLayout: () => {
+        const bounds=levelData?_mapBounds(levelData):null;
+        return {
+          platform:window.__wxMiniGame?'wechat-minigame':'web',
+          strategy:WECHAT_VIEWPORT&&WECHAT_VIEWPORT.strategy||'fixed-1920',
+          baseWidth:BASE_WORLD_W,viewWidth:W,viewHeight:H,sidePad:VIEWPORT_SIDE_PAD,
+          aspectMode:WECHAT_VIEWPORT&&WECHAT_VIEWPORT.aspectMode||'fixed',
+          displayRect:window.__SMART_EGG_WECHAT_BRIDGE__&&window.__SMART_EGG_WECHAT_BRIDGE__.getDisplayRect
+            ? window.__SMART_EGG_WECHAT_BRIDGE__.getDisplayRect():null,
+          backingSize:{width:canvas.width,height:canvas.height,renderScale},
+          worldBounds:bounds?{minX:bounds.minX,maxX:bounds.maxX,minY:bounds.minY,maxY:bounds.maxY}:null,
+          singleHorizontal:!!(bounds&&bounds.singleHorizontal),cameraX:_cameraX
+        };
+      },
+      inspectLevelViewport: (sourceLevel) => {
+        const clone=JSON.parse(JSON.stringify(sourceLevel||{}));
+        const before={
+          spawn:clone.spawn?{...clone.spawn}:null,
+          doors:(clone.doors||[]).map(door=>({x:door.x,y:door.y,w:door.w,h:door.h})),
+          grounds:(clone.platforms||[]).filter(platform=>(platform.kind||'ground')==='ground')
+            .map(platform=>({left:platform.x-platform.w/2,right:platform.x+platform.w/2,w:platform.w,h:platform.h}))
+        };
+        _adaptLevelEdgesForViewport(clone);
+        const bounds=_mapBounds(clone);
+        return {
+          before,
+          after:{
+            spawn:clone.spawn?{...clone.spawn}:null,
+            doors:(clone.doors||[]).map(door=>({x:door.x,y:door.y,w:door.w,h:door.h})),
+            grounds:(clone.platforms||[]).filter(platform=>(platform.kind||'ground')==='ground')
+              .map(platform=>({left:platform.x-platform.w/2,right:platform.x+platform.w/2,w:platform.w,h:platform.h}))
+          },
+          bounds:{minX:bounds.minX,maxX:bounds.maxX,minY:bounds.minY,maxY:bounds.maxY},
+          cameraStart:_initialCameraX(clone),singleHorizontal:bounds.singleHorizontal,
+          adaptive:clone._adaptiveViewportApplied||null
+        };
+      },
       getShowSuccess: () => showSuccess,
       getShowDead: () => showDead,
       getSuccessTimer: () => successTimer,
@@ -722,7 +812,7 @@
         ['runtime',true],['lifecycle',true],['network',true],['storage',true],['state',true],['input',true],['mechanic',true],['level-load',true],
         ['door',true],['collide',true],['puzzle',true],['progress',true],['audio',true],
         ['creator',true],['export',true],['dead',true],['guard',true],['fatal',true],
-        ['snapshot',true],['debug',true],['feature',true],['level-select',true],['render',true],
+        ['snapshot',true],['debug',true],['feature',true],['level-select',true],['render',true],['viewport',true],
         ['mechanic:bridge',true],['mechanic:gesture',true],['mechanic:transform',true],
         ['mechanic:hazard',true],['mechanic:direction',true],['mechanic:door',true],
         ['mechanic:terrain',true],['mechanic:erase',true],
@@ -945,6 +1035,9 @@
             features: {
                 creatorMode: { enabled: CREATOR_MODE_ENABLED, localData: 'preserved', storageKey: CREATOR_LS_KEY }
             },
+            viewport: window.__debug && window.__debug.getViewportLayout
+                ? window.__debug.getViewportLayout()
+                : { baseWidth:BASE_WORLD_W, viewWidth:W, viewHeight:H, sidePad:VIEWPORT_SIDE_PAD },
             logging: { maxEntries: LOG_MAX, modules: _mapEntriesToObject(_logModules), verboseQuery: location.search.includes('verbose=1') },
             game: {
                 pageName: currentPageName(),
@@ -1622,7 +1715,7 @@
         const isAndroidApp = document.body.classList.contains('android-app');
         const wh = window.innerHeight - (isAndroidApp ? 0 : 48);
         if (isAndroidApp) {
-            // 1920×1080 的手绘 Canvas 在模拟器 WebView 中按设备 DPR 全量绘制非常昂贵。
+            // 1080 高（微信宽屏可横向扩展）的手绘 Canvas 按设备 DPR 全量绘制非常昂贵。
             // 0.70 倍内部缓冲仍保持相同逻辑坐标和全屏比例，但像素填充量下降约 51%。
             renderScale = 0.70;
             canvas.style.width = ww + 'px';
@@ -2890,7 +2983,7 @@
         player.sF = player.sF + (tgtF - player.sF) * k;
         // 无限关卡以出生点为镜头原点，左右移动都保持人物在稳定的屏幕位置。
         const mbCamera=_mapBounds(levelData),hasWideMap=levelData.infinite_horizontal||mbCamera.e.left>0||mbCamera.e.right>0;
-        const rawCameraX=hasWideMap?player.x-420:0;
+        const rawCameraX=hasWideMap?player.x-420:(mbCamera.singleHorizontal?-VIEWPORT_SIDE_PAD:0);
         const targetCamera=levelData.infinite_horizontal?rawCameraX:Math.max(mbCamera.minX,Math.min(mbCamera.maxX-W,rawCameraX));
         _cameraX+=(targetCamera-_cameraX)*Math.min(1,dt*7);
         const targetCameraY=(levelData.expand_up||mbCamera.e.up>0)?Math.max(mbCamera.minY,Math.min(0,player.y-810)):0;
@@ -3683,7 +3776,7 @@
         }
         // 正式游戏名：单行居中，保留 F4 旷野视觉的留白。
         sketchBold(GAME_TITLE, W / 2, H * 0.34, 120);
-        const bw = W * 0.32, bh = 135, bx = W / 2 - bw / 2, by = H * 0.58;
+        const bw = BASE_WORLD_W * 0.32, bh = 135, bx = W / 2 - bw / 2, by = H * 0.58;
         // 开始按钮（不规则圆角方形白底黑描边）
         ctx.save();
         ctx.fillStyle = '#fff0bd';
@@ -4816,6 +4909,9 @@
             // 后台异步更新缓存（不阻塞）
             _fetchLevelIntoCache(idx);
         }
+        _adaptLevelEdgesForViewport(levelData);
+        // 宽屏单屏关以扩展后的左边界开场，首帧就稳定，不从旧 camera=0 缓动横滑。
+        _cameraX = _initialCameraX(levelData);
         // 现在同步设置 player 坐标（100% 生效！）
         player.x = levelData.spawn.x;
         player.y = levelData.spawn.y;
@@ -4843,9 +4939,21 @@
                 width: Math.round(gap.right - gap.left),
                 top: Math.round(gap.top)
             })),
-            collisionGeometryChanged: false,
+            collisionGeometryChanged: !!levelData._adaptiveViewportApplied,
+            collisionGeometryScope: levelData._adaptiveViewportApplied ? 'outer-ground-edges-only' : 'none',
             visualSidewalls: 'vertical',
             extendsBelowViewport: true
+        });
+        const viewportBounds=_mapBounds(levelData);
+        logStep('viewport', 'level-layout-applied', {
+            platform:window.__wxMiniGame?'wechat-minigame':'web',
+            strategy:WECHAT_VIEWPORT&&WECHAT_VIEWPORT.strategy||'fixed-1920',
+            levelIndex:idx,baseWidth:BASE_WORLD_W,viewWidth:W,viewHeight:H,
+            sidePad:VIEWPORT_SIDE_PAD,singleHorizontal:viewportBounds.singleHorizontal,
+            worldBounds:{minX:viewportBounds.minX,maxX:viewportBounds.maxX,minY:viewportBounds.minY,maxY:viewportBounds.maxY},
+            cameraX:_cameraX,
+            extendedGrounds:levelData._adaptiveViewportApplied
+                ? levelData._adaptiveViewportApplied.extendedGrounds : []
         });
         if (levelData.infinite_horizontal) {
             const mountainMotion = idx === 6 ? 'fixed' : 'stable-world-lattice';
@@ -5640,6 +5748,7 @@
     (async function main() {
         resize();
         logStep('lifecycle', 'session-start', _runtimeSnapshot());
+        logStep('viewport', 'runtime-layout-ready', window.__debug.getViewportLayout());
         logStep('feature', 'creator-mode-status', { enabled:CREATOR_MODE_ENABLED, localData:'preserved', storageKey:CREATOR_LS_KEY });
         // v4.9.6 启动时探测所有可用关卡
         await probeAvailableLevels();

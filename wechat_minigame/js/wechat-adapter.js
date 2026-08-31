@@ -1,9 +1,9 @@
 'use strict';
 
 /*
- * 怪奇之原微信小游戏兼容层 v184
+ * 怪奇之原微信小游戏兼容层 v185
  *
- * 游戏本体只在一个 1920×1080 Canvas 上绘制。本文件把微信小游戏的
+ * 游戏本体以 1080 高的逻辑 Canvas 绘制；微信宽屏会横向扩展地图而不拉伸元素。本文件把微信小游戏的
  * Canvas、触摸、存储、音频、生命周期、键盘和日志文件接口映射成游戏
  * 本体原来使用的浏览器接口。现有网页与 Android 版本不需要改动。
  */
@@ -124,7 +124,7 @@
     if (storedAdapterFault) adapterFaultJournal.lastFault = JSON.parse(String(storedAdapterFault));
   } catch (_) {}
   const adapterLogModules = new Map([
-    ['runtime', true], ['feature', true], ['input', false],
+    ['runtime', true], ['viewport', true], ['feature', true], ['input', false],
     ['audio-core', true], ['audio', false], ['storage', true], ['network', true], ['export', true]
   ]);
   function mapEntriesToObject(map) {
@@ -203,7 +203,7 @@
     redact: function (context) { return redactAdapterContext(context, 0); }
   });
   adapterLog('runtime', 'adapter-session-start', {
-    version: 184,
+    version: 185,
     creatorMode: CREATOR_MODE_ENABLED,
     retention: { type: 'memory-ring', maxEntries: ADAPTER_LOG_MAX },
     productionDefaults: mapEntriesToObject(adapterLogModules)
@@ -218,6 +218,10 @@
   let windowInfo = {};
   let viewportDpr = 1;
   let displayRect = { left: 0, top: 0, width: 1, height: 1, right: 1, bottom: 1 };
+  const VIEWPORT_BASE_WIDTH = 1920;
+  const VIEWPORT_LOGICAL_HEIGHT = 1080;
+  const VIEWPORT_MAX_WIDTH = 2880;
+  let logicalViewport = null;
 
   function readWindowInfo() {
     if (typeof wx.getWindowInfo === 'function') return wx.getWindowInfo();
@@ -236,9 +240,29 @@
     const safeTop = Number.isFinite(safe.top) ? safe.top : 0;
     const safeWidth = Math.max(1, safe.width || ((safe.right || width) - safeLeft));
     const safeHeight = Math.max(1, safe.height || ((safe.bottom || height) - safeTop));
-    const scale = Math.min(safeWidth / 1920, safeHeight / 1080);
-    const drawWidth = 1920 * scale;
-    const drawHeight = 1080 * scale;
+    const safeAspect = safeWidth / safeHeight;
+    if (!logicalViewport) {
+      const requestedWidth = Math.round(VIEWPORT_LOGICAL_HEIGHT * safeAspect);
+      const logicalWidth = Math.max(VIEWPORT_BASE_WIDTH, Math.min(VIEWPORT_MAX_WIDTH, requestedWidth));
+      logicalViewport = {
+        schemaVersion: 1,
+        strategy: 'extend-horizontal-v1',
+        baseWidth: VIEWPORT_BASE_WIDTH,
+        logicalWidth,
+        logicalHeight: VIEWPORT_LOGICAL_HEIGHT,
+        sidePad: Math.max(0, (logicalWidth - VIEWPORT_BASE_WIDTH) / 2),
+        requestedWidth,
+        aspectMode: requestedWidth < VIEWPORT_BASE_WIDTH
+          ? 'narrow-contain'
+          : (requestedWidth > VIEWPORT_MAX_WIDTH ? 'ultrawide-edge-extension' : 'horizontal-map-extension')
+      };
+    }
+    const scale = Math.min(
+      safeWidth / logicalViewport.logicalWidth,
+      safeHeight / logicalViewport.logicalHeight
+    );
+    const drawWidth = logicalViewport.logicalWidth * scale;
+    const drawHeight = logicalViewport.logicalHeight * scale;
     const left = safeLeft + (safeWidth - drawWidth) / 2;
     const top = safeTop + (safeHeight - drawHeight) / 2;
 
@@ -252,10 +276,28 @@
       left, top, width: drawWidth, height: drawHeight,
       right: left + drawWidth, bottom: top + drawHeight
     };
-    adapterLog('runtime', 'viewport-updated', {
+    const viewportSnapshot = Object.assign({}, logicalViewport, {
+      window: { width, height, dpr },
+      safeArea: { left:safeLeft, top:safeTop, width:safeWidth, height:safeHeight },
+      safeAspect:Number(safeAspect.toFixed(5)),
+      displayRect: { left, top, width:drawWidth, height:drawHeight },
+      gutters: {
+        left:Math.max(0, left), right:Math.max(0, width-left-drawWidth),
+        top:Math.max(0, top), bottom:Math.max(0, height-top-drawHeight)
+      }
+    });
+    installOwnProperty(root, '__SMART_EGG_VIEWPORT__', viewportSnapshot);
+    installOwnProperty(browserWindow, '__SMART_EGG_VIEWPORT__', viewportSnapshot);
+    adapterLog('viewport', 'viewport-updated', {
       width, height, dpr,
       safeArea: { left:safeLeft, top:safeTop, width:safeWidth, height:safeHeight },
-      displayRect: { left, top, width:drawWidth, height:drawHeight }
+      safeAspect:Number(safeAspect.toFixed(5)),
+      logicalWidth:logicalViewport.logicalWidth,
+      logicalHeight:logicalViewport.logicalHeight,
+      sidePad:logicalViewport.sidePad,
+      aspectMode:logicalViewport.aspectMode,
+      displayRect: { left, top, width:drawWidth, height:drawHeight },
+      gutters:viewportSnapshot.gutters
     });
   }
 
@@ -265,14 +307,41 @@
 
   function presentFrame() {
     const dpr = viewportDpr;
+    const destLeft = Math.round(displayRect.left * dpr);
+    const destTop = Math.round(displayRect.top * dpr);
+    const destWidth = Math.round(displayRect.width * dpr);
+    const destHeight = Math.round(displayRect.height * dpr);
+    const destRight = destLeft + destWidth;
     screenContext.setTransform(1, 0, 0, 1, 0, 0);
-    screenContext.fillStyle = '#221d2c';
+    // 真正超宽或安全区外侧只保留柔和的深青灰底；再把游戏画面的边缘像素向外延展，
+    // 避免纯黑硬切。主画面本身仍按同一比例绘制，绝不横向拉伸。
+    screenContext.fillStyle = '#2b3d42';
     screenContext.fillRect(0, 0, screenCanvas.width, screenCanvas.height);
+    if (gameCanvas.width > 0 && gameCanvas.height > 0 && destHeight > 0) {
+      if (destLeft > 0) {
+        screenContext.drawImage(gameCanvas, 0, 0, Math.min(4, gameCanvas.width), gameCanvas.height,
+          0, destTop, destLeft, destHeight);
+        const leftFade = screenContext.createLinearGradient(0, 0, destLeft, 0);
+        leftFade.addColorStop(0, 'rgba(30,45,50,.78)');
+        leftFade.addColorStop(1, 'rgba(30,45,50,0)');
+        screenContext.fillStyle = leftFade;
+        screenContext.fillRect(0, destTop, destLeft, destHeight);
+      }
+      if (destRight < screenCanvas.width) {
+        screenContext.drawImage(gameCanvas, Math.max(0, gameCanvas.width - 4), 0,
+          Math.min(4, gameCanvas.width), gameCanvas.height,
+          destRight, destTop, screenCanvas.width - destRight, destHeight);
+        const rightFade = screenContext.createLinearGradient(destRight, 0, screenCanvas.width, 0);
+        rightFade.addColorStop(0, 'rgba(30,45,50,0)');
+        rightFade.addColorStop(1, 'rgba(30,45,50,.78)');
+        screenContext.fillStyle = rightFade;
+        screenContext.fillRect(destRight, destTop, screenCanvas.width - destRight, destHeight);
+      }
+    }
     screenContext.drawImage(
       gameCanvas,
       0, 0, gameCanvas.width, gameCanvas.height,
-      Math.round(displayRect.left * dpr), Math.round(displayRect.top * dpr),
-      Math.round(displayRect.width * dpr), Math.round(displayRect.height * dpr)
+      destLeft, destTop, destWidth, destHeight
     );
   }
 
@@ -781,9 +850,46 @@
       pageY: touch.pageY == null ? touch.y : touch.pageY
     };
   }
+  // 只有在真实游戏显示区域内开始的手指，才属于游戏输入。手指开始后即使移出画面，
+  // 仍继续转发 move/end/cancel，确保方向键和按住机制一定能收到松手，不会卡住。
+  const forwardedTouchIds = new Set();
+  function touchInsideDisplay(touch) {
+    return Number.isFinite(Number(touch.clientX)) && Number.isFinite(Number(touch.clientY))
+      && touch.clientX >= displayRect.left && touch.clientX <= displayRect.right
+      && touch.clientY >= displayRect.top && touch.clientY <= displayRect.bottom;
+  }
   function forwardTouch(type, nativeEvent) {
-    const touches = Array.from(nativeEvent.touches || []).map(normalizeTouch);
-    const changedTouches = Array.from(nativeEvent.changedTouches || nativeEvent.touches || []).map(normalizeTouch);
+    const nativeTouches = Array.from(nativeEvent.touches || []).map(normalizeTouch);
+    const nativeChangedTouches = Array.from(nativeEvent.changedTouches || nativeEvent.touches || []).map(normalizeTouch);
+    const rejectedStarts = [];
+    let changedTouches;
+    if (type === 'touchstart') {
+      changedTouches = nativeChangedTouches.filter(function (touch) {
+        if (!touchInsideDisplay(touch)) {
+          rejectedStarts.push({ id:touch.identifier, x:touch.clientX, y:touch.clientY });
+          return false;
+        }
+        forwardedTouchIds.add(touch.identifier);
+        return true;
+      });
+    } else {
+      changedTouches = nativeChangedTouches.filter(function (touch) {
+        return forwardedTouchIds.has(touch.identifier);
+      });
+    }
+    const endingIds = new Set((type === 'touchend' || type === 'touchcancel')
+      ? changedTouches.map(function (touch) { return touch.identifier; }) : []);
+    const touches = nativeTouches.filter(function (touch) {
+      return forwardedTouchIds.has(touch.identifier) && !endingIds.has(touch.identifier);
+    });
+    if (rejectedStarts.length) {
+      adapterLog('viewport', 'touch-start-outside-display', {
+        rejected:rejectedStarts.slice(0, 5),
+        displayRect:{ left:displayRect.left, top:displayRect.top, right:displayRect.right, bottom:displayRect.bottom }
+      });
+    }
+    // 事件只涉及安全区外的新手指时，不把它伪装成游戏触摸；已有的游戏手指保持原状态。
+    if (!changedTouches.length) return;
     if (adapterLogModules.get('input') !== false) {
       adapterLog('input', type, {
         activeCount:touches.length,
@@ -795,6 +901,9 @@
     const event = new MiniEvent(type, { touches, changedTouches, timeStamp: Date.now() });
     gameCanvas.dispatchEvent(event);
     if (type === 'touchstart') documentObject.dispatchEvent(new MiniEvent('pointerdown', { touches, changedTouches }));
+    if (type === 'touchend' || type === 'touchcancel') {
+      changedTouches.forEach(function (touch) { forwardedTouchIds.delete(touch.identifier); });
+    }
   }
   wx.onTouchStart(function (event) { forwardTouch('touchstart', event); });
   if (typeof wx.onTouchMove === 'function') wx.onTouchMove(function (event) { forwardTouch('touchmove', event); });
@@ -881,7 +990,10 @@
     documentObject.visibilityState = hidden ? 'hidden' : 'visible';
     adapterLog('runtime', hidden ? 'app-hide' : 'app-show', { visibilityState:documentObject.visibilityState });
     documentObject.dispatchEvent(new MiniEvent('visibilitychange'));
-    if (hidden) browserWindow.dispatchEvent(new MiniEvent('blur'));
+    if (hidden) {
+      forwardedTouchIds.clear();
+      browserWindow.dispatchEvent(new MiniEvent('blur'));
+    }
   }
   wx.onHide(function () { setVisibility(true); });
   wx.onShow(function () { setVisibility(false); });
@@ -1098,10 +1210,18 @@
   installOwnProperty(browserWindow, '__SMART_EGG_WECHAT_ENV__', wechatEnvironment);
 
   const wechatBridge = {
-    version: 184,
+    version: 185,
     screenCanvas,
     gameCanvas,
     getDisplayRect: function () { return Object.assign({}, displayRect); },
+    getViewport: function () { return Object.assign({}, browserWindow.__SMART_EGG_VIEWPORT__ || {}); },
+    clientToLogical: function (clientX, clientY) {
+      if (!displayRect.width || !displayRect.height) return null;
+      const x = (Number(clientX) - displayRect.left) * (logicalViewport.logicalWidth / displayRect.width);
+      const y = (Number(clientY) - displayRect.top) * (logicalViewport.logicalHeight / displayRect.height);
+      if (x < 0 || y < 0 || x > logicalViewport.logicalWidth || y > logicalViewport.logicalHeight) return null;
+      return { x, y };
+    },
     presentFrame,
     updateViewport
   };

@@ -97,6 +97,12 @@ const readonlyHostDispatchEvent = function () { return true; };
 const readonlyHostRequestAnimationFrame = function () { return 987; };
 const readonlyHostAlert = function () {};
 const readonlyHostAudioContext = function HostAudioContext() {};
+const windowInfoFixture = {
+  windowWidth: 2400,
+  windowHeight: 1080,
+  pixelRatio: 1,
+  safeArea: { left:0, top:0, right:2400, bottom:1080, width:2400, height:1080 }
+};
 // 微信基础库 3.17.x 的 Window 对象以只读 getter 暴露这两个别名。
 // 兼容层必须复用它们，不能在严格模式里直接赋值。
 Object.defineProperty(global, 'window', {
@@ -154,7 +160,9 @@ for (const [key, value] of Object.entries({
 }
 global.wx = {
   createCanvas: canvasStub,
-  getWindowInfo: () => ({ windowWidth: 1280, windowHeight: 720, pixelRatio: 1 }),
+  getWindowInfo: () => Object.assign({}, windowInfoFixture, {
+    safeArea:Object.assign({}, windowInfoFixture.safeArea)
+  }),
   getAppBaseInfo: () => ({ SDKVersion: 'test', language: 'zh_CN' }),
   getDeviceInfo: () => ({ platform: 'devtools' }),
   getStorageSync: key => storageValues.has(String(key)) ? storageValues.get(String(key)) : '',
@@ -267,11 +275,11 @@ setTimeout(async () => {
   assert.notStrictEqual(gameWindow, global, 'game browser shims must live on an isolated compatibility window');
   assert.ok(gameWindow.document.getElementById('game-canvas'));
   assert.strictEqual(gameWindow.navigator.userAgent, 'WeChatMiniGame/test');
-  assert.strictEqual(global.__SMART_EGG_WECHAT_BRIDGE__.version, 184);
+  assert.strictEqual(global.__SMART_EGG_WECHAT_BRIDGE__.version, 185);
   assert.strictEqual(Object.keys(global.__SMART_EGG_LEVELS__).length, 20);
   assert.deepStrictEqual(Object.keys(global.__SMART_EGG_LEVELS__).map(Number), Array.from({ length:20 }, (_, index) => index));
   assert.ok(gameWindow.__debug, 'game debug API should be installed');
-  assert.strictEqual(gameWindow.__debug.VERSION, 184);
+  assert.strictEqual(gameWindow.__debug.VERSION, 185);
   assert.strictEqual(gameWindow.__debug.getState(), 'menu');
   assert.deepStrictEqual(gameWindow.__debug.getFeatures(), { creatorMode:{ enabled:false, localData:'preserved' } });
   assert.strictEqual(gameWindow.__debug.setState('creatorList'), 'menu', 'disabled creator route must be blocked');
@@ -282,6 +290,42 @@ setTimeout(async () => {
   assert.strictEqual(keyboardShows, 0, 'disabled creator mode must not open the level-code keyboard');
   assert.strictEqual(storageCalls.remove.includes('smart_egg_creator_levels_v1'), false, 'creator data must not be deleted');
   assert.strictEqual(storageCalls.clear, 0, 'offline mode must not clear storage');
+  const viewport = gameWindow.__debug.getViewportLayout();
+  assert.deepStrictEqual({
+    baseWidth:viewport.baseWidth,
+    viewWidth:viewport.viewWidth,
+    viewHeight:viewport.viewHeight,
+    sidePad:viewport.sidePad,
+    strategy:viewport.strategy,
+    backingSize:viewport.backingSize
+  }, {
+    baseWidth:1920,
+    viewWidth:2400,
+    viewHeight:1080,
+    sidePad:240,
+    strategy:'extend-horizontal-v1',
+    backingSize:{width:1680,height:756,renderScale:0.7}
+  }, '20:9 微信视口必须横向扩图且 Canvas 继续等比缩放');
+  assert.deepStrictEqual(global.__SMART_EGG_WECHAT_BRIDGE__.getDisplayRect(), {
+    left:0, top:0, width:2400, height:1080, right:2400, bottom:1080
+  }, '20:9 安全区应被完整地图填满，不应保留 16:9 黑边');
+  const level1Viewport = gameWindow.__debug.inspectLevelViewport(global.__SMART_EGG_LEVELS__[0]);
+  assert.deepStrictEqual(level1Viewport.after.grounds[0], { left:-240, right:2160, w:2400, h:440 },
+    '单屏完整地面必须向两侧扩展真实碰撞区域');
+  assert.deepStrictEqual(level1Viewport.before.spawn, level1Viewport.after.spawn,
+    '扩宽地图不得移动或缩放人物出生点');
+  assert.deepStrictEqual(level1Viewport.before.doors, level1Viewport.after.doors,
+    '扩宽地图不得移动或缩放门');
+  assert.strictEqual(level1Viewport.cameraStart, -240,
+    '宽屏单屏关首帧相机必须直接对齐扩展后的左边缘');
+  const cliffViewport = gameWindow.__debug.inspectLevelViewport(global.__SMART_EGG_LEVELS__[3]);
+  assert.deepStrictEqual(cliffViewport.after.grounds.map(ground => [ground.left, ground.right]), [
+    [-240,600], [1080,2160]
+  ], '断崖只扩外边，内部 600–1080 坑宽必须保持不变');
+  const longViewport = gameWindow.__debug.inspectLevelViewport(global.__SMART_EGG_LEVELS__[11]);
+  assert.strictEqual(longViewport.bounds.maxX, 5760,
+    '三屏关世界宽必须继续按 3×1920 计算，不能变成 3×设备视口');
+  assert.strictEqual(longViewport.singleHorizontal, false);
   const adapterLogControl = gameWindow.__SMART_EGG_ADAPTER_LOG_CONFIG__;
   assert.ok(adapterLogControl && adapterLogControl.getModules().export,
     'wechat adapter logs must expose independent module controls');
@@ -311,6 +355,12 @@ setTimeout(async () => {
     && Number.isInteger(entry.seq)
     && (index === 0 || entry.seq > entries[index - 1].seq)
   ), 'adapter diagnostics must carry one session id and increasing sequence numbers');
+  const viewportLogs = adapterLogControl.find('viewport', 'viewport-updated');
+  assert.ok(viewportLogs.some(entry => entry.context.logicalWidth === 2400
+    && entry.context.logicalHeight === 1080
+    && entry.context.sidePad === 240
+    && entry.context.aspectMode === 'horizontal-map-extension'),
+  'viewport module must independently diagnose safe area, logical size and extension strategy');
   assert.deepStrictEqual(adapterLogControl.redact({ nested:{ secret:'hide', cookie:'hide', safe:3 } }),
     { nested:{ secret:'[REDACTED]', cookie:'[REDACTED]', safe:3 } },
     'wechat adapter logs must recursively redact sensitive fields');
@@ -433,10 +483,10 @@ setTimeout(async () => {
   callbacks.raf(Date.now());
   adapterLogControl.setModule('input', true);
   callbacks.touchstart({
-    touches: [{ identifier: 1, clientX: 640, clientY: 463 }],
-    changedTouches: [{ identifier: 1, clientX: 640, clientY: 463 }]
+    touches: [{ identifier: 1, clientX: 1200, clientY: 694 }],
+    changedTouches: [{ identifier: 1, clientX: 1200, clientY: 694 }]
   });
-  callbacks.touchend({ touches: [], changedTouches: [{ identifier: 1, clientX: 640, clientY: 463 }] });
+  callbacks.touchend({ touches: [], changedTouches: [{ identifier: 1, clientX: 1200, clientY: 694 }] });
   assert.strictEqual(gameWindow.__debug.getState(), 'levelSelect', 'screen touch should map to the start button');
   assert.ok(adapterLogControl.find('input', 'touchstart').length > 0
     && adapterLogControl.find('input', 'touchend').length > 0,
@@ -509,7 +559,7 @@ setTimeout(async () => {
   assert.strictEqual(clipboardWrites, clipboardWritesBeforeFinalExport + 1,
     '当前这次日志导出必须完成微信剪贴板后备');
   assert.ok(lastFileWrite && lastFileWrite.encoding === 'utf8'
-    && /smart-egg-log-v184-/.test(lastFileWrite.filePath),
+    && /smart-egg-log-v185-/.test(lastFileWrite.filePath),
   '当前这次日志必须写入微信用户目录');
   const exportedReport = JSON.parse(lastFileWrite.data);
   assert.deepStrictEqual(exportedReport.previousFault, previousFaultFixture,
@@ -562,6 +612,6 @@ setTimeout(async () => {
   assert.ok(gameWindow.__SMART_EGG_ADAPTER_DIAGNOSTICS__[0].seq > sequenceBeforeRetentionProbe,
     'adapter diagnostics ring must evict old entries rather than growing without bound');
   Object.fromEntries = nativeObjectFromEntries;
-  console.log('微信小游戏冒烟测试通过：v184适配层、20关、创造秘境下线、A/D/空格/Shift、音频核心诊断、故障恢复日志与输入回归均正常。');
+  console.log('微信小游戏冒烟测试通过：v185宽屏适配、20关、创造秘境下线、A/D/空格/Shift、音频核心诊断、故障恢复日志与输入回归均正常。');
   process.exit(0);
 }, 80);
