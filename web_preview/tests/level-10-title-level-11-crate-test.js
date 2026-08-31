@@ -12,8 +12,8 @@ const guide = fs.readFileSync(path.join(root, 'web_preview/README.md'), 'utf8');
 const wordLevel = JSON.parse(fs.readFileSync(path.join(root, 'godot_project/levels/level_9.json'), 'utf8'));
 const crateLevel = JSON.parse(fs.readFileSync(path.join(root, 'godot_project/levels/level_10.json'), 'utf8'));
 
-assert.match(game, /const GAME_CODE_VERSION = 185/);
-assert.match(index, /game\.js\?v=185/);
+assert.match(game, /const GAME_CODE_VERSION = 186/);
+assert.match(index, /game\.js\?v=186/);
 assert.ok(wordLevel.mechanics.includes('word_bridge'));
 assert.ok(crateLevel.mechanics.includes('persistent_reset'));
 

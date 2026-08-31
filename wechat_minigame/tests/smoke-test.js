@@ -5,6 +5,9 @@ const fs = require('fs');
 const path = require('path');
 
 const projectRoot = path.resolve(__dirname, '../..');
+const jumpActionPath = path.join(projectRoot, 'wechat_minigame/assets/sfx-jump-action.wav');
+assert.ok(fs.existsSync(jumpActionPath) && fs.statSync(jumpActionPath).size > 1000,
+  '微信包必须包含独立的跳跃动作音效采样');
 assert.strictEqual(
   fs.readFileSync(path.join(projectRoot, 'wechat_minigame/js/levels.js'), 'utf8'),
   fs.readFileSync(path.join(projectRoot, 'godot_project/levels/levels_bundle.js'), 'utf8'),
@@ -275,11 +278,11 @@ setTimeout(async () => {
   assert.notStrictEqual(gameWindow, global, 'game browser shims must live on an isolated compatibility window');
   assert.ok(gameWindow.document.getElementById('game-canvas'));
   assert.strictEqual(gameWindow.navigator.userAgent, 'WeChatMiniGame/test');
-  assert.strictEqual(global.__SMART_EGG_WECHAT_BRIDGE__.version, 185);
+  assert.strictEqual(global.__SMART_EGG_WECHAT_BRIDGE__.version, 186);
   assert.strictEqual(Object.keys(global.__SMART_EGG_LEVELS__).length, 20);
   assert.deepStrictEqual(Object.keys(global.__SMART_EGG_LEVELS__).map(Number), Array.from({ length:20 }, (_, index) => index));
   assert.ok(gameWindow.__debug, 'game debug API should be installed');
-  assert.strictEqual(gameWindow.__debug.VERSION, 185);
+  assert.strictEqual(gameWindow.__debug.VERSION, 186);
   assert.strictEqual(gameWindow.__debug.getState(), 'menu');
   assert.deepStrictEqual(gameWindow.__debug.getFeatures(), { creatorMode:{ enabled:false, localData:'preserved' } });
   assert.strictEqual(gameWindow.__debug.setState('creatorList'), 'menu', 'disabled creator route must be blocked');
@@ -303,7 +306,7 @@ setTimeout(async () => {
     viewWidth:2400,
     viewHeight:1080,
     sidePad:240,
-    strategy:'extend-horizontal-v1',
+    strategy:'extend-horizontal-exact-v2',
     backingSize:{width:1680,height:756,renderScale:0.7}
   }, '20:9 微信视口必须横向扩图且 Canvas 继续等比缩放');
   assert.deepStrictEqual(global.__SMART_EGG_WECHAT_BRIDGE__.getDisplayRect(), {
@@ -326,6 +329,18 @@ setTimeout(async () => {
   assert.strictEqual(longViewport.bounds.maxX, 5760,
     '三屏关世界宽必须继续按 3×1920 计算，不能变成 3×设备视口');
   assert.strictEqual(longViewport.singleHorizontal, false);
+  const idleLegsA = gameWindow.__debug.getFantasyLegPose({ onGround:true, walking:false, walkT:0, vy:0, bob:0 });
+  const idleLegsB = gameWindow.__debug.getFantasyLegPose({ onGround:true, walking:false, walkT:2.4, vy:0, bob:0 });
+  assert.deepStrictEqual(idleLegsA, idleLegsB, '待机腿姿不能冻结在上一次随机跨步帧');
+  const walkBob = -3.2;
+  const walkLegs = gameWindow.__debug.getFantasyLegPose({ onGround:true, walking:true, walkT:Math.PI/2, vy:0, bob:walkBob });
+  assert.ok(walkLegs.left.foot[1] + walkBob < 84, '行走时前腿应自然抬脚');
+  assert.ok(Math.abs(walkLegs.right.foot[1] + walkBob - 84) < 1e-9, '行走支撑脚必须继续贴地');
+  const risingLegsA = gameWindow.__debug.getFantasyLegPose({ onGround:false, walking:false, walkT:0, vy:-600, bob:0 });
+  const risingLegsB = gameWindow.__debug.getFantasyLegPose({ onGround:false, walking:false, walkT:2.8, vy:-600, bob:0 });
+  assert.deepStrictEqual(risingLegsA, risingLegsB, '跳跃腿姿必须由垂直速度决定，不能沿用行走相位');
+  const fallingLegs = gameWindow.__debug.getFantasyLegPose({ onGround:false, walking:false, walkT:1.1, vy:900, bob:0 });
+  assert.ok(fallingLegs.left.foot[1] > risingLegsA.left.foot[1], '下落阶段双腿应逐渐伸展准备落地');
   const adapterLogControl = gameWindow.__SMART_EGG_ADAPTER_LOG_CONFIG__;
   assert.ok(adapterLogControl && adapterLogControl.getModules().export,
     'wechat adapter logs must expose independent module controls');
@@ -404,6 +419,13 @@ setTimeout(async () => {
   const adapterAudio = new gameWindow.AudioContext();
   assert.ok(adapterAudio && adapterLogControl.find('audio-core', 'context-created').length > 0,
     'audio-core must diagnose implementation selection without enabling verbose audio logs');
+  const audioCountBeforeBgmProbe = innerAudioInstances.length;
+  gameWindow.document.dispatchEvent(new gameWindow.Event('pointerdown'));
+  await new Promise(resolve => setTimeout(resolve, 430));
+  assert.strictEqual(innerAudioInstances.length, audioCountBeforeBgmProbe,
+    'first interaction must not start the old periodic dot-tone sequencer');
+  assert.strictEqual(gameWindow.__debug.getAudioDiagnostics().bgmEnabled, false,
+    'production diagnostics must state that the periodic sequencer is disabled');
   const oscillator = adapterAudio.createOscillator();
   const gain = adapterAudio.createGain();
   oscillator.connect(gain);
@@ -426,6 +448,18 @@ setTimeout(async () => {
     'short-lived InnerAudio playback must stop and destroy its native resource');
   assert.strictEqual(audioInstance.obeyMuteSwitch, false,
     'each fallback InnerAudio instance must not re-enable the hardware mute switch');
+  const actionOscillator = adapterAudio.createOscillator();
+  const actionGain = adapterAudio.createGain();
+  actionOscillator.__smartEggSample = 'jump-action';
+  actionOscillator.connect(actionGain);
+  actionOscillator.start(adapterAudio.currentTime);
+  actionOscillator.stop(adapterAudio.currentTime + 0.22);
+  await new Promise(resolve => setTimeout(resolve, 360));
+  const actionAudioInstance = innerAudioInstances[innerAudioInstances.length - 1];
+  assert.strictEqual(actionAudioInstance.src, 'assets/sfx-jump-action.wav',
+    'jump oscillator must route only to the dedicated physical-action sample');
+  assert.strictEqual(actionAudioInstance.playbackRate, 1,
+    'dedicated action sample must keep its authored playback rate');
   callbacks.hide();
   callbacks.show();
   const networkLogsBeforeMute = adapterLogControl.find('network', 'status-change').length;
@@ -559,7 +593,7 @@ setTimeout(async () => {
   assert.strictEqual(clipboardWrites, clipboardWritesBeforeFinalExport + 1,
     '当前这次日志导出必须完成微信剪贴板后备');
   assert.ok(lastFileWrite && lastFileWrite.encoding === 'utf8'
-    && /smart-egg-log-v185-/.test(lastFileWrite.filePath),
+    && /smart-egg-log-v186-/.test(lastFileWrite.filePath),
   '当前这次日志必须写入微信用户目录');
   const exportedReport = JSON.parse(lastFileWrite.data);
   assert.deepStrictEqual(exportedReport.previousFault, previousFaultFixture,
@@ -577,6 +611,15 @@ setTimeout(async () => {
   // 真机首跳故障注入：音频节点任一步抛错都只能让音频静默降级，不能再把
   // physicsStep 切到 fatal 或打断后续 RAF。
   gameWindow.__debug.loadLevelAndStart();
+  callbacks.raf(Date.now() + 8);
+  const controlRects = gameWindow.__debug.getControlRects();
+  for (const [name, rect] of Object.entries(controlRects)) {
+    assert.ok(rect, `${name} 控制按钮必须完成布局`);
+    assert.strictEqual(gameWindow.__debug.isSceneGestureBlockedByUI({
+      x:rect.x + rect.w / 2,
+      y:rect.y + rect.h / 2
+    }), true, `场景拖拽不能抢走 ${name} 控制按钮`);
+  }
   const jumpPlayer = gameWindow.__debug.getPlayer();
   jumpPlayer.onGround = true;
   gameWindow.__debug.__setAudioContextForTest({
@@ -612,6 +655,6 @@ setTimeout(async () => {
   assert.ok(gameWindow.__SMART_EGG_ADAPTER_DIAGNOSTICS__[0].seq > sequenceBeforeRetentionProbe,
     'adapter diagnostics ring must evict old entries rather than growing without bound');
   Object.fromEntries = nativeObjectFromEntries;
-  console.log('微信小游戏冒烟测试通过：v185宽屏适配、20关、创造秘境下线、A/D/空格/Shift、音频核心诊断、故障恢复日志与输入回归均正常。');
+  console.log('微信小游戏冒烟测试通过：v186精确宽屏、自然人物动作、独立跳跃动作声、20关与故障恢复日志均正常。');
   process.exit(0);
 }, 80);

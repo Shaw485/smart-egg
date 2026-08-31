@@ -10,8 +10,8 @@ const gameSource = fs.readFileSync(path.join(root, 'web_preview/game.js'), 'utf8
 const indexSource = fs.readFileSync(path.join(root, 'web_preview/index.html'), 'utf8');
 const debugGuide = fs.readFileSync(path.join(root, 'web_preview/README.md'), 'utf8');
 
-assert.match(gameSource, /const GAME_CODE_VERSION = 185/);
-assert.match(indexSource, /game\.js\?v=185/);
+assert.match(gameSource, /const GAME_CODE_VERSION = 186/);
+assert.match(indexSource, /game\.js\?v=186/);
 assert.match(gameSource, /const TOTAL_LEVELS = 20/);
 assert.match(gameSource, /_updateNewLevelMechanics\(dt\)/);
 assert.match(gameSource, /persistent-crate-land/);
@@ -55,10 +55,41 @@ assert.match(levels[0].description.hint_l1, /拖动.*太阳.*影子.*机关/);
 assert.match(levels[1].description.hint_l1, /松开.*原地不动约 2 秒.*继续不动/);
 assert.match(levels[2].description.hint_l1, /“路”字.*两块地面/);
 assert.match(levels[3].description.hint_l1, /重来.*箱子/);
-assert.match(levels[4].description.hint_l1, /场景空白处.*向左拖动.*地图/);
+assert.match(levels[4].description.hint_l1, /脚下地面.*向左拖动.*天空.*人物.*门.*不算.*只走路.*看不到门/);
 assert.strictEqual(levels[3].crates.length, 3);
 assert.ok(levels[3].crates.every(crate => crate.static_platform));
 assert.ok(!JSON.stringify(levels[4]).includes('远处安静得看不见尽头'));
+
+// 第12关机制回归：无论走到哪里，未拖动时门都在当前视野之外；只有累计左拖达标才固定出现。
+const dragLevel = levels[4];
+assert.deepStrictEqual(dragLevel.drag_world, { reveal_drag:720, door_lead:360, found_distance:620 });
+for (const viewportWidth of [1920, 2400, 3840]) {
+  for (const playerX of [420, 1200, 3200, 5680]) {
+    const cameraX = Math.max(0, Math.min(dragLevel.world_size.w - viewportWidth, playerX - 420));
+    const hiddenDoorX = playerX + viewportWidth + dragLevel.drag_world.door_lead;
+    assert.ok(hiddenDoorX - cameraX > viewportWidth,
+      `第12关未拖动时门必须保持在视野外：viewport=${viewportWidth}, player=${playerX}`);
+  }
+}
+const dragGoal = dragLevel.doors.find(door => door.is_goal);
+const foundPlayerX = 2200;
+const desiredDoorX = foundPlayerX + Math.min(dragLevel.drag_world.found_distance, 2400 * .42);
+const foundDoorX = Math.max(dragGoal.w/2+20,
+  Math.min(dragLevel.world_size.w-dragGoal.w/2-20, desiredDoorX));
+assert.ok(foundDoorX > foundPlayerX && foundDoorX-foundPlayerX <= dragLevel.drag_world.found_distance,
+  '第12关完成拖动后，门必须出现在人物前方可到达距离内');
+assert.match(gameSource, /_dragWorldTravel >= cfg\.revealDrag/);
+assert.match(gameSource, /world-door-found/);
+assert.match(gameSource, /walkingCanRevealDoor: false/);
+assert.match(gameSource, /function _dragWorldGroundHit\(p\)/);
+assert.match(gameSource, /startSurface:'ground'/);
+assert.match(gameSource, /reason:'start-not-on-ground'/);
+assert.match(gameSource, /groundVisualOffset:Math\.round\(_dragWorldOffset\)/);
+assert.match(gameSource, /const bottomControl = \[uiBTN\.left, uiBTN\.right, uiBTN\.jump\]/,
+  '第12关拖地手势必须排除底部左右和跳跃按钮');
+assert.match(gameSource, /return overlayVisible \|\| topButton \|\| bottomControl/);
+assert.doesNotMatch(gameSource, /_hasMechanic\('drag_world'\) && p\.y < 900/,
+  '第12关不能从天空等任意区域开始拖动');
 
 // 第10关几何回归：自然放到断口地面线必须成功，桥面必须与两岸齐平。
 const wordLevel = levels[2];

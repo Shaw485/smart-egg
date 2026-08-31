@@ -5,6 +5,7 @@
   "name": "小一点",
   "type": "shrink_tunnel",
   "mechanics": ["shrink_tunnel"],
+  "shrink_tunnel": {"x": 620, "y": 653, "w": 820, "h": 112, "ground_top": 870},
   "no_fall": true,
   "description": {"hint_l1": "直接点击人物让身体缩小，再从中间低矮通道下方走过去；缩小状态下进入右侧门。"},
   "world_size": {"w": 1920, "h": 1080},

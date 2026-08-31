@@ -1,7 +1,7 @@
 'use strict';
 
 /*
- * 怪奇之原微信小游戏兼容层 v185
+ * 怪奇之原微信小游戏兼容层 v186
  *
  * 游戏本体以 1080 高的逻辑 Canvas 绘制；微信宽屏会横向扩展地图而不拉伸元素。本文件把微信小游戏的
  * Canvas、触摸、存储、音频、生命周期、键盘和日志文件接口映射成游戏
@@ -203,7 +203,7 @@
     redact: function (context) { return redactAdapterContext(context, 0); }
   });
   adapterLog('runtime', 'adapter-session-start', {
-    version: 185,
+    version: 186,
     creatorMode: CREATOR_MODE_ENABLED,
     retention: { type: 'memory-ring', maxEntries: ADAPTER_LOG_MAX },
     productionDefaults: mapEntriesToObject(adapterLogModules)
@@ -220,7 +220,6 @@
   let displayRect = { left: 0, top: 0, width: 1, height: 1, right: 1, bottom: 1 };
   const VIEWPORT_BASE_WIDTH = 1920;
   const VIEWPORT_LOGICAL_HEIGHT = 1080;
-  const VIEWPORT_MAX_WIDTH = 2880;
   let logicalViewport = null;
 
   function readWindowInfo() {
@@ -243,10 +242,11 @@
     const safeAspect = safeWidth / safeHeight;
     if (!logicalViewport) {
       const requestedWidth = Math.round(VIEWPORT_LOGICAL_HEIGHT * safeAspect);
-      const logicalWidth = Math.max(VIEWPORT_BASE_WIDTH, Math.min(VIEWPORT_MAX_WIDTH, requestedWidth));
+      // 宽屏设备需要多宽，就生成多宽的逻辑地图；不封顶、不裁切，也不复制边缘像素。
+      const logicalWidth = Math.max(VIEWPORT_BASE_WIDTH, requestedWidth);
       logicalViewport = {
-        schemaVersion: 1,
-        strategy: 'extend-horizontal-v1',
+        schemaVersion: 2,
+        strategy: 'extend-horizontal-exact-v2',
         baseWidth: VIEWPORT_BASE_WIDTH,
         logicalWidth,
         logicalHeight: VIEWPORT_LOGICAL_HEIGHT,
@@ -254,7 +254,7 @@
         requestedWidth,
         aspectMode: requestedWidth < VIEWPORT_BASE_WIDTH
           ? 'narrow-contain'
-          : (requestedWidth > VIEWPORT_MAX_WIDTH ? 'ultrawide-edge-extension' : 'horizontal-map-extension')
+          : 'horizontal-map-extension'
       };
     }
     const scale = Math.min(
@@ -311,33 +311,10 @@
     const destTop = Math.round(displayRect.top * dpr);
     const destWidth = Math.round(displayRect.width * dpr);
     const destHeight = Math.round(displayRect.height * dpr);
-    const destRight = destLeft + destWidth;
     screenContext.setTransform(1, 0, 0, 1, 0, 0);
-    // 真正超宽或安全区外侧只保留柔和的深青灰底；再把游戏画面的边缘像素向外延展，
-    // 避免纯黑硬切。主画面本身仍按同一比例绘制，绝不横向拉伸。
+    // 仅安全区之外使用纯色衬底；主画面永远只等比绘制一次，不模糊、复制或拉长边缘。
     screenContext.fillStyle = '#2b3d42';
     screenContext.fillRect(0, 0, screenCanvas.width, screenCanvas.height);
-    if (gameCanvas.width > 0 && gameCanvas.height > 0 && destHeight > 0) {
-      if (destLeft > 0) {
-        screenContext.drawImage(gameCanvas, 0, 0, Math.min(4, gameCanvas.width), gameCanvas.height,
-          0, destTop, destLeft, destHeight);
-        const leftFade = screenContext.createLinearGradient(0, 0, destLeft, 0);
-        leftFade.addColorStop(0, 'rgba(30,45,50,.78)');
-        leftFade.addColorStop(1, 'rgba(30,45,50,0)');
-        screenContext.fillStyle = leftFade;
-        screenContext.fillRect(0, destTop, destLeft, destHeight);
-      }
-      if (destRight < screenCanvas.width) {
-        screenContext.drawImage(gameCanvas, Math.max(0, gameCanvas.width - 4), 0,
-          Math.min(4, gameCanvas.width), gameCanvas.height,
-          destRight, destTop, screenCanvas.width - destRight, destHeight);
-        const rightFade = screenContext.createLinearGradient(destRight, 0, screenCanvas.width, 0);
-        rightFade.addColorStop(0, 'rgba(30,45,50,0)');
-        rightFade.addColorStop(1, 'rgba(30,45,50,.78)');
-        screenContext.fillStyle = rightFade;
-        screenContext.fillRect(destRight, destTop, screenCanvas.width - destRight, destHeight);
-      }
-    }
     screenContext.drawImage(
       gameCanvas,
       0, 0, gameCanvas.width, gameCanvas.height,
@@ -679,6 +656,7 @@
       frequency: new AudioParam(440),
       _gain: null,
       _startAt: context.currentTime,
+      __smartEggSample: null,
       connect: function (target) { this._gain = target; return target; },
       start: function (when) { this._startAt = Number(when) || context.currentTime; },
       stop: function (when) {
@@ -700,11 +678,15 @@
         const delay = Math.max(0, (this._startAt - context.currentTime) * 1000);
         const duration = Math.max(40, ((Number(when) || this._startAt + 0.2) - this._startAt) * 1000);
         const gain = this._gain && this._gain.gain ? this._gain.gain.peak : 0.05;
+        const sampleId = this.__smartEggSample === 'jump-action' ? 'jump-action' : null;
         adapterLog('audio', 'tone-scheduled', {
-          frequency:Math.round(frequency), base, delayMs:Math.round(delay), durationMs:Math.round(duration), gain:Number(gain.toFixed(4))
+          frequency:Math.round(frequency), base, sampleId,
+          delayMs:Math.round(delay), durationMs:Math.round(duration), gain:Number(gain.toFixed(4))
         });
         setTimeout(function () {
-          const asset = 'assets/tone-' + base + '.wav';
+          const asset = sampleId === 'jump-action'
+            ? 'assets/sfx-jump-action.wav'
+            : 'assets/tone-' + base + '.wav';
           let audio = null;
           let playRequested = false;
           let playbackConfirmed = false;
@@ -802,8 +784,12 @@
             audio.loop = false;
             // 兼容旧基础库；新基础库以 setInnerAudioOption 的全局配置为准。
             audio.obeyMuteSwitch = false;
-            audio.volume = Math.max(0, Math.min(1, gain * 2.2));
-            audio.playbackRate = Math.max(0.5, Math.min(2, frequency / base));
+            audio.volume = sampleId === 'jump-action'
+              ? Math.max(0.45, Math.min(1, gain * 5.5))
+              : Math.max(0, Math.min(1, gain * 2.2));
+            audio.playbackRate = sampleId === 'jump-action'
+              ? 1
+              : Math.max(0.5, Math.min(2, frequency / base));
             // 必须先注册事件，再设置 src；本地资源可能很快进入 canplay。
             if (typeof audio.onCanplay === 'function') audio.onCanplay(handleCanplay);
             supportsOnPlay = typeof audio.onPlay === 'function';
@@ -1210,7 +1196,7 @@
   installOwnProperty(browserWindow, '__SMART_EGG_WECHAT_ENV__', wechatEnvironment);
 
   const wechatBridge = {
-    version: 185,
+    version: 186,
     screenCanvas,
     gameCanvas,
     getDisplayRect: function () { return Object.assign({}, displayRect); },

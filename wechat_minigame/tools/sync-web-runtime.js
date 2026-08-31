@@ -43,7 +43,7 @@ const preamble = `    const _platformGlobal = typeof GameGlobal !== 'undefined' 
 `;
 
 let game = fs.readFileSync(webGamePath, 'utf8');
-if (!/const GAME_CODE_VERSION = 185/.test(game)) throw new Error('网页主线不是预期的 v185，停止同步');
+if (!/const GAME_CODE_VERSION = 186/.test(game)) throw new Error('网页主线不是预期的 v186，停止同步');
 if (!/const CREATOR_MODE_ENABLED = false/.test(game)) throw new Error('创造秘境尚未下线，停止同步');
 const wechatAdapter = fs.readFileSync(wechatAdapterPath, 'utf8');
 if (!/const CREATOR_MODE_ENABLED = false/.test(wechatAdapter)) {
@@ -123,5 +123,5 @@ for (const file of writes) {
 
 console.log(JSON.stringify({
   at:new Date().toISOString(), module:'wechat-sync', level:'info', event:checkOnly?'sync-check-complete':'sync-complete',
-  codeVersion:185, levels:20, creatorMode:false
+  codeVersion:186, levels:20, creatorMode:false
 }));

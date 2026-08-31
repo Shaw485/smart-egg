@@ -46,8 +46,19 @@ const validStroke = [
 ];
 assert.strictEqual(mechanics.validateInkStroke(validStroke).valid, true, '保留的通用手势工具仍须稳定，避免旧自定义关卡失效');
 assert.strictEqual(mechanics.validateInkStroke(validStroke.slice(0, 3)).valid, false, '通用手势工具仍须拒绝未完成路径');
-assert.strictEqual(mechanics.sideBlock(650, 720, 40, 710, 1320, true).blocked, true, '未缩小时必须被低通道阻挡');
-assert.strictEqual(mechanics.sideBlock(650, 720, 40, 710, 1320, false).blocked, false, '缩小后必须能通过低通道');
+const shrinkLevel = bundle[14];
+const tunnel = shrinkLevel.shrink_tunnel;
+const tunnelLeft = tunnel.x + 10;
+const tunnelRight = tunnel.x + tunnel.w - 10;
+const tunnelClearance = tunnel.ground_top - (tunnel.y + tunnel.h);
+assert.ok(tunnel.w > 630, '第15关墙体必须比旧版更宽');
+assert.ok(tunnel.h <= 120, '第15关墙体本身不得高于未缩小人物的碰撞高度');
+assert.ok(tunnelClearance < 120 && tunnelClearance > 120 * .62,
+  '第15关通道净空必须只允许缩小人物通过');
+assert.strictEqual(mechanics.sideBlock(tunnelLeft-50, tunnelLeft+10, 40, tunnelLeft, tunnelRight, true).blocked, true,
+  '未缩小时必须被低通道阻挡');
+assert.strictEqual(mechanics.sideBlock(tunnelLeft-50, tunnelLeft+10, 40, tunnelLeft, tunnelRight, false).blocked, false,
+  '缩小后必须能通过低通道');
 assert.strictEqual(mechanics.eraseProgress(.9, 100), 1, '擦除进度必须封顶为1');
 const migratedProgress = mechanics.migrateProgressForRemovedLevel({
   unlocked: 17,
@@ -75,7 +86,9 @@ assert.match(game, /for \(const d of doors\) \{\s+const dx = d\.x - d\.w \/ 2, d
   '门跳跃的通关距离必须在实际判定循环内计算，不能引用前一轮循环的局部变量');
 assert.match(game, /ground_swap/);
 assert.match(game, /erase_wall/);
-assert.match(index, /accepted-mechanics\.js\?v=185/);
+assert.match(index, /accepted-mechanics\.js\?v=186/);
+assert.match(game, /function _shrinkTunnelGeometry/);
+assert.match(game, /shrink-tunnel-config/);
 
 const reverseLevel = bundle[13];
 assert.strictEqual(reverseLevel.source_review_id, 17, '原第15关必须顺排为新的第14关');
@@ -156,7 +169,7 @@ assert.match(game, /minProjectionClearance/,
 assert.ok(!Object.values(bundle).some(level => level.source_review_id === 15), '评审编号15对应的原第14关必须从主线删除');
 
 for (const moduleName of [
-  'mechanic:bridge', 'mechanic:gesture', 'mechanic:transform', 'mechanic:hazard',
+  'mechanic:bridge', 'mechanic:gesture', 'mechanic:transform', 'mechanic:world', 'mechanic:hazard',
   'mechanic:direction', 'mechanic:door', 'mechanic:terrain', 'mechanic:erase'
 ]) {
   assert.ok(game.includes(`['${moduleName}',true]`), `${moduleName} 日志模块必须可独立开关`);

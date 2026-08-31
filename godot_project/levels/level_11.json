@@ -4,12 +4,13 @@
   "name": "远方未远",
   "type": "drag_world",
   "mechanics": ["drag_world"],
+  "drag_world": {"reveal_drag": 720, "door_lead": 360, "found_distance": 620},
   "no_fall": true,
   "map_extent": {"left": 0, "right": 2, "up": 0},
   "description": {
     "定位": "拖动场景而不是人物的空间交互关。",
-    "正解": "在场景空白处向左拖动整个世界，把远方的门拖到人物面前。",
-    "hint_l1": "按住场景空白处向左拖动整张地图，把远处的门拖到人物面前；松手后走进门。"
+    "正解": "按住脚下的真实地面向左拖动整个世界，把远方的门拖到人物面前。",
+    "hint_l1": "按住脚下地面向左拖动整张地图；拖天空、人物或门都不算，只走路也永远看不到门。"
   },
   "world_size": {"w": 5760, "h": 1080},
   "spawn": {"x": 420, "y": 810},

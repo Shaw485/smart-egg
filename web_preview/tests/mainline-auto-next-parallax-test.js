@@ -11,8 +11,8 @@ const guide = fs.readFileSync(path.join(root, 'web_preview/README.md'), 'utf8');
 const level7 = JSON.parse(fs.readFileSync(path.join(root, 'godot_project/levels/level_6.json'), 'utf8'));
 const level8 = JSON.parse(fs.readFileSync(path.join(root, 'godot_project/levels/level_7.json'), 'utf8'));
 
-assert.match(game, /const GAME_CODE_VERSION = 185/);
-assert.match(index, /game\.js\?v=185/);
+assert.match(game, /const GAME_CODE_VERSION = 186/);
+assert.match(index, /game\.js\?v=186/);
 assert.strictEqual(level7.infinite_horizontal, true, '第7关应保持无限横向');
 assert.ok(level7.mechanics.includes('hold_to_stop'), '第7关应保留按住门停止机制');
 assert.ok(level8.mechanics.includes('shadow_switch'), '第8关应保留光影机关');
@@ -43,7 +43,9 @@ assert.match(game, /const screenX=worldX-shift/);
 assert.doesNotMatch(game, /const offset=-\(shift%480\)/, '山脉不能再使用会在边界跳变的取模偏移');
 assert.match(game, /mountainMotion = idx === 6 \? 'fixed' : 'stable-world-lattice'/);
 assert.match(game, /groundFeaturesWorldAnchored: true/);
-assert.match(game, /featureFirst=levelData\.infinite_horizontal\?Math\.floor\(\(_cameraX-250\)\/170\)\*170/);
+assert.match(game, /const featureFirst=levelData\.infinite_horizontal\s*\?\s*Math\.floor\(\(_cameraX-250\)\/170\)\*170/);
+assert.match(game, /const groundOffset=dragGround\?_dragWorldOffset:0/,
+  '第12关拖动地面时，地表纹理和参照物必须随拖动量移动');
 const worldX = 1800;
 for (const factor of [1]) {
   const before = worldX - 200 * factor;

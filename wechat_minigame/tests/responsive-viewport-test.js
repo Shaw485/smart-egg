@@ -151,18 +151,18 @@ const matrix = [
     mode:'narrow-contain'
   },
   {
-    name:'ultrawide-soft-edges',
+    name:'ultrawide-exact-map',
     info:{ windowWidth:3840, windowHeight:1080, pixelRatio:1 },
-    logicalWidth:2880,
-    rect:{ left:480, top:0, width:2880, height:1080, right:3360, bottom:1080 },
-    mode:'ultrawide-edge-extension'
+    logicalWidth:3840,
+    rect:{ left:0, top:0, width:3840, height:1080, right:3840, bottom:1080 },
+    mode:'horizontal-map-extension'
   }
 ];
 
 for (const entry of matrix) {
   const runtime = bootAdapter(entry.info);
   const viewport = runtime.bridge.getViewport();
-  assert.strictEqual(runtime.bridge.version, 185, `${entry.name}: bridge version`);
+  assert.strictEqual(runtime.bridge.version, 186, `${entry.name}: bridge version`);
   assert.strictEqual(viewport.logicalWidth, entry.logicalWidth, `${entry.name}: logical width`);
   assert.strictEqual(viewport.logicalHeight, 1080, `${entry.name}: logical height`);
   assert.strictEqual(viewport.aspectMode, entry.mode, `${entry.name}: aspect mode`);
@@ -182,6 +182,8 @@ for (const entry of matrix) {
   runtime.gameCanvas.height = 1080;
   runtime.bridge.presentFrame();
   const drawOperations = runtime.screenCanvas.context.operations.filter(operation => operation.type === 'drawImage');
+  assert.strictEqual(drawOperations.length, 1,
+    `${entry.name}: game frame must be drawn exactly once without copied or blurred edge strips`);
   const mainDraw = drawOperations.at(-1);
   assert.ok(mainDraw, `${entry.name}: main frame must be presented`);
   const [, sourceX, sourceY, sourceWidth, sourceHeight, destX, destY, destWidth, destHeight] = mainDraw.args;
@@ -199,29 +201,26 @@ for (const entry of matrix) {
     operation.type === 'fillRect' && operation.fillStyle === '#2b3d42'
   ), `${entry.name}: outside-safe-area matte must be natural blue-grey, never pure black`);
 
-  if (entry.name === 'ultrawide-soft-edges') {
-    assert.strictEqual(runtime.bridge.clientToLogical(100, 540), null,
-      'ultrawide outer gutter must not become an interactive stretched region');
-    assert.ok(drawOperations.length >= 3,
-      'ultrawide gutters must receive edge-pixel extensions before the main frame');
-
+  if (entry.name === 'safe-area-offset-dpr3') {
+    assert.strictEqual(runtime.bridge.clientToLogical(10, 540), null,
+      'unsafe-area matte must not become an interactive region');
     const forwarded = { touchstart:[], touchmove:[], touchend:[], touchcancel:[] };
     for (const type of Object.keys(forwarded)) {
       runtime.gameCanvas.addEventListener(type, event => forwarded[type].push(event));
     }
-    const outsideStart = { identifier:41, clientX:100, clientY:540 };
+    const outsideStart = { identifier:41, clientX:10, clientY:540 };
     runtime.callbacks.touchstart({ touches:[outsideStart], changedTouches:[outsideStart] });
     assert.strictEqual(forwarded.touchstart.length, 0,
-      'a touch beginning in the ultrawide gutter must never reach gameplay');
+      'a touch beginning outside the safe display rect must never reach gameplay');
     assert.ok(runtime.gameWindow.__SMART_EGG_ADAPTER_LOG_CONFIG__
       .find('viewport', 'touch-start-outside-display').length > 0,
     'a rejected gutter touch must leave an independently filterable viewport diagnostic');
 
-    const insideStart = { identifier:42, clientX:600, clientY:540 };
+    const insideStart = { identifier:42, clientX:100, clientY:540 };
     runtime.callbacks.touchstart({ touches:[insideStart], changedTouches:[insideStart] });
     assert.strictEqual(forwarded.touchstart.length, 1,
       'a touch beginning inside the real game rect must reach gameplay');
-    const movedOutside = { identifier:42, clientX:100, clientY:540 };
+    const movedOutside = { identifier:42, clientX:10, clientY:540 };
     runtime.callbacks.touchmove({ touches:[movedOutside], changedTouches:[movedOutside] });
     runtime.callbacks.touchend({ touches:[], changedTouches:[movedOutside] });
     assert.strictEqual(forwarded.touchmove.length, 1,
@@ -233,7 +232,7 @@ for (const entry of matrix) {
       'a released identifier must no longer be forwarded');
 
     const acceptedA = { identifier:51, clientX:700, clientY:600 };
-    const rejectedB = { identifier:52, clientX:150, clientY:600 };
+    const rejectedB = { identifier:52, clientX:10, clientY:600 };
     runtime.callbacks.touchstart({ touches:[acceptedA], changedTouches:[acceptedA] });
     const startsBeforeRejectedSecondFinger = forwarded.touchstart.length;
     runtime.callbacks.touchstart({ touches:[acceptedA,rejectedB], changedTouches:[rejectedB] });
@@ -245,7 +244,7 @@ for (const entry of matrix) {
       'the accepted first finger must still release after an outside second finger is ignored');
 
     const acceptedC = { identifier:53, clientX:800, clientY:650 };
-    const acceptedD = { identifier:54, clientX:3000, clientY:650 };
+    const acceptedD = { identifier:54, clientX:2300, clientY:650 };
     runtime.callbacks.touchstart({ touches:[acceptedC,acceptedD], changedTouches:[acceptedC,acceptedD] });
     runtime.callbacks.touchend({ touches:[acceptedD], changedTouches:[acceptedC] });
     assert.deepStrictEqual(Array.from(forwarded.touchend.at(-1).touches, touch => touch.identifier), [54],
@@ -264,4 +263,4 @@ for (const entry of matrix) {
     `${entry.name}: viewport calculation must be logged`);
 }
 
-console.log('微信响应式视口测试通过：16:9、19.5:9、20:9、安全区、DPR3、窄屏与超宽柔和边缘均保持等比。');
+console.log('微信响应式视口测试通过：常见宽高比、安全区、DPR3、窄屏与超宽精确地图均保持等比且不复制边缘。');
