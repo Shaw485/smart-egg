@@ -48,12 +48,39 @@ function canvasStub() {
 
 const callbacks = {};
 const storageCalls = { set:[], remove:[], clear:0 };
+const previousFaultFixture = {
+  id: 'fault-previous-test',
+  sessionId: 'session-previous-test',
+  kind: 'frame-stall',
+  levelIndex: 0,
+  frame: 41,
+  lastAction: 'jump',
+  at: '2026-08-31T12:00:00.000Z'
+};
+const lastFaultFixture = {
+  id: 'fault-last-test',
+  sessionId: 'session-last-test',
+  kind: 'unhandled-rejection',
+  levelIndex: 0,
+  frame: 42,
+  message: 'simulated recovered fault',
+  at: '2026-08-31T12:00:01.000Z'
+};
+const storageValues = new Map([
+  ['smart_egg_fault_journal_v1', JSON.stringify({
+    schemaVersion: 1,
+    previousFault: previousFaultFixture,
+    lastFault: lastFaultFixture
+  })]
+]);
 let clipboardWrites = 0;
 let clipboardReads = 0;
 let keyboardShows = 0;
 let modalShows = 0;
 let lastFileWrite = null;
 let clipboardWriteFails = false;
+const innerAudioOptionCalls = [];
+const innerAudioInstances = [];
 const hostDocumentListeners = Object.create(null);
 global.GameGlobal = global;
 const readonlyHostDocument = Object.freeze({
@@ -130,10 +157,63 @@ global.wx = {
   getWindowInfo: () => ({ windowWidth: 1280, windowHeight: 720, pixelRatio: 1 }),
   getAppBaseInfo: () => ({ SDKVersion: 'test', language: 'zh_CN' }),
   getDeviceInfo: () => ({ platform: 'devtools' }),
-  getStorageSync: () => '',
-  setStorageSync: (key, value) => { storageCalls.set.push({ key, value }); },
-  removeStorageSync: key => { storageCalls.remove.push(key); },
-  clearStorageSync: () => { storageCalls.clear += 1; },
+  getStorageSync: key => storageValues.has(String(key)) ? storageValues.get(String(key)) : '',
+  setStorageSync: (key, value) => {
+    storageCalls.set.push({ key, value });
+    storageValues.set(String(key), value);
+  },
+  removeStorageSync: key => {
+    storageCalls.remove.push(key);
+    storageValues.delete(String(key));
+  },
+  clearStorageSync: () => {
+    storageCalls.clear += 1;
+    storageValues.clear();
+  },
+  setInnerAudioOption: options => {
+    innerAudioOptionCalls.push(Object.assign({}, options));
+    if (options && typeof options.success === 'function') options.success();
+  },
+  createInnerAudioContext: () => {
+    const operations = [];
+    let canplayHandler = null;
+    let errorHandler = null;
+    let source = '';
+    const instance = {
+      operations,
+      autoplay: false,
+      loop: false,
+      obeyMuteSwitch: true,
+      volume: 1,
+      playbackRate: 1,
+      onCanplay(handler) {
+        operations.push('onCanplay');
+        canplayHandler = handler;
+      },
+      onError(handler) {
+        operations.push('onError');
+        errorHandler = handler;
+      },
+      play() { operations.push('play'); },
+      stop() { operations.push('stop'); },
+      destroy() { operations.push('destroy'); },
+      emitError(error) { if (errorHandler) errorHandler(error); }
+    };
+    Object.defineProperty(instance, 'src', {
+      enumerable: true,
+      configurable: true,
+      get: () => source,
+      set: value => {
+        source = String(value);
+        operations.push('src');
+        // 模拟资源已经就绪：若监听器在 src 之前注册，会立即收到 canplay；
+        // 若顺序反了则故意不补发，用来锁定真机“偶发无声”的竞态。
+        if (canplayHandler) canplayHandler();
+      }
+    });
+    innerAudioInstances.push(instance);
+    return instance;
+  },
   onTouchStart: fn => { callbacks.touchstart = fn; },
   onTouchMove: fn => { callbacks.touchmove = fn; },
   onTouchEnd: fn => { callbacks.touchend = fn; },
@@ -187,11 +267,11 @@ setTimeout(async () => {
   assert.notStrictEqual(gameWindow, global, 'game browser shims must live on an isolated compatibility window');
   assert.ok(gameWindow.document.getElementById('game-canvas'));
   assert.strictEqual(gameWindow.navigator.userAgent, 'WeChatMiniGame/test');
-  assert.strictEqual(global.__SMART_EGG_WECHAT_BRIDGE__.version, 183);
+  assert.strictEqual(global.__SMART_EGG_WECHAT_BRIDGE__.version, 184);
   assert.strictEqual(Object.keys(global.__SMART_EGG_LEVELS__).length, 20);
   assert.deepStrictEqual(Object.keys(global.__SMART_EGG_LEVELS__).map(Number), Array.from({ length:20 }, (_, index) => index));
   assert.ok(gameWindow.__debug, 'game debug API should be installed');
-  assert.strictEqual(gameWindow.__debug.VERSION, 183);
+  assert.strictEqual(gameWindow.__debug.VERSION, 184);
   assert.strictEqual(gameWindow.__debug.getState(), 'menu');
   assert.deepStrictEqual(gameWindow.__debug.getFeatures(), { creatorMode:{ enabled:false, localData:'preserved' } });
   assert.strictEqual(gameWindow.__debug.setState('creatorList'), 'menu', 'disabled creator route must be blocked');
@@ -211,6 +291,17 @@ setTimeout(async () => {
     'high-frequency adapter input logs must be disabled in production');
   assert.strictEqual(adapterLogControl.getModules().audio, false,
     'verbose adapter audio logs must be disabled in production');
+  assert.strictEqual(adapterLogControl.getModules()['audio-core'], true,
+    'low-volume audio lifecycle and failure diagnostics must stay enabled in production');
+  assert.ok(innerAudioOptionCalls.length > 0,
+    'wechat audio policy must be configured before the first sound is requested');
+  assert.deepStrictEqual({
+    obeyMuteSwitch: innerAudioOptionCalls[0].obeyMuteSwitch,
+    mixWithOther: innerAudioOptionCalls[0].mixWithOther
+  }, {
+    obeyMuteSwitch: false,
+    mixWithOther: true
+  }, 'wechat audio policy must play through the hardware mute switch and coexist with other audio');
   const adapterRuntimeLogs = adapterLogControl.find('runtime', '');
   assert.ok(adapterRuntimeLogs.some(entry => entry.event === 'adapter-session-start')
     && adapterRuntimeLogs.some(entry => entry.event === 'adapter-ready'),
@@ -260,11 +351,31 @@ setTimeout(async () => {
     entry.context.key === 'diagnostic-failure' && entry.level === 'error'
   ), 'adapter storage failure must produce an actionable diagnostic');
   global.wx.setStorageSync = normalStorageSetter;
-  adapterLogControl.setModule('audio', true);
   const adapterAudio = new gameWindow.AudioContext();
-  assert.ok(adapterAudio && adapterLogControl.find('audio', 'context-created').length > 0,
-    'adapter audio module must diagnose implementation selection when enabled');
-  adapterLogControl.setModule('audio', false);
+  assert.ok(adapterAudio && adapterLogControl.find('audio-core', 'context-created').length > 0,
+    'audio-core must diagnose implementation selection without enabling verbose audio logs');
+  const oscillator = adapterAudio.createOscillator();
+  const gain = adapterAudio.createGain();
+  oscillator.connect(gain);
+  oscillator.start(adapterAudio.currentTime);
+  oscillator.stop(adapterAudio.currentTime + 0.04);
+  await new Promise(resolve => setTimeout(resolve, 180));
+  assert.ok(innerAudioInstances.length > 0,
+    'fallback WebAudio oscillator must create a WeChat InnerAudio instance');
+  const audioInstance = innerAudioInstances[innerAudioInstances.length - 1];
+  const onCanplayIndex = audioInstance.operations.indexOf('onCanplay');
+  const srcIndex = audioInstance.operations.indexOf('src');
+  const playIndex = audioInstance.operations.indexOf('play');
+  const stopIndex = audioInstance.operations.indexOf('stop');
+  const destroyIndex = audioInstance.operations.indexOf('destroy');
+  assert.ok(onCanplayIndex >= 0 && srcIndex >= 0 && onCanplayIndex < srcIndex,
+    'InnerAudio onCanplay listener must be registered before src to avoid missing an immediately-ready resource');
+  assert.ok(playIndex > srcIndex,
+    'an immediately-ready InnerAudio resource must actually play');
+  assert.ok(stopIndex > playIndex && destroyIndex > stopIndex,
+    'short-lived InnerAudio playback must stop and destroy its native resource');
+  assert.strictEqual(audioInstance.obeyMuteSwitch, false,
+    'each fallback InnerAudio instance must not re-enable the hardware mute switch');
   callbacks.hide();
   callbacks.show();
   const networkLogsBeforeMute = adapterLogControl.find('network', 'status-change').length;
@@ -398,9 +509,13 @@ setTimeout(async () => {
   assert.strictEqual(clipboardWrites, clipboardWritesBeforeFinalExport + 1,
     '当前这次日志导出必须完成微信剪贴板后备');
   assert.ok(lastFileWrite && lastFileWrite.encoding === 'utf8'
-    && /smart-egg-log-v183-/.test(lastFileWrite.filePath),
+    && /smart-egg-log-v184-/.test(lastFileWrite.filePath),
   '当前这次日志必须写入微信用户目录');
   const exportedReport = JSON.parse(lastFileWrite.data);
+  assert.deepStrictEqual(exportedReport.previousFault, previousFaultFixture,
+    '最终诊断包必须携带上次会话恢复出的 previousFault');
+  assert.deepStrictEqual(exportedReport.lastFault, lastFaultFixture,
+    '最终诊断包必须携带当前可用的 lastFault');
   assert.ok(Array.isArray(exportedReport.adapterLogs) && exportedReport.adapterLogs.length > 0,
     '导出的诊断包必须包含微信适配层日志');
   assert.ok(exportedReport.adapterLogs.some(entry => entry.event === 'write-request')
@@ -408,6 +523,38 @@ setTimeout(async () => {
     '最终写入的诊断包必须包含本次导出的请求和文件写入成功事件');
   const exportLog = gameWindow._findLogs('native-export-dispatched', 'export').at(-1);
   assert.ok(exportLog && exportLog.kv.platform === 'wechat-minigame');
+
+  // 真机首跳故障注入：音频节点任一步抛错都只能让音频静默降级，不能再把
+  // physicsStep 切到 fatal 或打断后续 RAF。
+  gameWindow.__debug.loadLevelAndStart();
+  const jumpPlayer = gameWindow.__debug.getPlayer();
+  jumpPlayer.onGround = true;
+  gameWindow.__debug.__setAudioContextForTest({
+    state: 'running',
+    currentTime: 0,
+    destination: {},
+    createOscillator() { throw new Error('simulated-partial-webaudio-node-failure'); },
+    createGain() { throw new Error('gain-should-not-be-reached'); }
+  });
+  const frameBeforeAudioFault = gameWindow.__debug.getFrame();
+  hostKey('keydown', { key:' ', keyCode:32 });
+  callbacks.raf(Date.now() + 16);
+  hostKey('keyup', { key:' ', keyCode:32 });
+  assert.ok(gameWindow.__debug.getFrame() > frameBeforeAudioFault,
+    'audio failure during the first jump must not stop the RAF chain');
+  assert.strictEqual(gameWindow.__debug.getState(), 'playing',
+    'audio failure during jump must never turn the game into a fatal/frozen state');
+  assert.ok(gameWindow.__debug.getPlayer().vy < 0,
+    'jump physics must still fire when its sound effect fails');
+  const injectedAudioFailure = gameWindow._findLogs('audio-failure', 'audio').at(-1);
+  assert.ok(injectedAudioFailure
+    && injectedAudioFailure.kv.message.includes('simulated-partial-webaudio-node-failure'),
+    'audio failure must remain actionable in the diagnostic log');
+  assert.ok(gameWindow.__debug.getFaultJournal().lastFault
+    && gameWindow.__debug.getFaultJournal().lastFault.reason === 'audio-failure',
+    'audio failure must persist so it can be exported after a restart');
+  gameWindow.__debug.__setAudioContextForTest(null);
+
   const sequenceBeforeRetentionProbe = gameWindow.__SMART_EGG_ADAPTER_DIAGNOSTICS__.at(-1).seq;
   for (let index = 0; index < 220; index++) gameWindow.localStorage.getItem('ring-retention-probe');
   assert.strictEqual(gameWindow.__SMART_EGG_ADAPTER_DIAGNOSTICS__.length, 200,
@@ -415,6 +562,6 @@ setTimeout(async () => {
   assert.ok(gameWindow.__SMART_EGG_ADAPTER_DIAGNOSTICS__[0].seq > sequenceBeforeRetentionProbe,
     'adapter diagnostics ring must evict old entries rather than growing without bound');
   Object.fromEntries = nativeObjectFromEntries;
-  console.log('微信小游戏冒烟测试通过：v183适配层、20关、创造秘境下线、A/D/空格/Shift、日志导出与输入回归均正常。');
+  console.log('微信小游戏冒烟测试通过：v184适配层、20关、创造秘境下线、A/D/空格/Shift、音频核心诊断、故障恢复日志与输入回归均正常。');
   process.exit(0);
 }, 80);

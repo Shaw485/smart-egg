@@ -1,6 +1,6 @@
-# 怪奇之原 · 微信小游戏版（v183）
+# 怪奇之原 · 微信小游戏版（v184）
 
-这是与网页和 Android 构建隔离的微信小游戏工程。当前同步网页正式主线 v183，共 20 个关卡；首页“创造秘境”入口已下线，已有自定义关卡数据仍保留在本机存储中，没有删除，后续可以通过统一功能开关恢复。
+这是与网页和 Android 构建隔离的微信小游戏工程。当前同步网页正式主线 v184，共 20 个关卡；首页“创造秘境”入口已下线，已有自定义关卡数据仍保留在本机存储中，没有删除，后续可以通过统一功能开关恢复。
 
 ## 正确导入方式
 
@@ -19,6 +19,7 @@
 - 触屏支持移动和跳跃多指同时按住；开发者工具支持 `A` 左移、`D` 右移、`空格` 跳跃，`Shift` 用于需要按住空白区域的冻结机制。
 - 第 2 关箱子旁不会被纠正到屏幕左侧；第 7、9 关长距离奔跑参照物连续；第 10 关可拖“路”成桥；第 11 关箱子侧面不可穿、顶部可站；第 14 关高塔间距可跳通。
 - 首页右上角日志按钮可导出诊断日志；在微信环境会优先写入用户目录并调用分享能力，不可分享时复制到剪贴板。
+- 真机音频采用稳定的 `InnerAudioContext` 回退；即使音频创建、加载或播放失败，也只记录音频错误，不会中断物理循环或把游戏切成卡死状态。
 
 ## 从网页主线同步
 
@@ -38,7 +39,7 @@ node --check wechat_minigame/js/smart-egg-game.js
 node wechat_minigame/tests/smoke-test.js
 ```
 
-冒烟测试固定检查：v183 适配层、20/20 关卡内嵌、创造秘境不可达且数据未清理、三页选关、冷启动无致命错误、A/D/空格/Shift、10 项输入回归、辅助模块同源和原生日志导出。
+冒烟测试固定检查：v184 适配层、20/20 关卡内嵌、创造秘境不可达且数据未清理、三页选关、冷启动无致命错误、A/D/空格/Shift、10 项输入回归、辅助模块同源、稳定 InnerAudio 播放/销毁以及包含故障恢复信息的原生日志导出。
 
 ## 日志与独立调试
 
@@ -55,7 +56,9 @@ _findLogs('error')                         // 筛选错误事件
 _exportLogs()                              // 导出完整诊断包
 ```
 
-主要模块包括 `runtime`、`feature`、`state`、`input`、`level-load`、`collide`、`audio`、`storage`、`network`、`export` 和各 `mechanic:*` 子模块。微信适配层另保留最多 200 条 `wechat-adapter:*` 日志，并随诊断包一起导出；每条带独立 `sessionId` 和递增 `seq`。通过 `__SMART_EGG_ADAPTER_LOG_CONFIG__.getModules()`、`.setModule('export', false)` 和 `.find('export', 'failed')` 可独立开关及筛选适配层模块。适配层的 `input`、`audio` 高频详情在生产默认关闭，需要复现时分别执行 `.setModule('input', true)` 或 `.setModule('audio', true)`；`runtime`、`feature`、`storage`、`network`、`export` 默认开启，网络事件可用 `.setModule('network', false)` 单独关闭。生命周期、视口、输入、音频实现、存储变更、联网状态、文件写入、分享和剪贴板后备路径均能分别定位。复现完成后关闭高频模块；不要在日志里手工附加 AppSecret、AccessToken、用户隐私或其他敏感信息。
+主要模块包括 `runtime`、`feature`、`state`、`input`、`level-load`、`collide`、`audio`、`storage`、`network`、`export` 和各 `mechanic:*` 子模块。微信适配层另保留最多 200 条 `wechat-adapter:*` 日志，并随诊断包一起导出；每条带独立 `sessionId` 和递增 `seq`。通过 `__SMART_EGG_ADAPTER_LOG_CONFIG__.getModules()`、`.setModule('export', false)` 和 `.find('export', 'failed')` 可独立开关及筛选适配层模块。低频、可执行的 `audio-core` 生命周期与失败日志在生产默认开启；高频 `input`、`audio` 详情在生产默认关闭，需要复现时分别执行 `.setModule('input', true)` 或 `.setModule('audio', true)`。`runtime`、`feature`、`storage`、`network`、`export` 同样默认开启，网络事件可用 `.setModule('network', false)` 单独关闭。生命周期、视口、输入、音频实现、存储变更、联网状态、文件写入、分享和剪贴板后备路径均能分别定位。复现完成后关闭高频模块；不要在日志里手工附加 AppSecret、AccessToken、用户隐私或其他敏感信息。
+
+v184 会持久化精简的 `previousFault` 和 `lastFault`，每条故障中的 `lastAction` 记录故障前最后动作；完整逐帧日志仍只保存在有上限的内存环形缓冲中。若真机已经卡住、来不及手动导出，直接关闭并重新打开游戏，在首页右上角点击日志导出，新的诊断包会带回上次会话的异常与最后动作。
 
 ## 工程结构
 
@@ -64,7 +67,7 @@ _exportLogs()                              // 导出完整诊断包
 - `js/levels.js`：20 个正式关卡的内嵌离线数据。
 - `js/physics-collision.js`：主线碰撞模块。
 - `js/accepted-mechanics.js`：第 13–20 关正式机制模块。
-- `js/smart-egg-game.js`：由同步脚本生成的 v183 微信运行时。
+- `js/smart-egg-game.js`：由同步脚本生成的 v184 微信运行时。
 - `tools/sync-web-runtime.js`：确定性同步与一致性检查。
 - `tests/smoke-test.js`：微信隔离环境启动和功能回归。
 
@@ -72,5 +75,7 @@ _exportLogs()                              // 导出完整诊断包
 
 - 使用正式账号重新编译，核对 AppID `wx6f83b5cdbf65041b` 与后台主体一致。
 - 在至少一台 iOS 和一台 Android 真机完成 20 关抽样、触控组合、音频、横屏、安全区和日志导出检查。
+- 第一关先移动两步再跳跃，确认人物继续响应且物理帧持续推进；在设备无声或模拟音频失败时，确认游戏仍可移动和跳跃、不会卡死。
+- 制造或保留一次可识别异常后重开游戏，从首页右上角导出日志，确认同时包含 `previousFault`、`lastFault` 和其中的 `lastAction`。
 - 核对小程序名称、图标、隐私声明、类目、备案/版号及审核材料是否与后台一致。
 - 通过“预览”验证后再点“上传”；本次代码准备不会自动执行上传或提交审核。

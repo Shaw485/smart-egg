@@ -6,9 +6,9 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 183;   // 跟 index.html 的 ?v=183 保持一致
+    const GAME_CODE_VERSION = 184;   // 跟 index.html 的 ?v=184 保持一致
     const GAME_TITLE = '怪奇之原';
-    // v183 上线收敛：保留创造秘境代码与本地存档，只关闭正式入口和运行路径。
+    // v184 真机稳定性：保留创造秘境代码与本地存档，只关闭正式入口和运行路径。
     // 重新开放时需恢复此运行时开关，并同步恢复平台适配构建开关；旧存档不会丢失。
     const CREATOR_MODE_ENABLED = false;
     try {
@@ -698,9 +698,26 @@
     // 所有日志走 window.__gameLogs 数组，可在浏览器DevTools里查看或通过 _dumpLogs() 导出
     const LOG_MAX = 10000;
     const LOG_SESSION_ID = 'se-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+    const FAULT_JOURNAL_KEY = 'smart_egg_fault_journal_v1';
+    const LAST_ACTION_KEY = 'smart_egg_last_action_v1';
+    const FAULT_LOG_LIMIT = 80;
     let _logSequence = 0;
     const _logStartedAt = new Date().toISOString();
     window.__gameLogs = window.__gameLogs || [];
+    let _faultJournal = { previousFault: null, lastFault: null };
+    let _faultWriteActive = false;
+    try {
+        const storedFaultJournal = JSON.parse(localStorage.getItem(FAULT_JOURNAL_KEY) || 'null');
+        if (storedFaultJournal && typeof storedFaultJournal === 'object') {
+            _faultJournal = {
+                previousFault: storedFaultJournal.previousFault || null,
+                lastFault: storedFaultJournal.lastFault || null
+            };
+        }
+    } catch (error) {
+        console.warn('[FAULT-JOURNAL] restore failed', String(error && error.message || error));
+    }
+    window.__SMART_EGG_FAULT_JOURNAL__ = _faultJournal;
     const _logModules = new Map([
         ['runtime',true],['lifecycle',true],['network',true],['storage',true],['state',true],['input',true],['mechanic',true],['level-load',true],
         ['door',true],['collide',true],['puzzle',true],['progress',true],['audio',true],
@@ -773,6 +790,110 @@
         if (loudCats.includes(cat)) {
             console.log(`[LOG f=${entry.f} ${cat}/${tag}]`, JSON.stringify(entry.kv));
         }
+        return entry;
+    }
+
+    function _compactPlayerForFault() {
+        try {
+            return {
+                x: Math.round(player.x), y: Math.round(player.y),
+                vx: Math.round(player.vx), vy: Math.round(player.vy),
+                onGround: !!player.onGround, alive: !!player.alive,
+                jumpsLeft: player.jumpsLeft, wantJump: !!player.wantJump,
+                moveDir: player.moveDir
+            };
+        } catch (_) {
+            return { unavailable:true, reason:'player-not-initialized' };
+        }
+    }
+
+    function _faultRuntimeMeta() {
+        try {
+            return {
+                state: gameState,
+                pageName: currentPageName(),
+                levelIndex: currentLevelIndex,
+                levelName: levelData && levelData.name
+            };
+        } catch (_) {
+            return { state:'initializing', pageName:'初始化', levelIndex:null, levelName:null };
+        }
+    }
+
+    function _persistActionBreadcrumb(action, details = {}) {
+        try {
+            const runtimeMeta = _faultRuntimeMeta();
+            const breadcrumb = {
+                schemaVersion: 1,
+                at: new Date().toISOString(),
+                sessionId: LOG_SESSION_ID,
+                codeVersion: GAME_CODE_VERSION,
+                action: String(action || 'unknown'),
+                state: runtimeMeta.state,
+                levelIndex: runtimeMeta.levelIndex,
+                player: _compactPlayerForFault(),
+                details: _redactLogContext(details)
+            };
+            localStorage.setItem(LAST_ACTION_KEY, JSON.stringify(breadcrumb));
+            return breadcrumb;
+        } catch (error) {
+            console.warn('[FAULT-JOURNAL] breadcrumb write failed', String(error && error.message || error));
+            return null;
+        }
+    }
+
+    function _persistFault(reason, details = {}) {
+        if (_faultWriteActive) return null;
+        _faultWriteActive = true;
+        try {
+            let lastAction = null;
+            try { lastAction = JSON.parse(localStorage.getItem(LAST_ACTION_KEY) || 'null'); } catch (_) {}
+            const runtimeMeta = _faultRuntimeMeta();
+            let inputSnapshot = { unavailable:true, reason:'input-not-initialized' };
+            try { inputSnapshot = _getInputSnapshot(); } catch (_) {}
+            const fault = {
+                schemaVersion: 1,
+                at: new Date().toISOString(),
+                sessionId: LOG_SESSION_ID,
+                codeVersion: GAME_CODE_VERSION,
+                reason: String(reason || 'runtime-fault'),
+                state: runtimeMeta.state,
+                pageName: runtimeMeta.pageName,
+                levelIndex: runtimeMeta.levelIndex,
+                levelName: runtimeMeta.levelName,
+                player: _compactPlayerForFault(),
+                input: inputSnapshot,
+                lastAction,
+                details: _redactLogContext(details),
+                recentPlayerFrames: _playerRing.slice(-PLAYER_RING_SIZE),
+                adapterLogs: Array.isArray(window.__SMART_EGG_ADAPTER_DIAGNOSTICS__)
+                    ? window.__SMART_EGG_ADAPTER_DIAGNOSTICS__.slice(-60)
+                    : [],
+                adapterLastFault: window.__SMART_EGG_ADAPTER_FAULT_JOURNAL__
+                    ? window.__SMART_EGG_ADAPTER_FAULT_JOURNAL__.lastFault
+                    : null,
+                logs: window.__gameLogs.slice(-FAULT_LOG_LIMIT)
+            };
+            _faultJournal.previousFault = _faultJournal.lastFault || _faultJournal.previousFault || null;
+            _faultJournal.lastFault = fault;
+            localStorage.setItem(FAULT_JOURNAL_KEY, JSON.stringify(_faultJournal));
+            return fault;
+        } catch (error) {
+            console.error('[FAULT-JOURNAL] fault write failed', String(error && error.message || error));
+            return null;
+        } finally {
+            _faultWriteActive = false;
+        }
+    }
+
+    function _clearFaultJournal() {
+        _faultJournal.previousFault = null;
+        _faultJournal.lastFault = null;
+        try {
+            localStorage.removeItem(FAULT_JOURNAL_KEY);
+            localStorage.removeItem(LAST_ACTION_KEY);
+        } catch (_) {}
+        return { previousFault: null, lastFault: null };
     }
     // v4.9.7a 日志查询工具（一次性暴露 6 个）：
     //   _dumpLogs() 全量 / _tailLogs(n) 最后N条 / _findLogs(keyword) 按tag或KV关键字搜
@@ -804,6 +925,8 @@
     window.__debug.setLogModule = window._setLogModule;
     window.__debug.getLogModules = window._logModuleStatus;
     window.__debug.redactLogContext = value => _redactLogContext(value);
+    window.__debug.getFaultJournal = () => JSON.parse(JSON.stringify(_faultJournal));
+    window.__debug.clearFaultJournal = _clearFaultJournal;
 
     function _runtimeSnapshot() {
         return {
@@ -833,7 +956,12 @@
                 availableLevels: _availableLevels.slice(),
                 progress: { unlocked: _progress.unlocked, completed: (_progress.completed || []).slice() }
             },
-            audio: { supported: !!(window.AudioContext || window.webkitAudioContext), state: _audioCtx ? _audioCtx.state : 'not-created' }
+            audio: {
+                supported: !!(window.AudioContext || window.webkitAudioContext),
+                state: _audioCtx ? _audioCtx.state : 'not-created',
+                failureCount: _audioFailureCount,
+                lastFailure: _lastAudioFailure
+            }
         };
     }
     function exportDiagnosticLog() {
@@ -841,6 +969,11 @@
         const report = {
             format: 'smart-egg-diagnostic-log', schemaVersion: 1,
             runtime: _runtimeSnapshot(),
+            previousFault: _faultJournal.previousFault,
+            lastFault: _faultJournal.lastFault,
+            adapterLastFault: window.__SMART_EGG_ADAPTER_FAULT_JOURNAL__
+                ? window.__SMART_EGG_ADAPTER_FAULT_JOURNAL__.lastFault
+                : null,
             recentPlayerFrames: _playerRing.slice(),
             adapterLogs: Array.isArray(window.__SMART_EGG_ADAPTER_DIAGNOSTICS__)
                 ? window.__SMART_EGG_ADAPTER_DIAGNOSTICS__.slice()
@@ -869,8 +1002,16 @@
         }
     }
     window.__debug.exportLog = exportDiagnosticLog;
-    window.addEventListener('error', e => logStep('fatal', 'window-error', { message: e.message, file: e.filename, line: e.lineno, column: e.colno, stack: e.error && e.error.stack }));
-    window.addEventListener('unhandledrejection', e => logStep('fatal', 'unhandled-rejection', { reason: String(e.reason), stack: e.reason && e.reason.stack }));
+    window.addEventListener('error', e => {
+        const context = { message: e.message, file: e.filename, line: e.lineno, column: e.colno, stack: e.error && e.error.stack };
+        logStep('fatal', 'window-error', context);
+        _persistFault('window-error', context);
+    });
+    window.addEventListener('unhandledrejection', e => {
+        const context = { reason: String(e.reason), stack: e.reason && e.reason.stack };
+        logStep('fatal', 'unhandled-rejection', context);
+        _persistFault('unhandled-rejection', context);
+    });
     window.addEventListener('online', () => logStep('network', 'browser-online', { online: true }));
     window.addEventListener('offline', () => logStep('network', 'browser-offline', { online: false }));
     const input = { left: false, right: false, jumpPressed: false, jumpHeld: false };
@@ -923,6 +1064,12 @@
         if (isDown) _controlSources.set(sourceId, control);
         else _controlSources.delete(sourceId);
         _syncInputFromSources(isDown && control === 'jump');
+        if (isDown && control === 'jump' && previousControl !== 'jump') {
+            _persistActionBreadcrumb('jump-pressed', {
+                sourceId: String(sourceId),
+                moveHeld: { left: !!input.left, right: !!input.right }
+            });
+        }
         return {
             changed: isDown ? previousControl !== control : previousControl !== null,
             previousControl,
@@ -964,6 +1111,37 @@
         return { before, after };
     }
 
+    let _runtimeRecoveryNoticeShown = false;
+    function _recoverFromRuntimeFault(area, error) {
+        const context = {
+            area: String(area || 'runtime'),
+            message: String(error && error.message || error || 'unknown-runtime-error'),
+            stack: String(error && error.stack || '').slice(0, 800),
+            frame: frameCount,
+            stateBeforeRecovery: gameState,
+            levelIndex: currentLevelIndex
+        };
+        try { logStep('fatal', 'runtime-recovered', context); } catch (_) {}
+        try { _persistFault('runtime-' + context.area, context); } catch (_) {}
+        try {
+            _resetAllInput('runtime-recovery-' + context.area, {
+                clearHeldKeyboard: true,
+                clearBlockedKeyboard: true
+            });
+        } catch (_) {}
+        showSuccess = false;
+        showDead = false;
+        helpVisible = false;
+        gameState = 'paused';
+        if (!_runtimeRecoveryNoticeShown) {
+            _runtimeRecoveryNoticeShown = true;
+            window.setTimeout(() => {
+                try { alert('游戏刚才发生异常，已自动暂停。可以点“返回游戏”继续，或点重来；异常日志已经保存，重开游戏后也能在首页导出。'); } catch (_) {}
+            }, 0);
+        }
+        return context;
+    }
+
     function _isTextEntryTarget(target) {
         if (!target) return false;
         const tag = String(target.tagName || '').toUpperCase();
@@ -983,7 +1161,13 @@
     });
     document.addEventListener('visibilitychange', () => {
         logStep('lifecycle', 'visibility-change', { visibility: document.visibilityState, input: _getInputSnapshot() });
-        if (document.visibilityState === 'hidden') _resetForLostFocus('document-hidden');
+        if (document.visibilityState === 'hidden') {
+            _resetForLostFocus('document-hidden');
+        } else {
+            // 微信从后台回到前台时重新恢复音频；失败只记日志，不影响玩法。
+            _ensureAudio();
+            _startBgm();
+        }
     });
     window.addEventListener('pagehide', e => {
         logStep('lifecycle', 'page-hide', { persisted: e.persisted, input: _getInputSnapshot() });
@@ -1141,65 +1325,136 @@
 
     // 轻量程序化音效：不依赖外部音频文件，首次键盘/触摸操作后自动启用。
     let _audioCtx = null;
+    let _audioFailureCount = 0;
+    let _lastAudioFailure = null;
+    function _recordAudioFailure(stage, error, details = {}) {
+        const context = {
+            stage,
+            message: String(error && error.message || error || 'unknown-audio-error'),
+            stack: String(error && error.stack || '').slice(0, 500),
+            contextState: _audioCtx && _audioCtx.state || 'not-created',
+            implementation: window.__wxMiniGame ? 'wechat-adapter' : 'browser-web-audio',
+            failureCount: ++_audioFailureCount,
+            ...details
+        };
+        _lastAudioFailure = _redactLogContext(context);
+        logStep('audio', 'audio-failure', context);
+        // 只保留最初几次完整证据，避免坏设备连续写存储拖慢主线程。
+        if (_audioFailureCount <= 3) _persistFault('audio-failure', context);
+        return null;
+    }
     function _ensureAudio() {
-        const AudioCtor = window.AudioContext || window.webkitAudioContext;
-        if (!AudioCtor) return null;
-        if (!_audioCtx) _audioCtx = new AudioCtor();
-        if (_audioCtx.state === 'suspended') _audioCtx.resume().catch(() => {});
-        return _audioCtx;
-    }
-    function _tone(freq, duration, type = 'sine', volume = 0.08, delay = 0, endFreq = freq) {
-        const ac = _ensureAudio();
-        if (!ac) return;
-        const t = ac.currentTime + delay;
-        const osc = ac.createOscillator();
-        const gain = ac.createGain();
-        osc.type = type;
-        osc.frequency.setValueAtTime(freq, t);
-        osc.frequency.exponentialRampToValueAtTime(Math.max(30, endFreq), t + duration);
-        gain.gain.setValueAtTime(0.0001, t);
-        gain.gain.exponentialRampToValueAtTime(volume, t + 0.012);
-        gain.gain.exponentialRampToValueAtTime(0.0001, t + duration);
-        osc.connect(gain).connect(ac.destination);
-        osc.start(t); osc.stop(t + duration + 0.02);
-    }
-    function playSfx(name) {
-        logStep('audio', 'sfx-request', { name, audioState: _audioCtx ? _audioCtx.state : 'not-created', gameState, levelIndex: currentLevelIndex });
-        if (name === 'jump') {
-            _tone(260, 0.16, 'sine', 0.07, 0, 520);
-        } else if (name === 'land') {
-            _tone(120, 0.09, 'triangle', 0.055, 0, 70);
-        } else if (name === 'success') {
-            _tone(523, 0.18, 'triangle', 0.06, 0.00, 659);
-            _tone(659, 0.18, 'triangle', 0.06, 0.12, 784);
-            _tone(784, 0.28, 'triangle', 0.07, 0.24, 1047);
-        } else if (name === 'unlock') {
-            _tone(440, 0.12, 'square', 0.035, 0.00, 660);
-            _tone(880, 0.24, 'triangle', 0.055, 0.10, 1175);
-        } else if (name === 'knock') {
-            _tone(145, 0.11, 'sine', 0.10, 0.00, 82);
-            _tone(105, 0.16, 'triangle', 0.065, 0.045, 62);
+        try {
+            const AudioCtor = window.AudioContext || window.webkitAudioContext;
+            if (!AudioCtor) return _recordAudioFailure('constructor-unavailable', new Error('AudioContext unavailable'));
+            if (_audioCtx && _audioCtx.state === 'closed') _audioCtx = null;
+            if (!_audioCtx) {
+                _audioCtx = new AudioCtor();
+                logStep('audio', 'context-created', {
+                    state: _audioCtx && _audioCtx.state || 'unknown',
+                    implementation: window.__wxMiniGame ? 'wechat-adapter' : 'browser-web-audio'
+                });
+            }
+            if (_audioCtx.state === 'suspended' && typeof _audioCtx.resume === 'function') {
+                const resumeResult = _audioCtx.resume();
+                if (resumeResult && typeof resumeResult.catch === 'function') {
+                    resumeResult.catch(error => _recordAudioFailure('resume-rejected', error));
+                }
+            }
+            return _audioCtx;
+        } catch (error) {
+            _audioCtx = null;
+            return _recordAudioFailure('ensure-context', error);
         }
     }
+    function _tone(freq, duration, type = 'sine', volume = 0.08, delay = 0, endFreq = freq) {
+        let osc = null;
+        try {
+            const ac = _ensureAudio();
+            if (!ac) return false;
+            if (typeof ac.createOscillator !== 'function' || typeof ac.createGain !== 'function' || !ac.destination) {
+                throw new Error('AudioContext node API incomplete');
+            }
+            const t = Number(ac.currentTime || 0) + delay;
+            osc = ac.createOscillator();
+            const gain = ac.createGain();
+            if (!osc || !gain || !osc.frequency || !gain.gain) throw new Error('Audio nodes unavailable');
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, t);
+            osc.frequency.exponentialRampToValueAtTime(Math.max(30, endFreq), t + duration);
+            gain.gain.setValueAtTime(0.0001, t);
+            gain.gain.exponentialRampToValueAtTime(volume, t + 0.012);
+            gain.gain.exponentialRampToValueAtTime(0.0001, t + duration);
+            // 不依赖 connect 的返回值；部分微信真机实现返回 undefined。
+            osc.connect(gain);
+            gain.connect(ac.destination);
+            osc.start(t);
+            osc.stop(t + duration + 0.02);
+            return true;
+        } catch (error) {
+            try { if (osc && typeof osc.stop === 'function') osc.stop(); } catch (_) {}
+            _recordAudioFailure('tone', error, { freq, duration, type, volume, delay, endFreq });
+            return false;
+        }
+    }
+    function playSfx(name) {
+        try {
+            logStep('audio', 'sfx-request', { name, audioState: _audioCtx ? _audioCtx.state : 'not-created', gameState, levelIndex: currentLevelIndex });
+            if (name === 'jump') {
+                _tone(260, 0.16, 'sine', 0.09, 0, 520);
+            } else if (name === 'land') {
+                _tone(120, 0.09, 'triangle', 0.07, 0, 70);
+            } else if (name === 'success') {
+                _tone(523, 0.18, 'triangle', 0.08, 0.00, 659);
+                _tone(659, 0.18, 'triangle', 0.08, 0.12, 784);
+                _tone(784, 0.28, 'triangle', 0.09, 0.24, 1047);
+            } else if (name === 'unlock') {
+                _tone(440, 0.12, 'square', 0.055, 0.00, 660);
+                _tone(880, 0.24, 'triangle', 0.075, 0.10, 1175);
+            } else if (name === 'knock') {
+                _tone(145, 0.11, 'sine', 0.12, 0.00, 82);
+                _tone(105, 0.16, 'triangle', 0.085, 0.045, 62);
+            }
+        } catch (error) {
+            _recordAudioFailure('sfx', error, { name });
+        }
+    }
+    window.__debug.__setAudioContextForTest = context => {
+        _audioCtx = context || null;
+        return _audioCtx;
+    };
+    window.__debug.getAudioDiagnostics = () => ({
+        state: _audioCtx && _audioCtx.state || 'not-created',
+        failureCount: _audioFailureCount,
+        lastFailure: _lastAudioFailure
+    });
     let _bgmTimer = 0;
     let _bgmStep = 0;
     // 独立奇幻版原创五声音阶主题，不引用任何商业游戏旋律。
     const _bgmMelody = [294, 370, 440, 554, 440, 370, 330, 294, 370, 440, 659, 554];
     function _startBgm() {
-        const ac = _ensureAudio();
-        if (!ac || _bgmTimer) return;
-        const tick = () => {
-            if (document.hidden || !_audioCtx || _audioCtx.state !== 'running') return;
-            const note = _bgmMelody[_bgmStep % _bgmMelody.length];
-            _tone(note, 0.34, _bgmStep % 3 ? 'triangle' : 'sine', 0.031, 0, note * 0.997);
-            if (_bgmStep % 3 === 0) {
-                const bass = [147, 220, 165, 220][Math.floor(_bgmStep / 3) % 4];
-                _tone(bass, 0.72, 'sine', 0.019, 0, bass * 0.99);
-            }
-            _bgmStep++;
-        };
-        tick();
-        _bgmTimer = window.setInterval(tick, 380);
+        try {
+            const ac = _ensureAudio();
+            if (!ac || _bgmTimer) return;
+            const tick = () => {
+                try {
+                    if (document.hidden || !_audioCtx || _audioCtx.state !== 'running') return;
+                    const note = _bgmMelody[_bgmStep % _bgmMelody.length];
+                    _tone(note, 0.34, _bgmStep % 3 ? 'triangle' : 'sine', 0.075, 0, note * 0.997);
+                    if (_bgmStep % 3 === 0) {
+                        const bass = [147, 220, 165, 220][Math.floor(_bgmStep / 3) % 4];
+                        _tone(bass, 0.72, 'sine', 0.045, 0, bass * 0.99);
+                    }
+                    _bgmStep++;
+                } catch (error) {
+                    _recordAudioFailure('bgm-tick', error);
+                }
+            };
+            tick();
+            _bgmTimer = window.setInterval(tick, 380);
+        } catch (error) {
+            _recordAudioFailure('bgm-start', error);
+        }
     }
     document.addEventListener('pointerdown', _startBgm, { passive: true });
     document.addEventListener('keydown', e => {
@@ -3423,6 +3678,9 @@
         _wonkyRectPath(logX, logY, logW, logH, 20, 55139, 2); ctx.stroke(); ctx.restore();
         sketchBold('导出日志', logX + logW / 2, logY + logH / 2 + 5, 30);
         uiBTN.exportLog = { x: logX, y: logY, w: logW, h: logH };
+        if (_faultJournal.lastFault) {
+            sketchText('发现上次异常，可点这里导出', logX + logW / 2, logY + logH + 28, 21, 'center', true, '#b54043');
+        }
         // 正式游戏名：单行居中，保留 F4 旷野视觉的留白。
         sketchBold(GAME_TITLE, W / 2, H * 0.34, 120);
         const bw = W * 0.32, bh = 135, bx = W / 2 - bw / 2, by = H * 0.58;
@@ -4973,12 +5231,7 @@
             try {
                 physicsStep(dt);
             } catch(e) {
-                logStep('fatal', 'physicsStep-exception', {
-                    msg: e.message,
-                    stack: String(e.stack || '').substring(0, 200),
-                    frame: frameCount
-                });
-                gameState = 'fatal';
+                _recoverFromRuntimeFault('physics-step', e);
             }
         }
         // ===== v18.0 goal-hit → 真实毫秒级跳（必须写在 successTimer/watchdog/completeIntro OLD流程前面！！goal-hit优先级最高）=====
@@ -5002,7 +5255,7 @@
                     logStep('creator','custom-complete',{id:levelData&&levelData.id,elapsed_ms:Math.round(elapsed)});
                     showSuccess=false;showDead=false;gameState='creatorList';_playingCustom=false;
                     _goalHitJumped=true;_goalHitStartMs=0;_goalHitLevelIndex=-1;
-                    requestAnimationFrame(loop); return;
+                    requestAnimationFrame(_safeLoop); return;
                 }
                 const nxt = idx + 1;
                 const overflow  = nxt >= TOTAL_LEVELS;
@@ -5370,7 +5623,18 @@
             });
         }
 
-        requestAnimationFrame(loop);
+        requestAnimationFrame(_safeLoop);
+    }
+
+    // 所有帧都经过这一层。任何未预料异常只暂停当前关并保留证据，绝不再让
+    // requestAnimationFrame 链断掉后留下一个无法操作的静止画面。
+    function _safeLoop(now) {
+        try {
+            loop(now);
+        } catch (error) {
+            _recoverFromRuntimeFault('main-loop', error);
+            requestAnimationFrame(_safeLoop);
+        }
     }
 
     (async function main() {
@@ -5419,6 +5683,6 @@
                 }, 16);
             }, 800);
         }
-        requestAnimationFrame(loop);
+        requestAnimationFrame(_safeLoop);
     })();
 })();

@@ -1,7 +1,7 @@
 'use strict';
 
 /*
- * 怪奇之原微信小游戏兼容层 v183
+ * 怪奇之原微信小游戏兼容层 v184
  *
  * 游戏本体只在一个 1920×1080 Canvas 上绘制。本文件把微信小游戏的
  * Canvas、触摸、存储、音频、生命周期、键盘和日志文件接口映射成游戏
@@ -115,11 +115,17 @@
   const ADAPTER_LOG_MAX = 200;
   const ADAPTER_LOG_SESSION_ID = 'se-wx-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
   const ADAPTER_LOG_STARTED_AT = new Date().toISOString();
+  const ADAPTER_FAULT_KEY = 'smart_egg_adapter_last_fault_v1';
   let adapterLogSequence = 0;
   const adapterDiagnostics = [];
+  const adapterFaultJournal = { lastFault:null };
+  try {
+    const storedAdapterFault = wx.getStorageSync(ADAPTER_FAULT_KEY);
+    if (storedAdapterFault) adapterFaultJournal.lastFault = JSON.parse(String(storedAdapterFault));
+  } catch (_) {}
   const adapterLogModules = new Map([
     ['runtime', true], ['feature', true], ['input', false],
-    ['audio', false], ['storage', true], ['network', true], ['export', true]
+    ['audio-core', true], ['audio', false], ['storage', true], ['network', true], ['export', true]
   ]);
   function mapEntriesToObject(map) {
     const out = {};
@@ -163,10 +169,15 @@
     };
     adapterDiagnostics.push(entry);
     if (adapterDiagnostics.length > ADAPTER_LOG_MAX) adapterDiagnostics.shift();
+    if (normalizedModule === 'audio-core' && entry.level === 'error') {
+      adapterFaultJournal.lastFault = entry;
+      try { wx.setStorageSync(ADAPTER_FAULT_KEY, JSON.stringify(entry)); } catch (_) {}
+    }
     if (entry.level === 'error') console.error('[wechat-adapter]', JSON.stringify(entry));
     return entry;
   }
   installOwnProperty(browserWindow, '__SMART_EGG_ADAPTER_DIAGNOSTICS__', adapterDiagnostics);
+  installOwnProperty(browserWindow, '__SMART_EGG_ADAPTER_FAULT_JOURNAL__', adapterFaultJournal);
   installOwnProperty(browserWindow, '__SMART_EGG_ADAPTER_LOG_CONFIG__', {
     maxEntries: ADAPTER_LOG_MAX,
     productionVerbose: false,
@@ -192,7 +203,7 @@
     redact: function (context) { return redactAdapterContext(context, 0); }
   });
   adapterLog('runtime', 'adapter-session-start', {
-    version: 183,
+    version: 184,
     creatorMode: CREATOR_MODE_ENABLED,
     retention: { type: 'memory-ring', maxEntries: ADAPTER_LOG_MAX },
     productionDefaults: mapEntriesToObject(adapterLogModules)
@@ -523,6 +534,52 @@
     this.hasScheduledValue = true;
   };
 
+  function logAudioFailure(eventName, context, level) {
+    const normalizedLevel = level || 'error';
+    adapterLog('audio-core', eventName, context, normalizedLevel);
+  }
+
+  function initializeInnerAudioOptions() {
+    const requested = { obeyMuteSwitch:false, mixWithOther:true };
+    if (typeof wx.setInnerAudioOption !== 'function') {
+      logAudioFailure('inner-audio-option-unavailable', {
+        requested,
+        reason:'setInnerAudioOption-api-unavailable'
+      }, 'warn');
+      return;
+    }
+    let settled = false;
+    function succeed() {
+      if (settled) return;
+      settled = true;
+      adapterLog('audio-core', 'inner-audio-option-ready', requested);
+      adapterLog('audio', 'inner-audio-option-ready', requested);
+    }
+    function fail(error) {
+      if (settled) return;
+      settled = true;
+      const message = String(error && (error.errMsg || error.message) || error);
+      const devtoolsUnsupported = /开发者工具暂时不支持|devtools.*not support/i.test(message);
+      logAudioFailure('inner-audio-option-failed', {
+        requested,
+        message,
+        expectedOnDevtools:devtoolsUnsupported
+      }, devtoolsUnsupported ? 'warn' : 'error');
+    }
+    try {
+      const result = wx.setInnerAudioOption({
+        obeyMuteSwitch:requested.obeyMuteSwitch,
+        mixWithOther:requested.mixWithOther,
+        success:succeed,
+        fail:fail
+      });
+      if (result && typeof result.then === 'function') result.then(succeed).catch(fail);
+    } catch (error) {
+      fail(error);
+    }
+  }
+  initializeInnerAudioOptions();
+
   function FallbackAudioContext() {
     this.state = 'running';
     this.destination = {};
@@ -558,10 +615,11 @@
       stop: function (when) {
         if (context.state !== 'running') {
           adapterLog('audio', 'tone-skipped', { reason:'context-not-running', state:context.state });
+          adapterLog('audio-core', 'tone-skipped', { reason:'context-not-running', state:context.state }, 'warn');
           return;
         }
         if (typeof wx.createInnerAudioContext !== 'function') {
-          adapterLog('audio', 'tone-skipped', { reason:'inner-audio-api-unavailable' }, 'warn');
+          logAudioFailure('tone-skipped', { reason:'inner-audio-api-unavailable' });
           return;
         }
         const frequency = Math.max(55, this.frequency.peak || this.frequency.value || 440);
@@ -577,44 +635,128 @@
           frequency:Math.round(frequency), base, delayMs:Math.round(delay), durationMs:Math.round(duration), gain:Number(gain.toFixed(4))
         });
         setTimeout(function () {
+          const asset = 'assets/tone-' + base + '.wav';
+          let audio = null;
+          let playRequested = false;
+          let playbackConfirmed = false;
+          let destroyed = false;
+          let cleanupTimer = 0;
+          let loadWatchdog = 0;
+          let supportsOnPlay = false;
+          function clearTimer(timer) {
+            if (timer) clearTimeout(timer);
+          }
+          function cleanup(reason, stopFirst) {
+            if (destroyed) return;
+            destroyed = true;
+            clearTimer(cleanupTimer);
+            clearTimer(loadWatchdog);
+            function cleanupStep(method, args) {
+              if (!audio || typeof audio[method] !== 'function') return;
+              try {
+                audio[method].apply(audio, args || []);
+              } catch (error) {
+                logAudioFailure('tone-cleanup-failed', {
+                  asset, reason, playbackConfirmed, stage:method,
+                  message:String(error && (error.errMsg || error.message) || error)
+                });
+              }
+            }
+            cleanupStep('offCanplay', [handleCanplay]);
+            cleanupStep('offPlay', [handlePlay]);
+            cleanupStep('offEnded', [handleEnded]);
+            cleanupStep('offStop', [handleStop]);
+            cleanupStep('offError', [handleError]);
+            if (stopFirst && playbackConfirmed) cleanupStep('stop');
+            cleanupStep('destroy');
+            adapterLog('audio', 'tone-destroyed', { asset, reason, playbackConfirmed });
+          }
+          function scheduleCleanup() {
+            if (destroyed || cleanupTimer) return;
+            cleanupTimer = setTimeout(function () {
+              cleanup('duration-elapsed', true);
+            }, duration + 80);
+          }
+          function handlePlay() {
+            if (destroyed || playbackConfirmed) return;
+            try {
+              playbackConfirmed = true;
+              clearTimer(loadWatchdog);
+              loadWatchdog = 0;
+              const playbackRate = Number(audio && audio.playbackRate);
+              adapterLog('audio', 'tone-play', {
+                asset,
+                playbackRate:Number.isFinite(playbackRate) ? Number(playbackRate.toFixed(3)) : null
+              });
+              scheduleCleanup();
+            } catch (error) {
+              logAudioFailure('tone-playback-handler-failed', {
+                asset,
+                message:String(error && (error.errMsg || error.message) || error)
+              });
+              cleanup('playback-handler-failed', false);
+            }
+          }
+          function handleCanplay() {
+            if (destroyed || playRequested) return;
+            playRequested = true;
+            try {
+              audio.play();
+              adapterLog('audio', 'tone-play-requested', { asset });
+              if (!supportsOnPlay) handlePlay();
+            } catch (error) {
+              logAudioFailure('tone-play-failed', {
+                asset, stage:'play-call',
+                message:String(error && (error.errMsg || error.message) || error)
+              });
+              cleanup('play-call-failed', false);
+            }
+          }
+          function handleEnded() {
+            cleanup('ended', false);
+          }
+          function handleStop() {
+            cleanup('stopped', false);
+          }
+          function handleError(error) {
+            logAudioFailure('tone-failed', {
+              asset,
+              stage:playbackConfirmed ? 'playback' : (playRequested ? 'play-request' : 'load'),
+              message:String(error && (error.errMsg || error.message) || error)
+            });
+            cleanup('error', false);
+          }
           try {
-            const audio = wx.createInnerAudioContext();
+            audio = wx.createInnerAudioContext({ useWebAudioImplement:false });
+            if (!audio) throw new Error('createInnerAudioContext returned no context');
             audio.autoplay = false;
             audio.loop = false;
-            audio.obeyMuteSwitch = true;
+            // 兼容旧基础库；新基础库以 setInnerAudioOption 的全局配置为准。
+            audio.obeyMuteSwitch = false;
             audio.volume = Math.max(0, Math.min(1, gain * 2.2));
             audio.playbackRate = Math.max(0.5, Math.min(2, frequency / base));
-            const asset = 'assets/tone-' + base + '.wav';
-            audio.src = asset;
-            let started = false;
-            const play = function () {
-              if (started) return;
-              started = true;
-              audio.play();
-              adapterLog('audio', 'tone-play', { asset, playbackRate:Number(audio.playbackRate.toFixed(3)) });
-            };
-            if (typeof audio.onError === 'function') {
-              audio.onError(function (error) {
-                adapterLog('audio', 'tone-failed', {
-                  asset, message:String(error && error.errMsg || error)
-                }, 'error');
+            // 必须先注册事件，再设置 src；本地资源可能很快进入 canplay。
+            if (typeof audio.onCanplay === 'function') audio.onCanplay(handleCanplay);
+            supportsOnPlay = typeof audio.onPlay === 'function';
+            if (supportsOnPlay) audio.onPlay(handlePlay);
+            if (typeof audio.onEnded === 'function') audio.onEnded(handleEnded);
+            if (typeof audio.onStop === 'function') audio.onStop(handleStop);
+            if (typeof audio.onError === 'function') audio.onError(handleError);
+            loadWatchdog = setTimeout(function () {
+              if (destroyed || playbackConfirmed) return;
+              logAudioFailure('tone-load-timeout', {
+                asset, timeoutMs:10000, playRequested
               });
-            }
-            if (typeof audio.onCanplay === 'function') audio.onCanplay(play);
-            else play();
-            setTimeout(function () {
-              try {
-                audio.stop();
-                audio.destroy();
-                adapterLog('audio', 'tone-destroyed', { asset });
-              } catch (error) {
-                adapterLog('audio', 'tone-cleanup-failed', {
-                  asset, message:String(error && error.message || error)
-                }, 'error');
-              }
-            }, duration + 80);
+              cleanup('load-timeout', false);
+            }, 10000);
+            audio.src = asset;
+            if (typeof audio.onCanplay !== 'function') handleCanplay();
           } catch (error) {
-            adapterLog('audio', 'tone-create-failed', { message:String(error && error.message || error) }, 'error');
+            logAudioFailure('tone-create-failed', {
+              asset,
+              message:String(error && (error.errMsg || error.message) || error)
+            });
+            cleanup('create-failed', false);
           }
         }, delay);
       }
@@ -622,18 +764,9 @@
   };
 
   function WechatAudioContext() {
-    if (typeof wx.createWebAudioContext === 'function') {
-      try {
-        const context = wx.createWebAudioContext();
-        adapterLog('audio', 'context-created', { implementation:'web-audio' });
-        return context;
-      } catch (error) {
-        adapterLog('audio', 'context-create-failed', {
-          implementation:'web-audio', message:String(error && error.message || error), fallback:'inner-audio'
-        }, 'error');
-      }
-    }
-    adapterLog('audio', 'context-created', { implementation:'inner-audio-fallback' });
+    const context = { implementation:'inner-audio-fallback', webAudioBypassed:true };
+    adapterLog('audio-core', 'context-created', context);
+    adapterLog('audio', 'context-created', context);
     return new FallbackAudioContext();
   }
   installOwnProperty(browserWindow, 'AudioContext', WechatAudioContext);
@@ -965,7 +1098,7 @@
   installOwnProperty(browserWindow, '__SMART_EGG_WECHAT_ENV__', wechatEnvironment);
 
   const wechatBridge = {
-    version: 183,
+    version: 184,
     screenCanvas,
     gameCanvas,
     getDisplayRect: function () { return Object.assign({}, displayRect); },

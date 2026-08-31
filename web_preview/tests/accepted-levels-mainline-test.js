@@ -75,7 +75,7 @@ assert.match(game, /for \(const d of doors\) \{\s+const dx = d\.x - d\.w \/ 2, d
   '门跳跃的通关距离必须在实际判定循环内计算，不能引用前一轮循环的局部变量');
 assert.match(game, /ground_swap/);
 assert.match(game, /erase_wall/);
-assert.match(index, /accepted-mechanics\.js\?v=183/);
+assert.match(index, /accepted-mechanics\.js\?v=184/);
 
 const reverseLevel = bundle[13];
 assert.strictEqual(reverseLevel.source_review_id, 17, '原第15关必须顺排为新的第14关');
