@@ -1,7 +1,7 @@
 'use strict';
 
 /*
- * 怪奇之原微信小游戏兼容层 v190
+ * 怪奇之原微信小游戏兼容层 v191
  *
  * 游戏本体以 1080 高的逻辑 Canvas 绘制；微信宽屏会横向扩展地图而不拉伸元素。本文件把微信小游戏的
  * Canvas、触摸、存储、音频、生命周期、键盘和日志文件接口映射成游戏
@@ -203,7 +203,7 @@
     redact: function (context) { return redactAdapterContext(context, 0); }
   });
   adapterLog('runtime', 'adapter-session-start', {
-    version: 190,
+    version: 191,
     creatorMode: CREATOR_MODE_ENABLED,
     retention: { type: 'memory-ring', maxEntries: ADAPTER_LOG_MAX },
     productionDefaults: mapEntriesToObject(adapterLogModules)
@@ -293,11 +293,56 @@
       left, top, width: drawWidth, height: drawHeight,
       right: left + drawWidth, bottom: top + drawHeight
     };
+    let systemMenuButtonRect = null;
+    let logicalSystemMenuButtonRect = null;
+    let systemMenuButtonSource = 'unavailable';
+    if (typeof wx.getMenuButtonBoundingClientRect === 'function') {
+      try {
+        const rect = wx.getMenuButtonBoundingClientRect() || {};
+        const rectLeft = Number(rect.left);
+        const rectTop = Number(rect.top);
+        const rectWidth = Number(rect.width != null ? rect.width : Number(rect.right) - rectLeft);
+        const rectHeight = Number(rect.height != null ? rect.height : Number(rect.bottom) - rectTop);
+        if ([rectLeft, rectTop, rectWidth, rectHeight].every(Number.isFinite)
+            && rectWidth > 0 && rectHeight > 0) {
+          systemMenuButtonRect = {
+            left:rectLeft, top:rectTop, width:rectWidth, height:rectHeight,
+            right:rectLeft + rectWidth, bottom:rectTop + rectHeight
+          };
+          const logicalLeft = (rectLeft - left) * logicalViewport.logicalWidth / drawWidth;
+          const logicalTop = (rectTop - top) * logicalViewport.logicalHeight / drawHeight;
+          const logicalWidth = rectWidth * logicalViewport.logicalWidth / drawWidth;
+          const logicalHeight = rectHeight * logicalViewport.logicalHeight / drawHeight;
+          const intersectsCanvas = logicalLeft < logicalViewport.logicalWidth
+            && logicalTop < logicalViewport.logicalHeight
+            && logicalLeft + logicalWidth > 0 && logicalTop + logicalHeight > 0;
+          if (intersectsCanvas) {
+            logicalSystemMenuButtonRect = {
+              left:Number(logicalLeft.toFixed(3)), top:Number(logicalTop.toFixed(3)),
+              width:Number(logicalWidth.toFixed(3)), height:Number(logicalHeight.toFixed(3)),
+              right:Number((logicalLeft + logicalWidth).toFixed(3)),
+              bottom:Number((logicalTop + logicalHeight).toFixed(3))
+            };
+          }
+          systemMenuButtonSource = 'getMenuButtonBoundingClientRect';
+        } else {
+          systemMenuButtonSource = 'invalid-rect';
+        }
+      } catch (error) {
+        systemMenuButtonSource = 'api-error';
+        adapterLog('viewport', 'menu-button-read-failed', {
+          message:String(error && error.message || error)
+        }, 'warn');
+      }
+    }
     const viewportSnapshot = Object.assign({}, logicalViewport, {
       window: { width, height, dpr },
       safeArea: { left:safeLeft, top:safeTop, width:safeWidth, height:safeHeight },
       safeInsets,
       logicalSafeInsets,
+      systemMenuButton:systemMenuButtonRect,
+      logicalSystemMenuButton:logicalSystemMenuButtonRect,
+      systemMenuButtonSource,
       safeAspect:Number(safeAspect.toFixed(5)),
       windowAspect:Number(windowAspect.toFixed(5)),
       displayRect: { left, top, width:drawWidth, height:drawHeight },
@@ -313,6 +358,9 @@
       safeArea: { left:safeLeft, top:safeTop, width:safeWidth, height:safeHeight },
       safeInsets,
       logicalSafeInsets,
+      systemMenuButton:systemMenuButtonRect,
+      logicalSystemMenuButton:logicalSystemMenuButtonRect,
+      systemMenuButtonSource,
       safeAspect:Number(safeAspect.toFixed(5)),
       windowAspect:Number(windowAspect.toFixed(5)),
       layoutSource:logicalViewport.layoutSource,
@@ -610,9 +658,33 @@
     adapterLog('audio-core', eventName, context, normalizedLevel);
   }
 
+  const innerAudioOptionState = {
+    // 小游戏必须走扬声器；部分微信基础库在扬声器模式下仍可能让短音效
+    // 暂停 BGM，因此控制器同时监听意外 pause/stop 并自动恢复。
+    requested:{ obeyMuteSwitch:false, mixWithOther:true, speakerOn:true },
+    status:'not-requested',
+    message:null
+  };
+  const audioRuntimeInfo = (function readAudioRuntimeInfo() {
+    let device = {};
+    let app = {};
+    try { if (typeof wx.getDeviceInfo === 'function') device = wx.getDeviceInfo() || {}; } catch (_) {}
+    try { if (typeof wx.getAppBaseInfo === 'function') app = wx.getAppBaseInfo() || {}; } catch (_) {}
+    return {
+      platform:String(device.platform || 'unknown'),
+      system:String(device.system || ''),
+      brand:String(device.brand || ''),
+      model:String(device.model || ''),
+      SDKVersion:String(app.SDKVersion || ''),
+      wechatVersion:String(app.version || '')
+    };
+  })();
   function initializeInnerAudioOptions() {
-    const requested = { obeyMuteSwitch:false, mixWithOther:true };
+    const requested = innerAudioOptionState.requested;
+    innerAudioOptionState.status = 'requesting';
     if (typeof wx.setInnerAudioOption !== 'function') {
+      innerAudioOptionState.status = 'unavailable';
+      innerAudioOptionState.message = 'setInnerAudioOption-api-unavailable';
       logAudioFailure('inner-audio-option-unavailable', {
         requested,
         reason:'setInnerAudioOption-api-unavailable'
@@ -623,6 +695,8 @@
     function succeed() {
       if (settled) return;
       settled = true;
+      innerAudioOptionState.status = 'ready';
+      innerAudioOptionState.message = null;
       adapterLog('audio-core', 'inner-audio-option-ready', requested);
       adapterLog('audio', 'inner-audio-option-ready', requested);
     }
@@ -630,6 +704,8 @@
       if (settled) return;
       settled = true;
       const message = String(error && (error.errMsg || error.message) || error);
+      innerAudioOptionState.status = 'failed';
+      innerAudioOptionState.message = message;
       const devtoolsUnsupported = /开发者工具暂时不支持|devtools.*not support/i.test(message);
       logAudioFailure('inner-audio-option-failed', {
         requested,
@@ -641,6 +717,7 @@
       const result = wx.setInnerAudioOption({
         obeyMuteSwitch:requested.obeyMuteSwitch,
         mixWithOther:requested.mixWithOther,
+        speakerOn:requested.speakerOn,
         success:succeed,
         fail:fail
       });
@@ -651,12 +728,22 @@
   }
   initializeInnerAudioOptions();
 
-  // v187 背景音乐：唯一、长期、连续循环的 InnerAudio 实例。旧版逐音符
+  // v191 背景音乐：唯一、长期、连续循环的 InnerAudio 实例。旧版逐音符
   // Oscillator 会产生每 380ms 一次的点状声，背景音乐绝不再经过该短音链路。
   const BGM_ASSET = 'assets/bgm-wilds-ambient.wav';
-  const BGM_VOLUME = 0.62;
+  const BGM_VOLUME = 0.76;
+  const BGM_ASSET_PROFILE = Object.freeze({
+    revision:'phone-audible-v191',
+    format:'pcm16-mono-16000hz',
+    bytes:512044,
+    sha256:'1180d407d139803d72ed313902e688e93913d378599b8ccf4af50b86615fadda',
+    sourceRmsDbfs:-18.66,
+    phoneAudibleHighPass250Ratio:0.799
+  });
   const BGM_LOAD_WATCHDOG_MS = 10000;
   const BGM_PLAY_WATCHDOG_MS = 1800;
+  const BGM_PROGRESS_WATCHDOG_MS = 2200;
+  const BGM_PROGRESS_MIN_SECONDS = 0.08;
   const backgroundMusic = (function createBackgroundMusicController() {
     let audio = null;
     let requested = false;
@@ -670,12 +757,31 @@
     let lastError = null;
     let loadWatchdog = 0;
     let playWatchdog = 0;
+    let progressWatchdog = 0;
     let playAttemptId = 0;
+    let progressProbeId = 0;
+    let progressVerified = false;
+    let lastProgressDelta = 0;
+    let lastPlayReason = null;
+    let firstInteractionAt = null;
+    let lastCanplayAt = null;
+    let lastPlayAt = null;
+    let lastPauseAt = null;
+    let lastErrorAt = null;
+    let firstTimeUpdateAt = null;
+    let timeUpdateCount = 0;
+    let waitingCount = 0;
+    let unexpectedPauseCount = 0;
+    let unexpectedStopCount = 0;
     const instanceHandlers = new WeakMap();
 
     function stateSnapshot() {
       let currentTime = 0;
+      let duration = 0;
+      let nativePaused = null;
       try { currentTime = Number(audio && audio.currentTime || 0); } catch (_) {}
+      try { duration = Number(audio && audio.duration || 0); } catch (_) {}
+      try { nativePaused = audio && typeof audio.paused === 'boolean' ? audio.paused : null; } catch (_) {}
       return {
         enabled:true,
         mode:'looped-asset',
@@ -685,13 +791,35 @@
         ready,
         playing,
         playPending,
+        lifecyclePaused,
+        hasInstance:!!audio,
         paused:!!audio && !playing,
+        nativePaused,
         state,
         createCount,
         startCount,
         currentTime:Number.isFinite(currentTime) ? Number(currentTime.toFixed(3)) : 0,
+        duration:Number.isFinite(duration) ? Number(duration.toFixed(3)) : 0,
+        playAttemptId,
+        progressVerified,
+        lastProgressDelta:Number(lastProgressDelta.toFixed(3)),
+        timeUpdateCount,
+        waitingCount,
+        unexpectedPauseCount,
+        unexpectedStopCount,
+        lastPlayReason,
+        firstInteractionAt,
+        lastCanplayAt,
+        lastPlayAt,
+        lastPauseAt,
+        lastErrorAt,
+        firstTimeUpdateAt,
+        audioPolicy:Object.assign({}, innerAudioOptionState),
+        runtime:audioRuntimeInfo,
+        assetProfile:BGM_ASSET_PROFILE,
         loadWatchdogMs:BGM_LOAD_WATCHDOG_MS,
         playWatchdogMs:BGM_PLAY_WATCHDOG_MS,
+        progressWatchdogMs:BGM_PROGRESS_WATCHDOG_MS,
         lastError
       };
     }
@@ -711,6 +839,61 @@
       clearTimeout(playWatchdog);
       playWatchdog = 0;
     }
+    function clearProgressWatchdog() {
+      if (!progressWatchdog) return;
+      clearTimeout(progressWatchdog);
+      progressWatchdog = 0;
+    }
+    function readCurrentTime(instance) {
+      try {
+        const value = Number(instance && instance.currentTime || 0);
+        return Number.isFinite(value) ? value : 0;
+      } catch (_) { return 0; }
+    }
+    function armProgressWatchdog(instance, attemptId, reason) {
+      clearProgressWatchdog();
+      const probeId = ++progressProbeId;
+      const startTime = readCurrentTime(instance);
+      const startTimeUpdateCount = timeUpdateCount;
+      progressVerified = false;
+      lastProgressDelta = 0;
+      progressWatchdog = setTimeout(function () {
+        progressWatchdog = 0;
+        if (probeId !== progressProbeId || attemptId !== playAttemptId
+            || audio !== instance || !playing || lifecyclePaused || !requested) return;
+        const endTime = readCurrentTime(instance);
+        const delta = Math.max(0, endTime - startTime);
+        lastProgressDelta = delta;
+        const probeTimeUpdates = Math.max(0, timeUpdateCount - startTimeUpdateCount);
+        progressVerified = delta >= BGM_PROGRESS_MIN_SECONDS || probeTimeUpdates > 0;
+        if (progressVerified) state = 'playing-verified';
+        logBgm(progressVerified ? 'bgm-progress-verified' : 'bgm-progress-stalled', {
+          reason,
+          attemptId,
+          probeMs:BGM_PROGRESS_WATCHDOG_MS,
+          startTime:Number(startTime.toFixed(3)),
+          endTime:Number(endTime.toFixed(3)),
+          delta:Number(delta.toFixed(3)),
+          timeUpdateCount,
+          probeTimeUpdates,
+          nativePaused:(function () {
+            try { return typeof instance.paused === 'boolean' ? instance.paused : null; }
+            catch (_) { return null; }
+          })()
+        }, progressVerified ? 'info' : 'error');
+        if (progressVerified) return;
+        const stalled = audio;
+        audio = null;
+        playAttemptId++;
+        playing = false;
+        playPending = false;
+        ready = false;
+        state = 'progress-stalled';
+        lastError = 'playback-progress-stalled';
+        lastErrorAt = new Date().toISOString();
+        releaseAudioInstance(stalled, true);
+      }, BGM_PROGRESS_WATCHDOG_MS);
+    }
     function armPlayWatchdog(attemptId, reason) {
       clearPlayWatchdog();
       playWatchdog = setTimeout(function () {
@@ -719,11 +902,13 @@
         const stalled = audio;
         audio = null;
         playAttemptId++;
+        progressProbeId++;
         playPending = false;
         ready = false;
         playing = false;
         state = 'play-timeout';
         lastError = 'play-start-timeout';
+        lastErrorAt = new Date().toISOString();
         releaseAudioInstance(stalled, true);
         logBgm('bgm-play-timeout', {
           reason,
@@ -746,6 +931,8 @@
       cleanup('offEnded', handlers.ended);
       cleanup('offStop', handlers.stop);
       cleanup('offError', handlers.error);
+      cleanup('offTimeUpdate', handlers.timeupdate);
+      cleanup('offWaiting', handlers.waiting);
       instanceHandlers.delete(doomed);
       try { if (typeof doomed.pause === 'function') doomed.pause(); } catch (_) {}
       try { if (stopFirst && typeof doomed.stop === 'function') doomed.stop(); } catch (_) {}
@@ -759,13 +946,16 @@
         const stuck = audio;
         audio = null;
         playAttemptId++;
+        progressProbeId++;
         clearPlayWatchdog();
+        clearProgressWatchdog();
         releaseAudioInstance(stuck, true);
         ready = false;
         playing = false;
         playPending = false;
         state = 'load-timeout';
         lastError = 'canplay-timeout';
+        lastErrorAt = new Date().toISOString();
         logBgm('bgm-load-timeout', {
           watchdogMs:BGM_LOAD_WATCHDOG_MS,
           retry:'next-interaction-or-lifecycle-resume'
@@ -774,6 +964,7 @@
     }
     function handleCanplay() {
       clearLoadWatchdog();
+      lastCanplayAt = new Date().toISOString();
       const firstReady = !ready;
       ready = true;
       if (!playing) state = lifecyclePaused ? 'paused' : 'ready';
@@ -784,6 +975,7 @@
       if (!requested || lifecyclePaused || state === 'destroyed') {
         playPending = false;
         clearPlayWatchdog();
+        clearProgressWatchdog();
         try { if (audio && typeof audio.pause === 'function') audio.pause(); } catch (_) {}
         logBgm('bgm-late-play-ignored', { requested, lifecyclePaused, state }, 'warn');
         return;
@@ -796,9 +988,33 @@
       ready = true;
       playing = true;
       playPending = false;
-      state = 'playing';
+      state = 'play-signaled';
       lastError = null;
-      logBgm('bgm-playing', { startCount, volume:BGM_VOLUME });
+      lastPlayAt = new Date().toISOString();
+      const activeAttemptId = playAttemptId;
+      logBgm('bgm-play-signaled', {
+        startCount, volume:BGM_VOLUME, playAttemptId:activeAttemptId,
+        currentTime:Number(readCurrentTime(audio).toFixed(3)),
+        progressProbeMs:BGM_PROGRESS_WATCHDOG_MS
+      });
+      if (audio) armProgressWatchdog(audio, activeAttemptId, lastPlayReason || 'play-event');
+    }
+    function handleTimeUpdate() {
+      timeUpdateCount++;
+      progressVerified = true;
+      if (playing) state = 'playing-verified';
+      if (!firstTimeUpdateAt) {
+        firstTimeUpdateAt = new Date().toISOString();
+        logBgm('bgm-first-time-update', {
+          currentTime:Number(readCurrentTime(audio).toFixed(3)), playAttemptId
+        });
+      }
+    }
+    function handleWaiting() {
+      waitingCount++;
+      logBgm('bgm-waiting', {
+        waitingCount, currentTime:Number(readCurrentTime(audio).toFixed(3)), playAttemptId
+      }, 'warn');
     }
     function handlePause() {
       // 某些基础库会把上一轮 pause 事件延迟到新一轮 play 已发出之后；
@@ -808,13 +1024,36 @@
         return;
       }
       clearPlayWatchdog();
+      clearProgressWatchdog();
+      progressProbeId++;
+      const unexpected = requested && !lifecyclePaused && !!audio;
       playing = false;
       playPending = false;
       if (state !== 'destroyed') state = 'paused';
-      logBgm('bgm-paused', { lifecyclePaused });
+      lastPauseAt = new Date().toISOString();
+      logBgm('bgm-paused', {
+        lifecyclePaused,
+        unexpected,
+        nativePaused:(function () {
+          try { return audio && typeof audio.paused === 'boolean' ? audio.paused : null; }
+          catch (_) { return null; }
+        })()
+      }, unexpected ? 'warn' : 'info');
+      if (unexpected) {
+        unexpectedPauseCount++;
+        logBgm('bgm-unexpected-pause-recovery', {
+          unexpectedPauseCount,
+          playAttemptId,
+          retry:'same-instance-direct-play',
+          likelyCause:'native-audio-mutual-exclusion-or-device-policy'
+        }, 'warn');
+        requestPlay('unexpected-pause');
+      }
     }
     function handleEnded() {
       clearPlayWatchdog();
+      clearProgressWatchdog();
+      progressProbeId++;
       playing = false;
       playPending = false;
       state = 'ended';
@@ -825,38 +1064,55 @@
     }
     function handleStop() {
       clearPlayWatchdog();
+      clearProgressWatchdog();
+      progressProbeId++;
       playing = false;
       playPending = false;
       if (state !== 'destroyed') state = 'stopped';
       logBgm('bgm-stopped', { requested });
+      if (requested && !lifecyclePaused && audio) {
+        unexpectedStopCount++;
+        logBgm('bgm-unexpected-stop-recovery', {
+          unexpectedStopCount,
+          playAttemptId,
+          retry:'same-instance-direct-play',
+          likelyCause:'native-audio-mutual-exclusion-or-device-policy'
+        }, 'warn');
+        requestPlay('unexpected-stop');
+      }
     }
     function handleError(error) {
       clearLoadWatchdog();
       clearPlayWatchdog();
+      clearProgressWatchdog();
       const failed = audio;
       audio = null;
       playAttemptId++;
+      progressProbeId++;
       playing = false;
       playPending = false;
       ready = false;
       state = 'error';
       lastError = audioErrorMessage(error);
+      lastErrorAt = new Date().toISOString();
       releaseAudioInstance(failed, true);
       logBgm('bgm-error', { message:lastError, requested }, 'error');
     }
     function requestPlay(reason) {
       if (!audio || playing || playPending || !requested || lifecyclePaused) return false;
-      if (!ready) {
-        state = 'waiting-ready';
-        return false;
-      }
       try {
         const attemptId = ++playAttemptId;
         const instance = audio;
         playPending = true;
-        state = startCount ? 'resuming' : 'starting';
+        lastPlayReason = reason || 'interaction';
+        state = ready
+          ? (startCount ? 'resuming' : 'starting')
+          : 'starting-while-loading';
         startCount++;
-        logBgm('bgm-play-requested', { reason, startCount, ready, attemptId });
+        logBgm('bgm-play-requested', {
+          reason:lastPlayReason, startCount, ready, attemptId,
+          startupStrategy:'direct-play-inside-user-interaction'
+        });
         armPlayWatchdog(attemptId, reason);
         const result = audio.play();
         if (result && typeof result.then === 'function') {
@@ -874,6 +1130,7 @@
             ready = false;
             state = 'blocked';
             lastError = audioErrorMessage(error);
+            lastErrorAt = new Date().toISOString();
             releaseAudioInstance(rejected, true);
             logBgm('bgm-play-rejected', {
               reason, message:lastError,
@@ -889,6 +1146,7 @@
         playPending = false;
         state = 'error';
         lastError = audioErrorMessage(error);
+        lastErrorAt = new Date().toISOString();
         logBgm('bgm-play-failed', { reason, message:lastError }, 'error');
         return false;
       }
@@ -906,10 +1164,9 @@
         if (!instance) throw new Error('createInnerAudioContext returned no context');
         audio = instance;
         createCount++;
-        // 控制器只会在真实触摸/按键后创建，因此这里的 autoplay 不是冷启动
-        // 自动播放。它让真机在设置本地长音轨 src 时主动发起解码/播放；若设备
-        // 忽略 autoplay，后续 canplay 仍会走 requestPlay 作为第二条启动路径。
-        instance.autoplay = true;
+        // autoplay 在部分真机只会启动解码却不推进播放。v191 改为首次真实
+        // 触摸/按键调用栈内同步执行 play()；canplay 仍作为第二次确认和兜底。
+        instance.autoplay = false;
         instance.loop = true;
         instance.obeyMuteSwitch = false;
         instance.volume = BGM_VOLUME;
@@ -922,7 +1179,9 @@
           pause:function () { if (audio === instance) handlePause(); },
           ended:function () { if (audio === instance) handleEnded(); },
           stop:function () { if (audio === instance) handleStop(); },
-          error:function (error) { if (audio === instance) handleError(error); }
+          error:function (error) { if (audio === instance) handleError(error); },
+          timeupdate:function () { if (audio === instance) handleTimeUpdate(); },
+          waiting:function () { if (audio === instance) handleWaiting(); }
         };
         instanceHandlers.set(instance, handlers);
         // 本地资源可能同步进入 canplay，因此监听必须早于 src。
@@ -932,10 +1191,23 @@
         if (typeof instance.onEnded === 'function') instance.onEnded(handlers.ended);
         if (typeof instance.onStop === 'function') instance.onStop(handlers.stop);
         if (typeof instance.onError === 'function') instance.onError(handlers.error);
+        if (typeof instance.onTimeUpdate === 'function') instance.onTimeUpdate(handlers.timeupdate);
+        if (typeof instance.onWaiting === 'function') instance.onWaiting(handlers.waiting);
         state = 'loading';
         logBgm('bgm-instance-created', {
           createCount, loop:true, volume:BGM_VOLUME,
-          startupStrategy:'interaction-autoplay-with-canplay-fallback'
+          startupStrategy:'interaction-direct-play-with-canplay-fallback',
+          autoplay:false,
+          handlerSupport:{
+            canplay:typeof instance.onCanplay === 'function',
+            play:typeof instance.onPlay === 'function',
+            timeupdate:typeof instance.onTimeUpdate === 'function',
+            waiting:typeof instance.onWaiting === 'function',
+            error:typeof instance.onError === 'function'
+          },
+          assetProfile:BGM_ASSET_PROFILE,
+          audioPolicy:Object.assign({}, innerAudioOptionState),
+          runtime:audioRuntimeInfo
         });
         armLoadWatchdog(instance);
         instance.src = BGM_ASSET;
@@ -950,12 +1222,14 @@
         audio = null;
         clearLoadWatchdog();
         clearPlayWatchdog();
+        clearProgressWatchdog();
         releaseAudioInstance(failed, true);
         ready = false;
         playing = false;
         playPending = false;
         state = 'error';
         lastError = audioErrorMessage(error);
+        lastErrorAt = new Date().toISOString();
         logBgm('bgm-create-failed', { message:lastError }, 'error');
         return null;
       }
@@ -963,18 +1237,17 @@
     function start(reason) {
       requested = true;
       lifecyclePaused = false;
+      if (!firstInteractionAt) firstInteractionAt = new Date().toISOString();
       const instance = ensureInstance();
       if (!instance) return false;
-      if (!ready) {
-        state = 'waiting-ready';
-        return true;
-      }
       return playing || playPending || requestPlay(reason || 'interaction');
     }
     function pause(reason) {
       lifecyclePaused = true;
       playAttemptId++;
+      progressProbeId++;
       clearPlayWatchdog();
+      clearProgressWatchdog();
       if (!audio) return false;
       const wasActive = playing || playPending;
       playing = false;
@@ -986,6 +1259,7 @@
         playAttemptId++;
         clearLoadWatchdog();
         clearPlayWatchdog();
+        clearProgressWatchdog();
         releaseAudioInstance(loading, true);
         logBgm('bgm-loading-cancelled-for-pause', {
           reason:reason || 'pause', retry:'rebuild-on-resume'
@@ -1003,6 +1277,7 @@
         return true;
       } catch (error) {
         lastError = audioErrorMessage(error);
+        lastErrorAt = new Date().toISOString();
         logBgm('bgm-pause-failed', { reason, message:lastError }, 'error');
         return false;
       }
@@ -1012,10 +1287,6 @@
       lifecyclePaused = false;
       const instance = ensureInstance();
       if (!instance) return false;
-      if (!ready) {
-        state = 'waiting-ready';
-        return true;
-      }
       return playing || playPending || requestPlay(reason || 'resume');
     }
     function destroy(reason) {
@@ -1028,8 +1299,10 @@
       const doomed = audio;
       audio = null;
       playAttemptId++;
+      progressProbeId++;
       clearLoadWatchdog();
       clearPlayWatchdog();
+      clearProgressWatchdog();
       releaseAudioInstance(doomed, true);
       playing = false;
       playPending = false;
@@ -1038,7 +1311,24 @@
       logBgm('bgm-destroyed', { reason:reason || 'destroy' });
       return true;
     }
-    return { start, pause, resume, destroy, getState:stateSnapshot };
+    function captureDiagnostic(reason) {
+      const snapshot = stateSnapshot();
+      logBgm('bgm-diagnostic-captured', {
+        reason:reason || 'manual',
+        state:snapshot.state,
+        requested:snapshot.requested,
+        ready:snapshot.ready,
+        playing:snapshot.playing,
+        playPending:snapshot.playPending,
+        currentTime:snapshot.currentTime,
+        duration:snapshot.duration,
+        progressVerified:snapshot.progressVerified,
+        lastProgressDelta:snapshot.lastProgressDelta,
+        lastError:snapshot.lastError
+      }, snapshot.lastError ? 'warn' : 'info');
+      return snapshot;
+    }
+    return { start, pause, resume, destroy, getState:stateSnapshot, captureDiagnostic };
   })();
   installOwnProperty(browserWindow, '__SMART_EGG_BGM__', backgroundMusic);
   installOwnProperty(root, '__SMART_EGG_BGM__', backgroundMusic);
@@ -1632,7 +1922,7 @@
   installOwnProperty(browserWindow, '__SMART_EGG_WECHAT_ENV__', wechatEnvironment);
 
   const wechatBridge = {
-    version: 190,
+    version: 191,
     screenCanvas,
     gameCanvas,
     getDisplayRect: function () { return Object.assign({}, displayRect); },

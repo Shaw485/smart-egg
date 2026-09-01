@@ -6,8 +6,14 @@ const path = require('path');
 const vm = require('vm');
 
 const adapterSource = fs.readFileSync(path.resolve(__dirname, '../js/wechat-adapter.js'), 'utf8');
+const gameSource = fs.readFileSync(path.resolve(__dirname, '../js/smart-egg-game.js'), 'utf8');
+const menuHelpersStart = gameSource.indexOf('    function _currentViewportUiSnapshot()');
+const menuHelpersEnd = gameSource.indexOf('    window.__debug.getMenuDiagnosticLayout', menuHelpersStart);
+assert.ok(menuHelpersStart >= 0 && menuHelpersEnd > menuHelpersStart,
+  'responsive test must execute the production menu diagnostic and version badge helpers');
+const menuHelpersSource = gameSource.slice(menuHelpersStart, menuHelpersEnd);
 
-function bootAdapter(windowInfo) {
+function bootAdapter(windowInfo, menuButtonApi) {
   const canvases = [];
   const callbacks = {};
 
@@ -69,6 +75,11 @@ function bootAdapter(windowInfo) {
     getFileSystemManager:() => ({ writeFile() {} }),
     env:{ USER_DATA_PATH:'/tmp' }
   };
+  if (menuButtonApi !== undefined) {
+    wx.getMenuButtonBoundingClientRect = typeof menuButtonApi === 'function'
+      ? menuButtonApi
+      : () => JSON.parse(JSON.stringify(menuButtonApi));
+  }
   const sandbox = {
     wx,
     console:{ log() {}, warn() {}, error() {} },
@@ -107,6 +118,79 @@ function bootAdapter(windowInfo) {
   };
 }
 
+function evaluateProductionMenuUi(viewport) {
+  const snapshot = JSON.parse(JSON.stringify(viewport));
+  const sandbox = {
+    window:{
+      __SMART_EGG_VIEWPORT__:snapshot,
+      __SMART_EGG_WECHAT_BRIDGE__:{ getViewport:() => snapshot }
+    },
+    W:viewport.logicalWidth,
+    H:viewport.logicalHeight,
+    VIEWPORT_SAFE_INSETS:snapshot.logicalSafeInsets || { left:0, right:0, top:0, bottom:0 },
+    WECHAT_VIEWPORT:null,
+    JSON,
+    Object,
+    Number,
+    Math
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(`${menuHelpersSource}\n`+
+    'globalThis.__menuUiResult = {'+
+      'menu:_computeMenuDiagnosticLayout(), badge:_versionBadgeRect()'+
+    '};', sandbox, { filename:'smart-egg-game-menu-layout.js' });
+  return JSON.parse(JSON.stringify(sandbox.__menuUiResult));
+}
+
+function normalizeRect(rect) {
+  return {
+    x:Number(rect.x != null ? rect.x : rect.left),
+    y:Number(rect.y != null ? rect.y : rect.top),
+    w:Number(rect.w != null ? rect.w : rect.width),
+    h:Number(rect.h != null ? rect.h : rect.height)
+  };
+}
+
+function rectsOverlap(a, b) {
+  const first = normalizeRect(a);
+  const second = normalizeRect(b);
+  return first.x < second.x + second.w && first.x + first.w > second.x
+    && first.y < second.y + second.h && first.y + first.h > second.y;
+}
+
+function assertMenuUiSafe(viewport, expectedCandidate, label) {
+  const ui = evaluateProductionMenuUi(viewport);
+  const { menu, badge } = ui;
+  assert.strictEqual(menu.candidate, expectedCandidate, `${label}: menu layout candidate`);
+  assert.deepStrictEqual(menu.hitRect, menu.visualRect,
+    `${label}: the production draw rect and click hit rect must be identical`);
+  assert.strictEqual(menu.overlap, false, `${label}: log export button must avoid the system capsule`);
+  assert.ok(menu.visualRect.x >= menu.safeBounds.x
+    && menu.visualRect.y >= menu.safeBounds.y
+    && menu.visualRect.x + menu.visualRect.w <= menu.safeBounds.x + menu.safeBounds.w
+    && menu.visualRect.y + menu.visualRect.h <= menu.safeBounds.y + menu.safeBounds.h,
+  `${label}: log export button must remain fully inside the logical safe bounds`);
+  if (viewport.logicalSystemMenuButton) {
+    const capsule = normalizeRect(viewport.logicalSystemMenuButton);
+    const expandedCapsule = {
+      x:capsule.x-menu.clearance,
+      y:capsule.y-menu.clearance,
+      w:capsule.w+menu.clearance*2,
+      h:capsule.h+menu.clearance*2
+    };
+    assert.strictEqual(rectsOverlap(menu.visualRect, expandedCapsule), false,
+      `${label}: log export button must keep the configured clearance from the system capsule`);
+    assert.strictEqual(rectsOverlap(badge, capsule), false,
+      `${label}: version badge must never overlap the system capsule`);
+  }
+  assert.ok(badge.x >= viewport.logicalSafeInsets.left
+    && badge.x + badge.w <= viewport.logicalWidth - viewport.logicalSafeInsets.right
+    && badge.y >= viewport.logicalSafeInsets.top
+    && badge.y + badge.h <= viewport.logicalHeight - viewport.logicalSafeInsets.bottom,
+  `${label}: version badge must remain visible inside the logical safe area`);
+  return ui;
+}
+
 function roundedRect(rect) {
   return Object.fromEntries(['left','top','width','height','right','bottom'].map(key => [key, Math.round(rect[key] * 1000) / 1000]));
 }
@@ -115,6 +199,7 @@ const matrix = [
   {
     name:'16:9',
     info:{ windowWidth:1280, windowHeight:720, pixelRatio:1 },
+    menuButton:{ left:1120, top:16, width:132, height:54 },
     logicalWidth:1920,
     rect:{ left:0, top:0, width:1280, height:720, right:1280, bottom:720 },
     mode:'horizontal-map-extension'
@@ -129,6 +214,7 @@ const matrix = [
   {
     name:'20:9',
     info:{ windowWidth:2400, windowHeight:1080, pixelRatio:1 },
+    menuButton:{ left:2148, top:24, width:222, height:80 },
     logicalWidth:2400,
     rect:{ left:0, top:0, width:2400, height:1080, right:2400, bottom:1080 },
     mode:'horizontal-map-extension'
@@ -160,9 +246,9 @@ const matrix = [
 ];
 
 for (const entry of matrix) {
-  const runtime = bootAdapter(entry.info);
+  const runtime = bootAdapter(entry.info, entry.menuButton);
   const viewport = runtime.bridge.getViewport();
-  assert.strictEqual(runtime.bridge.version, 190, `${entry.name}: bridge version`);
+  assert.strictEqual(runtime.bridge.version, 191, `${entry.name}: bridge version`);
   assert.strictEqual(viewport.logicalWidth, entry.logicalWidth, `${entry.name}: logical width`);
   assert.strictEqual(viewport.logicalHeight, 1080, `${entry.name}: logical height`);
   assert.strictEqual(viewport.aspectMode, entry.mode, `${entry.name}: aspect mode`);
@@ -268,6 +354,89 @@ for (const entry of matrix) {
     `${entry.name}: viewport diagnostics must be independently enabled`);
   assert.ok(runtime.gameWindow.__SMART_EGG_ADAPTER_LOG_CONFIG__.find('viewport', 'viewport-updated').length > 0,
     `${entry.name}: viewport calculation must be logged`);
+  if (entry.menuButton) {
+    const physicalMenuButton = {
+      left:entry.menuButton.left,
+      top:entry.menuButton.top,
+      width:entry.menuButton.width,
+      height:entry.menuButton.height,
+      right:entry.menuButton.left+entry.menuButton.width,
+      bottom:entry.menuButton.top+entry.menuButton.height
+    };
+    const display = runtime.bridge.getDisplayRect();
+    const logicalMenuButton = {
+      left:Number(((physicalMenuButton.left-display.left)*viewport.logicalWidth/display.width).toFixed(3)),
+      top:Number(((physicalMenuButton.top-display.top)*viewport.logicalHeight/display.height).toFixed(3)),
+      width:Number((physicalMenuButton.width*viewport.logicalWidth/display.width).toFixed(3)),
+      height:Number((physicalMenuButton.height*viewport.logicalHeight/display.height).toFixed(3))
+    };
+    logicalMenuButton.right = Number((logicalMenuButton.left+logicalMenuButton.width).toFixed(3));
+    logicalMenuButton.bottom = Number((logicalMenuButton.top+logicalMenuButton.height).toFixed(3));
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(viewport.systemMenuButton)), physicalMenuButton,
+      `${entry.name}: physical capsule rect must be preserved for diagnostics`);
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(viewport.logicalSystemMenuButton)), logicalMenuButton,
+      `${entry.name}: capsule rect must be converted into the logical game coordinate space`);
+    assert.strictEqual(viewport.systemMenuButtonSource, 'getMenuButtonBoundingClientRect',
+      `${entry.name}: capsule source must record the successful WeChat API`);
+    assertMenuUiSafe(viewport, 'top-left', entry.name);
+  }
 }
 
-console.log('微信响应式视口测试通过：常见宽高比、安全区、DPR3、窄屏与超宽精确地图均保持等比且不复制边缘。');
+const leftCapsuleRuntime = bootAdapter({
+  windowWidth:2400,
+  windowHeight:1080,
+  pixelRatio:1,
+  safeArea:{ left:104, top:0, right:2400, bottom:1080, width:2296, height:1080 }
+}, { left:120, top:24, width:222, height:80 });
+const leftCapsuleViewport = leftCapsuleRuntime.bridge.getViewport();
+const leftCapsuleUi = assertMenuUiSafe(leftCapsuleViewport, 'top-right', '20:9 left-side capsule');
+assert.ok(leftCapsuleUi.menu.visualRect.x > leftCapsuleViewport.logicalSystemMenuButton.right,
+  '20:9 left-side capsule: log export button must move to the opposite side of the screen');
+assert.ok(leftCapsuleUi.badge.x >= leftCapsuleViewport.logicalSystemMenuButton.right+16,
+  '20:9 left-side capsule: version badge must keep its 16px gap after the capsule');
+
+const fallbackWindowInfo = { windowWidth:2400, windowHeight:1080, pixelRatio:1 };
+const fallbackCases = [
+  {
+    name:'invalid capsule API rect',
+    menuButton:{ left:2148, top:24, width:0, height:80 },
+    source:'invalid-rect',
+    warning:false
+  },
+  {
+    name:'throwing capsule API',
+    menuButton:() => { throw new Error('synthetic capsule failure'); },
+    source:'api-error',
+    warning:true
+  }
+];
+for (const entry of fallbackCases) {
+  const runtime = bootAdapter(fallbackWindowInfo, entry.menuButton);
+  const viewport = runtime.bridge.getViewport();
+  assert.strictEqual(viewport.systemMenuButton, null, `${entry.name}: invalid physical rect must not leak`);
+  assert.strictEqual(viewport.logicalSystemMenuButton, null, `${entry.name}: invalid logical rect must not leak`);
+  assert.strictEqual(viewport.systemMenuButtonSource, entry.source,
+    `${entry.name}: fallback reason must remain actionable in diagnostics`);
+  const warnings = runtime.gameWindow.__SMART_EGG_ADAPTER_LOG_CONFIG__.find('viewport', 'menu-button-read-failed');
+  assert.strictEqual(warnings.length > 0, entry.warning,
+    `${entry.name}: only thrown API failures should produce a warning record`);
+  if (entry.warning) {
+    assert.ok(warnings.some(item => item.context && item.context.message === 'synthetic capsule failure'),
+      `${entry.name}: warning must preserve the non-sensitive failure cause`);
+  }
+  const ui = assertMenuUiSafe(viewport, 'top-left', entry.name);
+  assert.strictEqual(ui.menu.capsuleRect, null,
+    `${entry.name}: production layout must safely fall back when no usable capsule exists`);
+  assert.strictEqual(ui.menu.capsuleSource, entry.source,
+    `${entry.name}: production layout export must include the capsule fallback source`);
+}
+
+assert.ok([
+  'const { x:logX, y:logY, w:logW, h:logH } = diagnosticLayout.visualRect;',
+  'uiBTN.exportLog = Object.assign({}, diagnosticLayout.hitRect,',
+  'if (inRect(p, uiBTN.exportLog)) {',
+  'const versionRect = _versionBadgeRect();'
+].every(fragment => gameSource.includes(fragment)),
+'production drawing, click dispatch, export hitbox and version badge must all consume the tested layout helpers');
+
+console.log('微信响应式视口测试通过：宽高比、安全区、左右胶囊、异常 API、日志热区与版本徽标均安全适配。');

@@ -27,9 +27,9 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 190;   // 跟 index.html 的 ?v=190 保持一致
+    const GAME_CODE_VERSION = 191;   // 跟 index.html 的 ?v=191 保持一致
     const GAME_TITLE = '怪奇之原';
-    // v190 第5/12/15关交互修复：保留创造秘境代码与本地存档，只关闭正式入口和运行路径。
+    // v191 手机扬声器可听配乐、直接播放进度诊断与微信系统胶囊安全区。
     // 重新开放时需恢复此运行时开关，并同步恢复平台适配构建开关；旧存档不会丢失。
     const CREATOR_MODE_ENABLED = false;
     try {
@@ -954,6 +954,7 @@
         right:uiBTN.right && {...uiBTN.right},
         jump:uiBTN.jump && {...uiBTN.jump}
       }),
+      getMenuExportRect: () => uiBTN.exportLog && {...uiBTN.exportLog},
       getShowSuccess: () => showSuccess,
       getShowDead: () => showDead,
       getSuccessTimer: () => successTimer,
@@ -1288,6 +1289,11 @@
         };
     }
     function exportDiagnosticLog() {
+        const bgmController = _wechatBgmController();
+        if (bgmController && typeof bgmController.captureDiagnostic === 'function') {
+            try { bgmController.captureDiagnostic('log-export'); }
+            catch (error) { _recordAudioFailure('bgm-diagnostic-capture', error); }
+        }
         logStep('export', 'export-request', { state: gameState, levelIndex: currentLevelIndex, logCountBeforeExport: window.__gameLogs.length });
         const report = {
             format: 'smart-egg-diagnostic-log', schemaVersion: 1,
@@ -1661,8 +1667,16 @@
     let _audioFailureCount = 0;
     let _lastAudioFailure = null;
     const BGM_ASSET = 'assets/bgm-wilds-ambient.wav';
-    const BGM_VOLUME = 0.62;
+    const BGM_VOLUME = 0.76;
     const BGM_MODE = 'looped-asset';
+    const BGM_ASSET_PROFILE = Object.freeze({
+        revision:'phone-audible-v191',
+        format:'pcm16-mono-16000hz',
+        bytes:512044,
+        sha256:'1180d407d139803d72ed313902e688e93913d378599b8ccf4af50b86615fadda',
+        sourceRmsDbfs:-18.66,
+        phoneAudibleHighPass250Ratio:0.799
+    });
     let _bgmAudio = null;
     let _bgmRequested = false;
     let _bgmState = 'idle';
@@ -1831,7 +1845,7 @@
         const controller = _wechatBgmController();
         if (controller && typeof controller.getState === 'function') {
             try {
-                return { enabled:true, mode:BGM_MODE, asset:BGM_ASSET, volume:BGM_VOLUME, ...controller.getState() };
+                return { enabled:true, mode:BGM_MODE, asset:BGM_ASSET, volume:BGM_VOLUME, assetProfile:BGM_ASSET_PROFILE, ...controller.getState() };
             } catch (error) {
                 _bgmLastError = String(error && error.message || error);
             }
@@ -1843,6 +1857,7 @@
             mode: BGM_MODE,
             asset: BGM_ASSET,
             volume: BGM_VOLUME,
+            assetProfile: BGM_ASSET_PROFILE,
             requested: _bgmRequested,
             state: _bgmState,
             startCount: _bgmStartCount,
@@ -4279,17 +4294,122 @@
         ctx.restore();
     }
 
+    function _currentViewportUiSnapshot() {
+        try {
+            const bridge = window.__SMART_EGG_WECHAT_BRIDGE__;
+            if (bridge && typeof bridge.getViewport === 'function') return bridge.getViewport() || {};
+        } catch (_) {}
+        return window.__SMART_EGG_VIEWPORT__ || WECHAT_VIEWPORT || {};
+    }
+    function _normalizedUiRect(rect) {
+        if (!rect) return null;
+        const left = Number(rect.left != null ? rect.left : rect.x);
+        const top = Number(rect.top != null ? rect.top : rect.y);
+        const width = Number(rect.width != null ? rect.width : rect.w);
+        const height = Number(rect.height != null ? rect.height : rect.h);
+        if (![left, top, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return null;
+        return { x:left, y:top, w:width, h:height, left, top, right:left+width, bottom:top+height };
+    }
+    function _uiRectsOverlap(a, b) {
+        return !!a && !!b && a.x < b.x + b.w && a.x + a.w > b.x
+            && a.y < b.y + b.h && a.y + a.h > b.y;
+    }
+    function _expandedUiRect(rect, amount) {
+        if (!rect) return null;
+        return { x:rect.x-amount, y:rect.y-amount, w:rect.w+amount*2, h:rect.h+amount*2 };
+    }
+    let _lastMenuDiagnosticLayoutFingerprint = '';
+    function _computeMenuDiagnosticLayout() {
+        const viewport = _currentViewportUiSnapshot();
+        const rawInsets = viewport.logicalSafeInsets || VIEWPORT_SAFE_INSETS;
+        const insets = {
+            left:Math.max(0, Number(rawInsets && rawInsets.left) || 0),
+            right:Math.max(0, Number(rawInsets && rawInsets.right) || 0),
+            top:Math.max(0, Number(rawInsets && rawInsets.top) || 0),
+            bottom:Math.max(0, Number(rawInsets && rawInsets.bottom) || 0)
+        };
+        const safeBounds = {
+            x:insets.left+28, y:insets.top+28,
+            w:Math.max(1, W-insets.left-insets.right-56),
+            h:Math.max(1, H-insets.top-insets.bottom-56)
+        };
+        const capsule = _normalizedUiRect(viewport.logicalSystemMenuButton);
+        const obstacle = _expandedUiRect(capsule, 24);
+        const w = 250, h = 76;
+        const candidates = [
+            { name:'top-left', x:safeBounds.x+12, y:safeBounds.y+10 },
+            { name:'top-right', x:safeBounds.x+safeBounds.w-w-12, y:safeBounds.y+10 },
+            { name:'below-system-left', x:safeBounds.x+12, y:obstacle ? obstacle.y+obstacle.h+20 : safeBounds.y+112 },
+            { name:'below-system-right', x:safeBounds.x+safeBounds.w-w-12, y:obstacle ? obstacle.y+obstacle.h+20 : safeBounds.y+112 },
+            { name:'bottom-left', x:safeBounds.x+12, y:safeBounds.y+safeBounds.h-h-12 }
+        ];
+        const fits = candidate => candidate.x >= safeBounds.x && candidate.y >= safeBounds.y
+            && candidate.x+w <= safeBounds.x+safeBounds.w
+            && candidate.y+h <= safeBounds.y+safeBounds.h
+            && !_uiRectsOverlap({x:candidate.x,y:candidate.y,w,h}, obstacle);
+        const chosen = candidates.find(fits) || {
+            name:'safe-area-clamped',
+            x:Math.max(safeBounds.x, Math.min(safeBounds.x+safeBounds.w-w, safeBounds.x+12)),
+            y:Math.max(safeBounds.y, Math.min(safeBounds.y+safeBounds.h-h, H-insets.bottom-h-40))
+        };
+        const visualRect = { x:chosen.x, y:chosen.y, w, h };
+        return {
+            candidate:chosen.name,
+            visualRect,
+            hitRect:Object.assign({}, visualRect),
+            safeBounds,
+            safeInsets:insets,
+            capsuleRect:capsule,
+            capsuleSource:viewport.systemMenuButtonSource || 'unavailable',
+            clearance:24,
+            overlap:_uiRectsOverlap(visualRect, obstacle),
+            view:{ width:W, height:H }
+        };
+    }
+    function _versionBadgeRect() {
+        const viewport = _currentViewportUiSnapshot();
+        const rawInsets = viewport.logicalSafeInsets || VIEWPORT_SAFE_INSETS;
+        const safeLeft = Math.max(0, Number(rawInsets && rawInsets.left) || 0);
+        const safeRight = W - Math.max(0, Number(rawInsets && rawInsets.right) || 0);
+        const safeTop = Math.max(0, Number(rawInsets && rawInsets.top) || 0);
+        const capsule = _normalizedUiRect(viewport.logicalSystemMenuButton);
+        const vbw = 120, vbh = 32, gap = 16;
+        let x = safeRight-gap-vbw;
+        let y = safeTop+gap;
+        if (capsule) {
+            const before = capsule.x-gap-vbw;
+            const after = capsule.x+capsule.w+gap;
+            if (before >= safeLeft+gap) x = before;
+            else if (after+vbw <= safeRight-gap) x = after;
+            else { x = safeRight-gap-vbw; y = capsule.y+capsule.h+gap; }
+        }
+        return {x,y,w:vbw,h:vbh};
+    }
+    window.__debug.getMenuDiagnosticLayout = () => JSON.parse(JSON.stringify(_computeMenuDiagnosticLayout()));
+
     function drawMenu() {
         drawGrid();
-        const logW = 250, logH = 76, logX = W - logW - 46, logY = 38;
+        const diagnosticLayout = _computeMenuDiagnosticLayout();
+        const { x:logX, y:logY, w:logW, h:logH } = diagnosticLayout.visualRect;
+        const layoutFingerprint = JSON.stringify(diagnosticLayout);
+        if (layoutFingerprint !== _lastMenuDiagnosticLayoutFingerprint) {
+            _lastMenuDiagnosticLayoutFingerprint = layoutFingerprint;
+            logStep('viewport', 'menu-diagnostic-layout', diagnosticLayout);
+        }
         ctx.save(); ctx.fillStyle = '#fff0bd';
         _wonkyRectPath(logX, logY, logW, logH, 20, 55139, 2); ctx.fill();
         ctx.strokeStyle = '#17343a'; ctx.lineWidth = 4;
         _wonkyRectPath(logX, logY, logW, logH, 20, 55139, 2); ctx.stroke(); ctx.restore();
         sketchBold('导出日志', logX + logW / 2, logY + logH / 2 + 5, 30);
-        uiBTN.exportLog = { x: logX, y: logY, w: logW, h: logH };
+        uiBTN.exportLog = Object.assign({}, diagnosticLayout.hitRect, {
+            candidate:diagnosticLayout.candidate,
+            capsuleRect:diagnosticLayout.capsuleRect,
+            safeBounds:diagnosticLayout.safeBounds,
+            overlap:diagnosticLayout.overlap
+        });
         if (_faultJournal.lastFault) {
-            sketchText('发现上次异常，可点这里导出', logX + logW / 2, logY + logH + 28, 21, 'center', true, '#b54043');
+            const faultTextY = logY+logH+36 < H ? logY+logH+28 : logY-22;
+            sketchText('发现上次异常，可点这里导出', logX + logW / 2, faultTextY, 21, 'center', true, '#b54043');
         }
         // 正式游戏名：单行居中，保留 F4 旷野视觉的留白。
         sketchBold(GAME_TITLE, W / 2, H * 0.34, 120);
@@ -4873,7 +4993,15 @@
         }
         if (gameState === 'menu') {
             if (inRect(p, uiBTN.exportLog)) {
-                logStep('input', 'menu-export-log-click', { x: Math.round(p.x), y: Math.round(p.y) });
+                logStep('input', 'menu-export-log-click', {
+                    x:Math.round(p.x), y:Math.round(p.y),
+                    buttonRect:{x:uiBTN.exportLog.x,y:uiBTN.exportLog.y,w:uiBTN.exportLog.w,h:uiBTN.exportLog.h},
+                    candidate:uiBTN.exportLog.candidate,
+                    capsuleRect:uiBTN.exportLog.capsuleRect,
+                    safeBounds:uiBTN.exportLog.safeBounds,
+                    overlap:uiBTN.exportLog.overlap,
+                    version:GAME_CODE_VERSION
+                });
                 exportDiagnosticLog();
                 return;
             }
@@ -6213,10 +6341,11 @@
             // ===== v15.0 右上角代码版本号显示（一眼看出是不是新代码，不用猜缓存）=====
             try {
                 ctx.save();
-                // 小灰色圆角矩形背景（右上角：离右/上边距各 16px，宽 ~120，高 32）
-                const vbx = W - 16 - 120;
-                const vby = 16;
-                const vbw = 120, vbh = 32, vr = 10;
+                // 版本标识也避让微信右上角系统胶囊；网页仍保持原右上布局。
+                const versionRect = _versionBadgeRect();
+                const vbx = versionRect.x;
+                const vby = versionRect.y;
+                const vbw = versionRect.w, vbh = versionRect.h, vr = 10;
                 ctx.beginPath();
                 ctx.moveTo(vbx + vr, vby);
                 ctx.lineTo(vbx + vbw - vr, vby);

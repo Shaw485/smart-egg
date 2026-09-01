@@ -62,6 +62,12 @@ let sampleCount = 0;
 let nonZeroSamples = 0;
 let peak = 0;
 let sumSquares = 0;
+let highPassSumSquares = 0;
+let previousSample = 0;
+let previousHighPass = 0;
+const highPassCutoffHz = 250;
+const highPassRc = 1 / (2 * Math.PI * highPassCutoffHz);
+const highPassAlpha = highPassRc / (highPassRc + 1 / format.sampleRate);
 for (const chunk of dataChunks) {
   assert.strictEqual(chunk.size % format.blockAlign, 0, 'WAV data 大小必须按采样帧对齐');
   for (let position = chunk.start; position + 1 < chunk.end; position += 2) {
@@ -71,15 +77,29 @@ for (const chunk of dataChunks) {
     if (sample !== 0) nonZeroSamples += 1;
     if (magnitude > peak) peak = magnitude;
     sumSquares += sample * sample;
+    const highPassSample = highPassAlpha * (previousHighPass + sample - previousSample);
+    highPassSumSquares += highPassSample * highPassSample;
+    previousSample = sample;
+    previousHighPass = highPassSample;
   }
 }
 const rms = Math.sqrt(sumSquares / sampleCount);
+const highPassRms = Math.sqrt(highPassSumSquares / sampleCount);
+const highPassRatio = highPassRms / rms;
 assert.ok(sampleCount > 0, '背景音乐没有可读取的 PCM 样本');
 assert.ok(nonZeroSamples > 0 && peak > 0 && rms > 0,
   '背景音乐 PCM 数据不能是全静音');
+assert.ok(rms >= 3200,
+  `背景音乐原始响度必须足以在手机扬声器播放，当前 RMS=${rms.toFixed(2)}`);
+assert.ok(highPassRatio >= 0.45,
+  `至少应有足够的 250Hz 以上可听内容，当前高通 RMS 比例=${highPassRatio.toFixed(3)}`);
 
 const game = fs.readFileSync(gamePath, 'utf8');
-assert.match(game, /const GAME_CODE_VERSION = 190/, 'Web 正式代码版本必须升级为 v190');
+assert.match(game, /const GAME_CODE_VERSION = 191/, 'Web 正式代码版本必须升级为 v191');
+assert.match(game, /const BGM_VOLUME = 0\.76/,
+  'v191 手机可听背景音乐应使用明确的独立音量');
+assert.match(game, /phone-audible-v191/,
+  '音频诊断必须标记手机可听频段资源修订版');
 
 const bgmAssetMatches = game.match(/assets\/[A-Za-z0-9._/-]*bgm[A-Za-z0-9._/-]*\.(?:wav|mp3|ogg|m4a)/gi) || [];
 const uniqueBgmAssets = [...new Set(bgmAssetMatches)];
@@ -116,5 +136,6 @@ assert.doesNotMatch(audioSection, /\bsetInterval\s*\(/,
 
 console.log(
   `Web 背景音乐回归测试通过：PCM16 单声道，${durationSeconds.toFixed(2)} 秒，` +
-  `peak=${peak}，rms=${rms.toFixed(2)}；单一循环资源启用且旧点状音序器关闭。`
+  `peak=${peak}，rms=${rms.toFixed(2)}，highPass250=${highPassRatio.toFixed(3)}；` +
+  '单一循环资源启用且旧点状音序器关闭。'
 );
