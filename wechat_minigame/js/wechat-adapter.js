@@ -1,7 +1,7 @@
 'use strict';
 
 /*
- * 怪奇之原微信小游戏兼容层 v186
+ * 怪奇之原微信小游戏兼容层 v187
  *
  * 游戏本体以 1080 高的逻辑 Canvas 绘制；微信宽屏会横向扩展地图而不拉伸元素。本文件把微信小游戏的
  * Canvas、触摸、存储、音频、生命周期、键盘和日志文件接口映射成游戏
@@ -203,7 +203,7 @@
     redact: function (context) { return redactAdapterContext(context, 0); }
   });
   adapterLog('runtime', 'adapter-session-start', {
-    version: 186,
+    version: 187,
     creatorMode: CREATOR_MODE_ENABLED,
     retention: { type: 'memory-ring', maxEntries: ADAPTER_LOG_MAX },
     productionDefaults: mapEntriesToObject(adapterLogModules)
@@ -626,6 +626,357 @@
   }
   initializeInnerAudioOptions();
 
+  // v187 背景音乐：唯一、长期、连续循环的 InnerAudio 实例。旧版逐音符
+  // Oscillator 会产生每 380ms 一次的点状声，背景音乐绝不再经过该短音链路。
+  const BGM_ASSET = 'assets/bgm-wilds-ambient.wav';
+  const BGM_VOLUME = 0.42;
+  const BGM_LOAD_WATCHDOG_MS = 5000;
+  const BGM_PLAY_WATCHDOG_MS = 1800;
+  const backgroundMusic = (function createBackgroundMusicController() {
+    let audio = null;
+    let requested = false;
+    let ready = false;
+    let playing = false;
+    let playPending = false;
+    let lifecyclePaused = false;
+    let state = 'idle';
+    let createCount = 0;
+    let startCount = 0;
+    let lastError = null;
+    let loadWatchdog = 0;
+    let playWatchdog = 0;
+    let playAttemptId = 0;
+    const instanceHandlers = new WeakMap();
+
+    function stateSnapshot() {
+      let currentTime = 0;
+      try { currentTime = Number(audio && audio.currentTime || 0); } catch (_) {}
+      return {
+        enabled:true,
+        mode:'looped-asset',
+        asset:BGM_ASSET,
+        volume:BGM_VOLUME,
+        requested,
+        ready,
+        playing,
+        playPending,
+        paused:!!audio && !playing,
+        state,
+        createCount,
+        startCount,
+        currentTime:Number.isFinite(currentTime) ? Number(currentTime.toFixed(3)) : 0,
+        loadWatchdogMs:BGM_LOAD_WATCHDOG_MS,
+        playWatchdogMs:BGM_PLAY_WATCHDOG_MS,
+        lastError
+      };
+    }
+    function audioErrorMessage(error) {
+      return String(error && (error.errMsg || error.message) || error || 'unknown-audio-error');
+    }
+    function logBgm(eventName, context, level) {
+      adapterLog('audio-core', eventName, Object.assign({ asset:BGM_ASSET }, context || {}), level || 'info');
+    }
+    function clearLoadWatchdog() {
+      if (!loadWatchdog) return;
+      clearTimeout(loadWatchdog);
+      loadWatchdog = 0;
+    }
+    function clearPlayWatchdog() {
+      if (!playWatchdog) return;
+      clearTimeout(playWatchdog);
+      playWatchdog = 0;
+    }
+    function armPlayWatchdog(attemptId, reason) {
+      clearPlayWatchdog();
+      playWatchdog = setTimeout(function () {
+        playWatchdog = 0;
+        if (attemptId !== playAttemptId || !playPending || playing || !audio) return;
+        playPending = false;
+        state = ready ? 'ready' : 'waiting-ready';
+        lastError = 'play-start-timeout';
+        logBgm('bgm-play-timeout', {
+          reason,
+          attemptId,
+          watchdogMs:BGM_PLAY_WATCHDOG_MS,
+          ready,
+          retry:'next-interaction-or-lifecycle-resume'
+        }, 'warn');
+      }, BGM_PLAY_WATCHDOG_MS);
+    }
+    function releaseAudioInstance(doomed, stopFirst) {
+      if (!doomed) return;
+      const handlers = instanceHandlers.get(doomed) || {};
+      function cleanup(method, handler) {
+        if (typeof doomed[method] !== 'function') return;
+        try { doomed[method](handler); } catch (_) {}
+      }
+      cleanup('offCanplay', handlers.canplay);
+      cleanup('offPlay', handlers.play);
+      cleanup('offPause', handlers.pause);
+      cleanup('offEnded', handlers.ended);
+      cleanup('offStop', handlers.stop);
+      cleanup('offError', handlers.error);
+      instanceHandlers.delete(doomed);
+      try { if (typeof doomed.pause === 'function') doomed.pause(); } catch (_) {}
+      try { if (stopFirst && typeof doomed.stop === 'function') doomed.stop(); } catch (_) {}
+      try { if (typeof doomed.destroy === 'function') doomed.destroy(); } catch (_) {}
+    }
+    function armLoadWatchdog(instance) {
+      clearLoadWatchdog();
+      loadWatchdog = setTimeout(function () {
+        loadWatchdog = 0;
+        if (!audio || audio !== instance || ready) return;
+        const stuck = audio;
+        audio = null;
+        playAttemptId++;
+        clearPlayWatchdog();
+        releaseAudioInstance(stuck, true);
+        ready = false;
+        playing = false;
+        playPending = false;
+        state = 'load-timeout';
+        lastError = 'canplay-timeout';
+        logBgm('bgm-load-timeout', {
+          watchdogMs:BGM_LOAD_WATCHDOG_MS,
+          retry:'next-interaction-or-lifecycle-resume'
+        }, 'error');
+      }, BGM_LOAD_WATCHDOG_MS);
+    }
+    function handleCanplay() {
+      clearLoadWatchdog();
+      const firstReady = !ready;
+      ready = true;
+      if (!playing) state = lifecyclePaused ? 'paused' : 'ready';
+      if (firstReady) logBgm('bgm-ready', { requested, lifecyclePaused });
+      if (requested && !lifecyclePaused) requestPlay('canplay');
+    }
+    function handlePlay() {
+      if (!requested || lifecyclePaused || state === 'destroyed') {
+        playPending = false;
+        clearPlayWatchdog();
+        try { if (audio && typeof audio.pause === 'function') audio.pause(); } catch (_) {}
+        logBgm('bgm-late-play-ignored', { requested, lifecyclePaused, state }, 'warn');
+        return;
+      }
+      clearPlayWatchdog();
+      playing = true;
+      playPending = false;
+      state = 'playing';
+      lastError = null;
+      logBgm('bgm-playing', { startCount, volume:BGM_VOLUME });
+    }
+    function handlePause() {
+      // 某些基础库会把上一轮 pause 事件延迟到新一轮 play 已发出之后；
+      // 此时不能清掉新的 playPending，否则真机再次陷入“看似已暂停、实际仍在启动”。
+      if (!lifecyclePaused && playPending) {
+        logBgm('bgm-late-pause-ignored', { state, playAttemptId }, 'warn');
+        return;
+      }
+      clearPlayWatchdog();
+      playing = false;
+      playPending = false;
+      if (state !== 'destroyed') state = 'paused';
+      logBgm('bgm-paused', { lifecyclePaused });
+    }
+    function handleEnded() {
+      clearPlayWatchdog();
+      playing = false;
+      playPending = false;
+      state = 'ended';
+      logBgm('bgm-ended', { requested }, 'warn');
+    }
+    function handleStop() {
+      clearPlayWatchdog();
+      playing = false;
+      playPending = false;
+      if (state !== 'destroyed') state = 'stopped';
+      logBgm('bgm-stopped', { requested });
+    }
+    function handleError(error) {
+      clearLoadWatchdog();
+      clearPlayWatchdog();
+      const failed = audio;
+      audio = null;
+      playAttemptId++;
+      playing = false;
+      playPending = false;
+      ready = false;
+      state = 'error';
+      lastError = audioErrorMessage(error);
+      releaseAudioInstance(failed, true);
+      logBgm('bgm-error', { message:lastError, requested }, 'error');
+    }
+    function requestPlay(reason) {
+      if (!audio || playing || playPending || !requested || lifecyclePaused) return false;
+      if (!ready) {
+        state = 'waiting-ready';
+        return false;
+      }
+      try {
+        const attemptId = ++playAttemptId;
+        const instance = audio;
+        playPending = true;
+        state = startCount ? 'resuming' : 'starting';
+        startCount++;
+        logBgm('bgm-play-requested', { reason, startCount, ready, attemptId });
+        armPlayWatchdog(attemptId, reason);
+        const result = audio.play();
+        if (result && typeof result.then === 'function') {
+          result.then(function () {
+            if (attemptId !== playAttemptId || audio !== instance || lifecyclePaused || !requested) return;
+            if (!playing) handlePlay();
+          }).catch(function (error) {
+            if (attemptId !== playAttemptId || audio !== instance) return;
+            clearPlayWatchdog();
+            playPending = false;
+            state = 'blocked';
+            lastError = audioErrorMessage(error);
+            logBgm('bgm-play-rejected', { reason, message:lastError }, 'warn');
+          });
+        } else if (typeof audio.onPlay !== 'function') {
+          handlePlay();
+        }
+        return true;
+      } catch (error) {
+        clearPlayWatchdog();
+        playPending = false;
+        state = 'error';
+        lastError = audioErrorMessage(error);
+        logBgm('bgm-play-failed', { reason, message:lastError }, 'error');
+        return false;
+      }
+    }
+    function ensureInstance() {
+      if (audio) return audio;
+      if (typeof wx.createInnerAudioContext !== 'function') {
+        state = 'unsupported';
+        lastError = 'createInnerAudioContext unavailable';
+        logBgm('bgm-unavailable', { message:lastError }, 'warn');
+        return null;
+      }
+      try {
+        const instance = wx.createInnerAudioContext({ useWebAudioImplement:false });
+        if (!instance) throw new Error('createInnerAudioContext returned no context');
+        audio = instance;
+        createCount++;
+        instance.autoplay = false;
+        instance.loop = true;
+        instance.obeyMuteSwitch = false;
+        instance.volume = BGM_VOLUME;
+        instance.playbackRate = 1;
+        // off* 不能保证撤销已经排队的原生事件，因此每个实例都捕获自身身份；
+        // 旧实例的迟到 canplay/error 绝不能污染或销毁后来重建的新实例。
+        const handlers = {
+          canplay:function () { if (audio === instance) handleCanplay(); },
+          play:function () { if (audio === instance) handlePlay(); },
+          pause:function () { if (audio === instance) handlePause(); },
+          ended:function () { if (audio === instance) handleEnded(); },
+          stop:function () { if (audio === instance) handleStop(); },
+          error:function (error) { if (audio === instance) handleError(error); }
+        };
+        instanceHandlers.set(instance, handlers);
+        // 本地资源可能同步进入 canplay，因此监听必须早于 src。
+        if (typeof instance.onCanplay === 'function') instance.onCanplay(handlers.canplay);
+        if (typeof instance.onPlay === 'function') instance.onPlay(handlers.play);
+        if (typeof instance.onPause === 'function') instance.onPause(handlers.pause);
+        if (typeof instance.onEnded === 'function') instance.onEnded(handlers.ended);
+        if (typeof instance.onStop === 'function') instance.onStop(handlers.stop);
+        if (typeof instance.onError === 'function') instance.onError(handlers.error);
+        state = 'loading';
+        logBgm('bgm-instance-created', { createCount, loop:true, volume:BGM_VOLUME });
+        armLoadWatchdog(instance);
+        instance.src = BGM_ASSET;
+        if (typeof instance.onCanplay !== 'function') {
+          clearLoadWatchdog();
+          ready = true;
+          requestPlay('no-canplay-api');
+        }
+        return instance;
+      } catch (error) {
+        const failed = audio;
+        audio = null;
+        clearLoadWatchdog();
+        clearPlayWatchdog();
+        releaseAudioInstance(failed, true);
+        ready = false;
+        playing = false;
+        playPending = false;
+        state = 'error';
+        lastError = audioErrorMessage(error);
+        logBgm('bgm-create-failed', { message:lastError }, 'error');
+        return null;
+      }
+    }
+    function start(reason) {
+      requested = true;
+      lifecyclePaused = false;
+      const instance = ensureInstance();
+      if (!instance) return false;
+      if (!ready) {
+        state = 'waiting-ready';
+        return true;
+      }
+      return playing || playPending || requestPlay(reason || 'interaction');
+    }
+    function pause(reason) {
+      lifecyclePaused = true;
+      playAttemptId++;
+      clearPlayWatchdog();
+      if (!audio) return false;
+      const wasActive = playing || playPending;
+      playing = false;
+      playPending = false;
+      state = 'paused';
+      try {
+        // 先落本地状态，避免极少数基础库漏发 onPause 后恢复逻辑误以为仍在播放。
+        audio.pause();
+        if (typeof audio.onPause !== 'function') handlePause();
+        logBgm(wasActive ? 'bgm-pause-requested' : 'bgm-pause-before-start', {
+          reason:reason || 'pause', ready, wasActive
+        });
+        return true;
+      } catch (error) {
+        lastError = audioErrorMessage(error);
+        logBgm('bgm-pause-failed', { reason, message:lastError }, 'error');
+        return false;
+      }
+    }
+    function resume(reason) {
+      if (!requested) return false;
+      lifecyclePaused = false;
+      const instance = ensureInstance();
+      if (!instance) return false;
+      if (!ready) {
+        state = 'waiting-ready';
+        return true;
+      }
+      return playing || playPending || requestPlay(reason || 'resume');
+    }
+    function destroy(reason) {
+      requested = false;
+      lifecyclePaused = true;
+      if (!audio) {
+        state = 'destroyed';
+        return false;
+      }
+      const doomed = audio;
+      audio = null;
+      playAttemptId++;
+      clearLoadWatchdog();
+      clearPlayWatchdog();
+      releaseAudioInstance(doomed, true);
+      playing = false;
+      playPending = false;
+      ready = false;
+      state = 'destroyed';
+      logBgm('bgm-destroyed', { reason:reason || 'destroy' });
+      return true;
+    }
+    return { start, pause, resume, destroy, getState:stateSnapshot };
+  })();
+  installOwnProperty(browserWindow, '__SMART_EGG_BGM__', backgroundMusic);
+  installOwnProperty(root, '__SMART_EGG_BGM__', backgroundMusic);
+
   function FallbackAudioContext() {
     this.state = 'running';
     this.destination = {};
@@ -975,6 +1326,8 @@
     documentObject.hidden = hidden;
     documentObject.visibilityState = hidden ? 'hidden' : 'visible';
     adapterLog('runtime', hidden ? 'app-hide' : 'app-show', { visibilityState:documentObject.visibilityState });
+    // 音频状态只由游戏层的 visibilitychange 监听统一管理。若这里再直接
+    // pause/resume，一次 hide/show 会形成两套暂停原因，并可能在暂停菜单中误恢复。
     documentObject.dispatchEvent(new MiniEvent('visibilitychange'));
     if (hidden) {
       forwardedTouchIds.clear();
@@ -1196,7 +1549,7 @@
   installOwnProperty(browserWindow, '__SMART_EGG_WECHAT_ENV__', wechatEnvironment);
 
   const wechatBridge = {
-    version: 186,
+    version: 187,
     screenCanvas,
     gameCanvas,
     getDisplayRect: function () { return Object.assign({}, displayRect); },
@@ -1209,7 +1562,8 @@
       return { x, y };
     },
     presentFrame,
-    updateViewport
+    updateViewport,
+    audio: backgroundMusic
   };
   installOwnProperty(root, '__SMART_EGG_WECHAT_BRIDGE__', wechatBridge);
   installOwnProperty(browserWindow, '__SMART_EGG_WECHAT_BRIDGE__', wechatBridge);

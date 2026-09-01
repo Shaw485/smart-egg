@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 186;   // 跟 index.html 的 ?v=186 保持一致
+    const GAME_CODE_VERSION = 187;   // 跟 index.html 的 ?v=187 保持一致
     const GAME_TITLE = '怪奇之原';
     // v186 小程序精确宽屏适配：保留创造秘境代码与本地存档，只关闭正式入口和运行路径。
     // 重新开放时需恢复此运行时开关，并同步恢复平台适配构建开关；旧存档不会丢失。
@@ -1171,10 +1171,12 @@
                 progress: { unlocked: _progress.unlocked, completed: (_progress.completed || []).slice() }
             },
             audio: {
-                supported: !!(window.AudioContext || window.webkitAudioContext),
+                supported: !!(window.AudioContext || window.webkitAudioContext || window.Audio || _wechatBgmController()),
                 state: _audioCtx ? _audioCtx.state : 'not-created',
                 failureCount: _audioFailureCount,
-                lastFailure: _lastAudioFailure
+                lastFailure: _lastAudioFailure,
+                backgroundMusic: _bgmDiagnosticSnapshot(),
+                legacyDotSequencerEnabled: false
             }
         };
     }
@@ -1376,16 +1378,25 @@
     document.addEventListener('visibilitychange', () => {
         logStep('lifecycle', 'visibility-change', { visibility: document.visibilityState, input: _getInputSnapshot() });
         if (document.visibilityState === 'hidden') {
+            _pauseBgm('document-hidden');
             _resetForLostFocus('document-hidden');
         } else {
-            // 微信从后台回到前台时重新恢复音频；失败只记日志，不影响玩法。
+            // 首次播放仍要求用户真实操作；已经启动过的音乐从原进度恢复。
             _ensureAudio();
-            _startBgm();
+            _resumeBgm('document-visible');
         }
     });
     window.addEventListener('pagehide', e => {
         logStep('lifecycle', 'page-hide', { persisted: e.persisted, input: _getInputSnapshot() });
+        if (e.persisted) _pauseBgm('pagehide-bfcache');
+        else _destroyBgm('pagehide');
         _resetForLostFocus('page-hide');
+    });
+    window.addEventListener('pageshow', e => {
+        if (e.persisted) {
+            logStep('lifecycle', 'page-show', { persisted:true });
+            _resumeBgm('pageshow-bfcache');
+        }
     });
 
     async function _runInputRegressionTests() {
@@ -1537,10 +1548,22 @@
         return results;
     }
 
-    // 轻量程序化音效：不依赖外部音频文件，首次键盘/触摸操作后自动启用。
+    // 动作音继续使用轻量 WebAudio；背景音乐使用一条长期连续音轨，避免旧版
+    // 每 380ms 创建短音所造成的周期“点状声”。两套链路相互独立、可单独诊断。
     let _audioCtx = null;
     let _audioFailureCount = 0;
     let _lastAudioFailure = null;
+    const BGM_ASSET = 'assets/bgm-wilds-ambient.wav';
+    const BGM_VOLUME = 0.42;
+    const BGM_MODE = 'looped-asset';
+    let _bgmAudio = null;
+    let _bgmRequested = false;
+    let _bgmState = 'idle';
+    let _bgmStartCount = 0;
+    let _bgmPlayPending = false;
+    let _bgmLastError = null;
+    let _bgmUnavailableLogged = false;
+    let _bgmAttemptId = 0;
     function _recordAudioFailure(stage, error, details = {}) {
         const context = {
             stage,
@@ -1645,30 +1668,210 @@
         _audioCtx = context || null;
         return _audioCtx;
     };
+    function _wechatBgmController() {
+        const controller = window.__SMART_EGG_BGM__;
+        return window.__wxMiniGame && controller && typeof controller.start === 'function'
+            ? controller : null;
+    }
+    function _bgmDiagnosticSnapshot() {
+        const controller = _wechatBgmController();
+        if (controller && typeof controller.getState === 'function') {
+            try {
+                return { enabled:true, mode:BGM_MODE, asset:BGM_ASSET, volume:BGM_VOLUME, ...controller.getState() };
+            } catch (error) {
+                _bgmLastError = String(error && error.message || error);
+            }
+        }
+        let currentTime = 0;
+        try { currentTime = Number(_bgmAudio && _bgmAudio.currentTime || 0); } catch (_) {}
+        return {
+            enabled: true,
+            mode: BGM_MODE,
+            asset: BGM_ASSET,
+            volume: BGM_VOLUME,
+            requested: _bgmRequested,
+            state: _bgmState,
+            startCount: _bgmStartCount,
+            currentTime: Number.isFinite(currentTime) ? Number(currentTime.toFixed(3)) : 0,
+            lastError: _bgmLastError
+        };
+    }
     window.__debug.getAudioDiagnostics = () => ({
         state: _audioCtx && _audioCtx.state || 'not-created',
         failureCount: _audioFailureCount,
         lastFailure: _lastAudioFailure,
-        bgmEnabled: false,
+        bgmEnabled: true,
+        backgroundMusic: _bgmDiagnosticSnapshot(),
+        legacyDotSequencerEnabled: false,
         jumpSample: window.__wxMiniGame ? 'assets/sfx-jump-action.wav' : 'web-audio-action-pulse'
     });
-    let _bgmDisabledLogged = false;
-    // v186：旧程序化旋律会在微信端每 380ms 变成一个孤立短音，听起来像持续报错。
-    // 正式停用该音序器，只保留跳跃、落地、敲门、解锁与通关等动作音效。
-    function _startBgm() {
-        _ensureAudio();
-        if (!_bgmDisabledLogged) {
-            _bgmDisabledLogged = true;
-            logStep('audio', 'bgm-sequencer-disabled', {
-                reason:'remove-periodic-dot-sound',
-                actionSfxEnabled:true
+    function _ensureWebBgm() {
+        if (_bgmAudio) return _bgmAudio;
+        if (typeof window.Audio !== 'function') {
+            _bgmState = 'unsupported';
+            if (!_bgmUnavailableLogged) {
+                _bgmUnavailableLogged = true;
+                logStep('audio', 'bgm-unavailable', { implementation:'html-audio', asset:BGM_ASSET });
+            }
+            return null;
+        }
+        try {
+            const audio = new window.Audio();
+            audio.autoplay = false;
+            audio.loop = true;
+            audio.preload = 'auto';
+            audio.volume = BGM_VOLUME;
+            audio.playsInline = true;
+            audio.addEventListener('loadstart', () => {
+                if (_bgmAudio !== audio) return;
+                _bgmState = 'loading';
+                logStep('audio', 'bgm-load-start', { asset:BGM_ASSET, mode:BGM_MODE });
             });
+            audio.addEventListener('canplay', () => {
+                if (_bgmAudio !== audio) return;
+                if (_bgmState !== 'playing' && _bgmState !== 'paused' && _bgmState !== 'destroyed') _bgmState = 'ready';
+                logStep('audio', 'bgm-ready', { asset:BGM_ASSET });
+            });
+            audio.addEventListener('playing', () => {
+                if (_bgmAudio !== audio) return;
+                if (document.visibilityState === 'hidden' || gameState === 'paused' || !_bgmRequested) {
+                    _bgmAttemptId++;
+                    _bgmPlayPending = false;
+                    try { audio.pause(); } catch (_) {}
+                    _bgmState = 'paused';
+                    logStep('audio', 'bgm-late-playing-ignored', {
+                        asset:BGM_ASSET, visibility:document.visibilityState, gameState, requested:_bgmRequested
+                    });
+                    return;
+                }
+                _bgmState = 'playing';
+                _bgmPlayPending = false;
+                _bgmLastError = null;
+                logStep('audio', 'bgm-playing', { asset:BGM_ASSET, volume:BGM_VOLUME, startCount:_bgmStartCount });
+            });
+            audio.addEventListener('pause', () => {
+                if (_bgmAudio !== audio || !audio.paused) return;
+                if (_bgmState !== 'destroyed') _bgmState = 'paused';
+            });
+            audio.addEventListener('error', () => {
+                if (_bgmAudio !== audio) return;
+                _bgmPlayPending = false;
+                _bgmState = 'error';
+                const mediaError = audio.error;
+                _bgmLastError = 'media-error-' + String(mediaError && mediaError.code || 'unknown');
+                _recordAudioFailure('bgm-media-error', new Error(_bgmLastError), { asset:BGM_ASSET });
+            });
+            // 事件必须先挂载，再设置 src；本地资源可能立即进入可播放状态。
+            _bgmAudio = audio;
+            audio.src = BGM_ASSET;
+            if (typeof audio.load === 'function') audio.load();
+            logStep('audio', 'bgm-instance-created', { asset:BGM_ASSET, mode:BGM_MODE, loop:true, volume:BGM_VOLUME });
+            return audio;
+        } catch (error) {
+            _bgmAudio = null;
+            _bgmState = 'error';
+            _bgmLastError = String(error && error.message || error);
+            _recordAudioFailure('bgm-create', error, { asset:BGM_ASSET });
+            return null;
         }
     }
-    document.addEventListener('pointerdown', _startBgm, { passive: true });
+    function _playWebBgm(reason) {
+        const audio = _ensureWebBgm();
+        if (!audio || _bgmPlayPending) return !!audio;
+        if (!audio.paused && _bgmState === 'playing') return true;
+        try {
+            const attemptId = ++_bgmAttemptId;
+            _bgmPlayPending = true;
+            _bgmState = _bgmStartCount ? 'resuming' : 'starting';
+            _bgmStartCount++;
+            logStep('audio', 'bgm-play-request', { reason, asset:BGM_ASSET, startCount:_bgmStartCount, attemptId });
+            const playResult = audio.play();
+            if (playResult && typeof playResult.then === 'function') {
+                playResult.then(() => {
+                    if (attemptId !== _bgmAttemptId || _bgmAudio !== audio) return;
+                    if (document.visibilityState === 'hidden' || gameState === 'paused' || !_bgmRequested) return;
+                    _bgmPlayPending = false;
+                    if (_bgmState !== 'paused' && _bgmState !== 'destroyed') _bgmState = 'playing';
+                }).catch(error => {
+                    if (attemptId !== _bgmAttemptId || _bgmAudio !== audio) return;
+                    _bgmPlayPending = false;
+                    _bgmState = 'blocked';
+                    _bgmLastError = String(error && error.message || error);
+                    // 下一次真实用户操作可以再尝试；失败不进入物理主循环。
+                    logStep('audio', 'bgm-play-rejected', { reason, asset:BGM_ASSET, message:_bgmLastError });
+                });
+            } else {
+                if (attemptId !== _bgmAttemptId || _bgmAudio !== audio) return false;
+                _bgmPlayPending = false;
+                _bgmState = 'playing';
+            }
+            return true;
+        } catch (error) {
+            _bgmPlayPending = false;
+            _bgmState = 'error';
+            _bgmLastError = String(error && error.message || error);
+            _recordAudioFailure('bgm-play', error, { reason, asset:BGM_ASSET });
+            return false;
+        }
+    }
+    function _startBgm(reason = 'interaction') {
+        _bgmRequested = true;
+        _ensureAudio();
+        if (document.visibilityState === 'hidden' || gameState === 'paused') {
+            logStep('audio', 'bgm-start-deferred', { reason, visibility:document.visibilityState, gameState });
+            return false;
+        }
+        const controller = _wechatBgmController();
+        if (controller) return controller.start(reason);
+        return _playWebBgm(reason);
+    }
+    function _pauseBgm(reason = 'pause') {
+        const controller = _wechatBgmController();
+        if (controller) return controller.pause(reason);
+        _bgmAttemptId++;
+        if (!_bgmAudio) return false;
+        try {
+            const wasActive = !_bgmAudio.paused || _bgmPlayPending;
+            _bgmPlayPending = false;
+            _bgmAudio.pause();
+            _bgmState = 'paused';
+            if (wasActive) logStep('audio', 'bgm-paused', { reason, asset:BGM_ASSET });
+            return wasActive;
+        } catch (error) {
+            _recordAudioFailure('bgm-pause', error, { reason, asset:BGM_ASSET });
+            return false;
+        }
+    }
+    function _resumeBgm(reason = 'resume') {
+        if (!_bgmRequested || document.visibilityState === 'hidden' || gameState === 'paused') return false;
+        const controller = _wechatBgmController();
+        if (controller) return controller.resume(reason);
+        return _playWebBgm(reason);
+    }
+    function _destroyBgm(reason = 'destroy') {
+        _bgmAttemptId++;
+        const controller = _wechatBgmController();
+        if (controller && typeof controller.destroy === 'function') controller.destroy(reason);
+        if (_bgmAudio) {
+            try { _bgmAudio.pause(); } catch (_) {}
+            try { _bgmAudio.removeAttribute('src'); } catch (_) {}
+            try { if (typeof _bgmAudio.load === 'function') _bgmAudio.load(); } catch (_) {}
+            _bgmAudio = null;
+        }
+        _bgmPlayPending = false;
+        _bgmRequested = false;
+        _bgmState = 'destroyed';
+        logStep('audio', 'bgm-destroyed', { reason, asset:BGM_ASSET });
+        return true;
+    }
+    function _syncBgmForState(from, to) {
+        if (to === 'paused') _pauseBgm('game-paused');
+        else if (from === 'paused') _resumeBgm('game-resumed');
+    }
+    document.addEventListener('pointerdown', () => _startBgm('pointerdown'), { passive: true });
     document.addEventListener('keydown', e => {
         _ensureAudio();
-        _startBgm();
+        _startBgm('keydown');
         // v4.9.7a B类：键盘输入事件全链路日志（含 repeat/游戏状态/按键名）
         logStep('input', 'keydown', {
             code: e.code, key: e.key, repeat: !!e.repeat,
@@ -4813,7 +5016,7 @@
     }
     canvas.addEventListener('touchstart', e => {
         e.preventDefault();
-        _ensureAudio(); _startBgm();
+        _ensureAudio(); _startBgm('touchstart');
         for (const touch of Array.from(e.changedTouches)) {
             const p = _touchPos(touch);
             const moving = gameState === 'playing' ? _movingTargetAt(p) : null;
@@ -5498,6 +5701,7 @@
             logStep('state', 'state-change', {
                 from: _prevState, to: gameState, showSuccess, showDead
             });
+            _syncBgmForState(_prevState, gameState);
             _prevState = gameState;
         }
 

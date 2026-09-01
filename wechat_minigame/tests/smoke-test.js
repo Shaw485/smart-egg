@@ -5,7 +5,10 @@ const fs = require('fs');
 const path = require('path');
 
 const projectRoot = path.resolve(__dirname, '../..');
+const bgmAmbientPath = path.join(projectRoot, 'wechat_minigame/assets/bgm-wilds-ambient.wav');
 const jumpActionPath = path.join(projectRoot, 'wechat_minigame/assets/sfx-jump-action.wav');
+assert.ok(fs.existsSync(bgmAmbientPath) && fs.statSync(bgmAmbientPath).size > 1000,
+  '微信包必须包含独立、连续的旷野环境背景音乐');
 assert.ok(fs.existsSync(jumpActionPath) && fs.statSync(jumpActionPath).size > 1000,
   '微信包必须包含独立的跳跃动作音效采样');
 assert.strictEqual(
@@ -84,6 +87,7 @@ let lastFileWrite = null;
 let clipboardWriteFails = false;
 const innerAudioOptionCalls = [];
 const innerAudioInstances = [];
+let innerAudioCanplayMode = 'sync';
 const hostDocumentListeners = Object.create(null);
 global.GameGlobal = global;
 const readonlyHostDocument = Object.freeze({
@@ -188,6 +192,10 @@ global.wx = {
   createInnerAudioContext: () => {
     const operations = [];
     let canplayHandler = null;
+    let playHandler = null;
+    let pauseHandler = null;
+    let endedHandler = null;
+    let stopHandler = null;
     let errorHandler = null;
     let source = '';
     const instance = {
@@ -201,13 +209,74 @@ global.wx = {
         operations.push('onCanplay');
         canplayHandler = handler;
       },
+      offCanplay(handler) {
+        operations.push('offCanplay');
+        if (!handler || canplayHandler === handler) canplayHandler = null;
+      },
+      onPlay(handler) {
+        operations.push('onPlay');
+        playHandler = handler;
+      },
+      offPlay(handler) {
+        operations.push('offPlay');
+        if (!handler || playHandler === handler) playHandler = null;
+      },
+      onPause(handler) {
+        operations.push('onPause');
+        pauseHandler = handler;
+      },
+      offPause(handler) {
+        operations.push('offPause');
+        if (!handler || pauseHandler === handler) pauseHandler = null;
+      },
+      onEnded(handler) {
+        operations.push('onEnded');
+        endedHandler = handler;
+      },
+      offEnded(handler) {
+        operations.push('offEnded');
+        if (!handler || endedHandler === handler) endedHandler = null;
+      },
+      onStop(handler) {
+        operations.push('onStop');
+        stopHandler = handler;
+      },
+      offStop(handler) {
+        operations.push('offStop');
+        if (!handler || stopHandler === handler) stopHandler = null;
+      },
       onError(handler) {
         operations.push('onError');
         errorHandler = handler;
       },
-      play() { operations.push('play'); },
-      stop() { operations.push('stop'); },
-      destroy() { operations.push('destroy'); },
+      offError(handler) {
+        operations.push('offError');
+        if (!handler || errorHandler === handler) errorHandler = null;
+      },
+      play() {
+        operations.push('play');
+        instance.playing = true;
+        if (playHandler) playHandler();
+      },
+      pause() {
+        operations.push('pause');
+        instance.playing = false;
+        if (pauseHandler) pauseHandler();
+      },
+      stop() {
+        operations.push('stop');
+        instance.playing = false;
+        if (stopHandler) stopHandler();
+      },
+      destroy() {
+        operations.push('destroy');
+        instance.playing = false;
+      },
+      playing: false,
+      snapshotCanplayHandler() { return canplayHandler; },
+      snapshotErrorHandler() { return errorHandler; },
+      emitCanplay() { if (canplayHandler) canplayHandler(); },
+      emitEnded() { if (endedHandler) endedHandler(); },
       emitError(error) { if (errorHandler) errorHandler(error); }
     };
     Object.defineProperty(instance, 'src', {
@@ -219,7 +288,7 @@ global.wx = {
         operations.push('src');
         // 模拟资源已经就绪：若监听器在 src 之前注册，会立即收到 canplay；
         // 若顺序反了则故意不补发，用来锁定真机“偶发无声”的竞态。
-        if (canplayHandler) canplayHandler();
+        if (canplayHandler && innerAudioCanplayMode === 'sync') canplayHandler();
       }
     });
     innerAudioInstances.push(instance);
@@ -278,11 +347,11 @@ setTimeout(async () => {
   assert.notStrictEqual(gameWindow, global, 'game browser shims must live on an isolated compatibility window');
   assert.ok(gameWindow.document.getElementById('game-canvas'));
   assert.strictEqual(gameWindow.navigator.userAgent, 'WeChatMiniGame/test');
-  assert.strictEqual(global.__SMART_EGG_WECHAT_BRIDGE__.version, 186);
+  assert.strictEqual(global.__SMART_EGG_WECHAT_BRIDGE__.version, 187);
   assert.strictEqual(Object.keys(global.__SMART_EGG_LEVELS__).length, 20);
   assert.deepStrictEqual(Object.keys(global.__SMART_EGG_LEVELS__).map(Number), Array.from({ length:20 }, (_, index) => index));
   assert.ok(gameWindow.__debug, 'game debug API should be installed');
-  assert.strictEqual(gameWindow.__debug.VERSION, 186);
+  assert.strictEqual(gameWindow.__debug.VERSION, 187);
   assert.strictEqual(gameWindow.__debug.getState(), 'menu');
   assert.deepStrictEqual(gameWindow.__debug.getFeatures(), { creatorMode:{ enabled:false, localData:'preserved' } });
   assert.strictEqual(gameWindow.__debug.setState('creatorList'), 'menu', 'disabled creator route must be blocked');
@@ -420,12 +489,44 @@ setTimeout(async () => {
   assert.ok(adapterAudio && adapterLogControl.find('audio-core', 'context-created').length > 0,
     'audio-core must diagnose implementation selection without enabling verbose audio logs');
   const audioCountBeforeBgmProbe = innerAudioInstances.length;
+  innerAudioCanplayMode = 'manual';
   gameWindow.document.dispatchEvent(new gameWindow.Event('pointerdown'));
-  await new Promise(resolve => setTimeout(resolve, 430));
-  assert.strictEqual(innerAudioInstances.length, audioCountBeforeBgmProbe,
-    'first interaction must not start the old periodic dot-tone sequencer');
-  assert.strictEqual(gameWindow.__debug.getAudioDiagnostics().bgmEnabled, false,
-    'production diagnostics must state that the periodic sequencer is disabled');
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.strictEqual(innerAudioInstances.length, audioCountBeforeBgmProbe + 1,
+    'first real pointer interaction must create exactly one long-lived BGM InnerAudio instance');
+  const bgmAudioInstance = innerAudioInstances[audioCountBeforeBgmProbe];
+  assert.strictEqual(bgmAudioInstance.src, 'assets/bgm-wilds-ambient.wav',
+    'BGM must use the authored continuous ambient track instead of periodic tone assets');
+  assert.strictEqual(bgmAudioInstance.loop, true,
+    'continuous ambient BGM must use the native loop flag');
+  assert.strictEqual(bgmAudioInstance.operations.includes('play'), false,
+    'BGM must wait for asynchronous canplay instead of issuing a premature play that can deadlock on device');
+  assert.strictEqual(gameWindow.__SMART_EGG_BGM__.getState().playPending, false,
+    'waiting for canplay must not occupy the playPending retry gate');
+  bgmAudioInstance.emitCanplay();
+  innerAudioCanplayMode = 'sync';
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert.strictEqual(bgmAudioInstance.playing, true,
+    'the BGM instance must actually enter playback after the first interaction');
+  assert.ok(bgmAudioInstance.operations.indexOf('onCanplay') >= 0
+    && bgmAudioInstance.operations.indexOf('onCanplay') < bgmAudioInstance.operations.indexOf('src')
+    && bgmAudioInstance.operations.indexOf('play') > bgmAudioInstance.operations.indexOf('src'),
+  'BGM must register readiness before src and play after the local resource becomes ready');
+  const repeatedTouch = { identifier: 91, clientX: 40, clientY: 540 };
+  gameWindow.document.dispatchEvent(new gameWindow.Event('pointerdown'));
+  callbacks.touchstart({ touches:[repeatedTouch], changedTouches:[repeatedTouch] });
+  callbacks.touchend({ touches:[], changedTouches:[repeatedTouch] });
+  gameWindow.document.dispatchEvent(new gameWindow.KeyboardEvent('keydown', { code:'KeyQ', key:'q' }));
+  gameWindow.document.dispatchEvent(new gameWindow.KeyboardEvent('keyup', { code:'KeyQ', key:'q' }));
+  await new Promise(resolve => setTimeout(resolve, 900));
+  assert.strictEqual(innerAudioInstances.length, audioCountBeforeBgmProbe + 1,
+    'repeated pointer/touch/keydown and three old 380ms periods must not create duplicate BGM or periodic tone instances');
+  assert.strictEqual(bgmAudioInstance.operations.filter(operation => operation === 'play').length, 1,
+    'duplicate start requests must not restart or layer the already-playing BGM');
+  assert.ok(!bgmAudioInstance.operations.includes('stop') && !bgmAudioInstance.operations.includes('destroy'),
+    'the single BGM instance must stay alive during normal foreground playback');
+  assert.strictEqual(gameWindow.__debug.getAudioDiagnostics().bgmEnabled, true,
+    'production diagnostics must state that the continuous BGM is enabled');
   const oscillator = adapterAudio.createOscillator();
   const gain = adapterAudio.createGain();
   oscillator.connect(gain);
@@ -460,8 +561,69 @@ setTimeout(async () => {
     'jump oscillator must route only to the dedicated physical-action sample');
   assert.strictEqual(actionAudioInstance.playbackRate, 1,
     'dedicated action sample must keep its authored playback rate');
+  assert.strictEqual(bgmAudioInstance.playing, true,
+    'short jump SFX playback must not pause or replace the long-lived BGM instance');
+  assert.ok(!bgmAudioInstance.operations.includes('stop') && !bgmAudioInstance.operations.includes('destroy'),
+    'short jump SFX cleanup must never stop or destroy the BGM instance');
+  const audioCountBeforeLifecycle = innerAudioInstances.length;
+  const bgmPlayCountBeforeResume = bgmAudioInstance.operations.filter(operation => operation === 'play').length;
+  callbacks.hide();
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.strictEqual(bgmAudioInstance.playing, false,
+    'app hide must pause the continuous BGM');
+  assert.ok(bgmAudioInstance.operations.includes('pause')
+    && !bgmAudioInstance.operations.includes('destroy'),
+  'app hide must preserve the same BGM instance for a later resume');
+  callbacks.show();
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert.strictEqual(innerAudioInstances.length, audioCountBeforeLifecycle,
+    'app show must resume the existing BGM instance instead of creating a replacement');
+  assert.strictEqual(innerAudioInstances[audioCountBeforeBgmProbe], bgmAudioInstance,
+    'BGM object identity must survive an app hide/show cycle');
+  assert.strictEqual(bgmAudioInstance.operations.filter(operation => operation === 'play').length,
+    bgmPlayCountBeforeResume + 1,
+    'app show must issue exactly one resume play on the preserved BGM instance');
+  assert.strictEqual(bgmAudioInstance.playing, true,
+    'the preserved BGM instance must be playing after app show');
+  gameWindow.__debug.setState('paused');
+  callbacks.raf(Date.now());
+  await new Promise(resolve => setTimeout(resolve, 10));
+  const bgmPlayCountWhilePaused = bgmAudioInstance.operations.filter(operation => operation === 'play').length;
   callbacks.hide();
   callbacks.show();
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert.strictEqual(bgmAudioInstance.playing, false,
+    'app show must not restart BGM while the in-game pause menu remains open');
+  assert.strictEqual(bgmAudioInstance.operations.filter(operation => operation === 'play').length, bgmPlayCountWhilePaused,
+    'paused game plus hide/show must not issue a hidden duplicate resume');
+  gameWindow.__debug.setState('playing');
+  callbacks.raf(Date.now() + 16);
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert.strictEqual(bgmAudioInstance.playing, true,
+    'leaving the in-game pause state must resume the preserved BGM instance');
+  gameWindow.__debug.setState('menu');
+  callbacks.raf(Date.now() + 32);
+  const staleCanplay = bgmAudioInstance.snapshotCanplayHandler();
+  const staleError = bgmAudioInstance.snapshotErrorHandler();
+  assert.ok(staleCanplay && staleError,
+    'BGM mock must capture old native callbacks for stale-event isolation testing');
+  gameWindow.__SMART_EGG_BGM__.destroy('stale-callback-regression');
+  gameWindow.document.dispatchEvent(new gameWindow.Event('pointerdown'));
+  await new Promise(resolve => setTimeout(resolve, 40));
+  const rebuiltBgmAudioInstance = innerAudioInstances[innerAudioInstances.length - 1];
+  assert.notStrictEqual(rebuiltBgmAudioInstance, bgmAudioInstance,
+    'destroy followed by a new interaction must rebuild one fresh BGM instance');
+  assert.strictEqual(rebuiltBgmAudioInstance.playing, true,
+    'rebuilt BGM instance must play before stale callbacks are injected');
+  staleCanplay();
+  staleError({ errMsg:'late-error-from-released-instance' });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.strictEqual(rebuiltBgmAudioInstance.playing, true,
+    'queued canplay/error from a released instance must not stop or mutate the rebuilt BGM');
+  assert.strictEqual(gameWindow.__SMART_EGG_BGM__.getState().state, 'playing',
+    'controller state must remain playing after stale native callbacks from an old instance');
+  assert.ok(!rebuiltBgmAudioInstance.operations.includes('destroy'),
+    'stale old-instance error must never destroy the current BGM instance');
   const networkLogsBeforeMute = adapterLogControl.find('network', 'status-change').length;
   adapterLogControl.setModule('network', false);
   callbacks.network({ isConnected:false, networkType:'none' });
@@ -593,7 +755,7 @@ setTimeout(async () => {
   assert.strictEqual(clipboardWrites, clipboardWritesBeforeFinalExport + 1,
     '当前这次日志导出必须完成微信剪贴板后备');
   assert.ok(lastFileWrite && lastFileWrite.encoding === 'utf8'
-    && /smart-egg-log-v186-/.test(lastFileWrite.filePath),
+    && /smart-egg-log-v187-/.test(lastFileWrite.filePath),
   '当前这次日志必须写入微信用户目录');
   const exportedReport = JSON.parse(lastFileWrite.data);
   assert.deepStrictEqual(exportedReport.previousFault, previousFaultFixture,
@@ -655,6 +817,6 @@ setTimeout(async () => {
   assert.ok(gameWindow.__SMART_EGG_ADAPTER_DIAGNOSTICS__[0].seq > sequenceBeforeRetentionProbe,
     'adapter diagnostics ring must evict old entries rather than growing without bound');
   Object.fromEntries = nativeObjectFromEntries;
-  console.log('微信小游戏冒烟测试通过：v186精确宽屏、自然人物动作、独立跳跃动作声、20关与故障恢复日志均正常。');
+  console.log('微信小游戏冒烟测试通过：v187连续背景音乐单实例循环、动作音并行、精确宽屏、20关与故障恢复日志均正常。');
   process.exit(0);
 }, 80);

@@ -43,7 +43,7 @@ const preamble = `    const _platformGlobal = typeof GameGlobal !== 'undefined' 
 `;
 
 let game = fs.readFileSync(webGamePath, 'utf8');
-if (!/const GAME_CODE_VERSION = 186/.test(game)) throw new Error('网页主线不是预期的 v186，停止同步');
+if (!/const GAME_CODE_VERSION = 187/.test(game)) throw new Error('网页主线不是预期的 v187，停止同步');
 if (!/const CREATOR_MODE_ENABLED = false/.test(game)) throw new Error('创造秘境尚未下线，停止同步');
 const wechatAdapter = fs.readFileSync(wechatAdapterPath, 'utf8');
 if (!/const CREATOR_MODE_ENABLED = false/.test(wechatAdapter)) {
@@ -100,28 +100,31 @@ game = replaceOnce(
 const files = [
   { source: path.join(projectRoot, 'godot_project/levels/levels_bundle.js'), target: path.join(wechatRoot, 'js/levels.js') },
   { source: path.join(projectRoot, 'web_preview/physics-collision.js'), target: path.join(wechatRoot, 'js/physics-collision.js') },
-  { source: path.join(projectRoot, 'web_preview/accepted-mechanics.js'), target: path.join(wechatRoot, 'js/accepted-mechanics.js') }
+  { source: path.join(projectRoot, 'web_preview/accepted-mechanics.js'), target: path.join(wechatRoot, 'js/accepted-mechanics.js') },
+  { source: path.join(projectRoot, 'web_preview/assets/bgm-wilds-ambient.wav'), target: path.join(wechatRoot, 'assets/bgm-wilds-ambient.wav') }
 ];
 
 const writes = [{ target:path.join(wechatRoot, 'js/smart-egg-game.js'), content:game }];
-for (const file of files) writes.push({ target:file.target, content:fs.readFileSync(file.source, 'utf8') });
+for (const file of files) writes.push({ target:file.target, content:fs.readFileSync(file.source) });
 
 for (const file of writes) {
+  const expected = Buffer.isBuffer(file.content) ? file.content : Buffer.from(file.content, 'utf8');
   if (checkOnly) {
     if (!fs.existsSync(file.target)) throw new Error(`同步目标缺失：${path.relative(projectRoot, file.target)}`);
-    const actual = fs.readFileSync(file.target, 'utf8');
-    if (actual !== file.content) throw new Error(`同步目标已落后：${path.relative(projectRoot, file.target)}`);
+    const actual = fs.readFileSync(file.target);
+    if (!actual.equals(expected)) throw new Error(`同步目标已落后：${path.relative(projectRoot, file.target)}`);
   } else {
-    fs.writeFileSync(file.target, file.content);
+    fs.mkdirSync(path.dirname(file.target), { recursive:true });
+    fs.writeFileSync(file.target, expected);
   }
-  const sha256 = crypto.createHash('sha256').update(file.content).digest('hex');
+  const sha256 = crypto.createHash('sha256').update(expected).digest('hex');
   console.log(JSON.stringify({
     at:new Date().toISOString(), module:'wechat-sync', level:'info', event:checkOnly?'file-verified':'file-synced',
-    file:path.relative(projectRoot, file.target), bytes:Buffer.byteLength(file.content), sha256
+    file:path.relative(projectRoot, file.target), bytes:expected.length, sha256
   }));
 }
 
 console.log(JSON.stringify({
   at:new Date().toISOString(), module:'wechat-sync', level:'info', event:checkOnly?'sync-check-complete':'sync-complete',
-  codeVersion:186, levels:20, creatorMode:false
+  codeVersion:187, levels:20, creatorMode:false
 }));
