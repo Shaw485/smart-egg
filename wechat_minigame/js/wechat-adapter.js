@@ -1,7 +1,7 @@
 'use strict';
 
 /*
- * 怪奇之原微信小游戏兼容层 v187
+ * 怪奇之原微信小游戏兼容层 v188
  *
  * 游戏本体以 1080 高的逻辑 Canvas 绘制；微信宽屏会横向扩展地图而不拉伸元素。本文件把微信小游戏的
  * Canvas、触摸、存储、音频、生命周期、键盘和日志文件接口映射成游戏
@@ -203,7 +203,7 @@
     redact: function (context) { return redactAdapterContext(context, 0); }
   });
   adapterLog('runtime', 'adapter-session-start', {
-    version: 187,
+    version: 188,
     creatorMode: CREATOR_MODE_ENABLED,
     retention: { type: 'memory-ring', maxEntries: ADAPTER_LOG_MAX },
     productionDefaults: mapEntriesToObject(adapterLogModules)
@@ -239,14 +239,25 @@
     const safeTop = Number.isFinite(safe.top) ? safe.top : 0;
     const safeWidth = Math.max(1, safe.width || ((safe.right || width) - safeLeft));
     const safeHeight = Math.max(1, safe.height || ((safe.bottom || height) - safeTop));
+    const safeRight = Number.isFinite(safe.right) ? safe.right : safeLeft + safeWidth;
+    const safeBottom = Number.isFinite(safe.bottom) ? safe.bottom : safeTop + safeHeight;
     const safeAspect = safeWidth / safeHeight;
+    const windowAspect = width / height;
+    const safeInsets = {
+      left: Math.max(0, safeLeft),
+      right: Math.max(0, width - safeRight),
+      top: Math.max(0, safeTop),
+      bottom: Math.max(0, height - safeBottom)
+    };
     if (!logicalViewport) {
-      const requestedWidth = Math.round(VIEWPORT_LOGICAL_HEIGHT * safeAspect);
-      // 宽屏设备需要多宽，就生成多宽的逻辑地图；不封顶、不裁切，也不复制边缘像素。
+      const requestedWidth = Math.round(VIEWPORT_LOGICAL_HEIGHT * windowAspect);
+      // 完整物理窗口需要多宽，就生成多宽的逻辑地图。safeArea 只供关键 UI 避让，
+      // 不能再把它误当成地图裁切框，否则单侧刘海/系统区会留下黑条。
       const logicalWidth = Math.max(VIEWPORT_BASE_WIDTH, requestedWidth);
       logicalViewport = {
-        schemaVersion: 2,
-        strategy: 'extend-horizontal-exact-v2',
+        schemaVersion: 3,
+        strategy: 'extend-horizontal-full-window-v3',
+        layoutSource: 'full-window',
         baseWidth: VIEWPORT_BASE_WIDTH,
         logicalWidth,
         logicalHeight: VIEWPORT_LOGICAL_HEIGHT,
@@ -258,13 +269,19 @@
       };
     }
     const scale = Math.min(
-      safeWidth / logicalViewport.logicalWidth,
-      safeHeight / logicalViewport.logicalHeight
+      width / logicalViewport.logicalWidth,
+      height / logicalViewport.logicalHeight
     );
     const drawWidth = logicalViewport.logicalWidth * scale;
     const drawHeight = logicalViewport.logicalHeight * scale;
-    const left = safeLeft + (safeWidth - drawWidth) / 2;
-    const top = safeTop + (safeHeight - drawHeight) / 2;
+    const left = (width - drawWidth) / 2;
+    const top = (height - drawHeight) / 2;
+    const logicalSafeInsets = {
+      left: Math.max(0, safeLeft - left) * logicalViewport.logicalWidth / drawWidth,
+      right: Math.max(0, left + drawWidth - safeRight) * logicalViewport.logicalWidth / drawWidth,
+      top: Math.max(0, safeTop - top) * logicalViewport.logicalHeight / drawHeight,
+      bottom: Math.max(0, top + drawHeight - safeBottom) * logicalViewport.logicalHeight / drawHeight
+    };
 
     installOwnProperty(browserWindow, 'innerWidth', width);
     installOwnProperty(browserWindow, 'innerHeight', height);
@@ -279,7 +296,10 @@
     const viewportSnapshot = Object.assign({}, logicalViewport, {
       window: { width, height, dpr },
       safeArea: { left:safeLeft, top:safeTop, width:safeWidth, height:safeHeight },
+      safeInsets,
+      logicalSafeInsets,
       safeAspect:Number(safeAspect.toFixed(5)),
+      windowAspect:Number(windowAspect.toFixed(5)),
       displayRect: { left, top, width:drawWidth, height:drawHeight },
       gutters: {
         left:Math.max(0, left), right:Math.max(0, width-left-drawWidth),
@@ -291,7 +311,11 @@
     adapterLog('viewport', 'viewport-updated', {
       width, height, dpr,
       safeArea: { left:safeLeft, top:safeTop, width:safeWidth, height:safeHeight },
+      safeInsets,
+      logicalSafeInsets,
       safeAspect:Number(safeAspect.toFixed(5)),
+      windowAspect:Number(windowAspect.toFixed(5)),
+      layoutSource:logicalViewport.layoutSource,
       logicalWidth:logicalViewport.logicalWidth,
       logicalHeight:logicalViewport.logicalHeight,
       sidePad:logicalViewport.sidePad,
@@ -312,7 +336,8 @@
     const destWidth = Math.round(displayRect.width * dpr);
     const destHeight = Math.round(displayRect.height * dpr);
     screenContext.setTransform(1, 0, 0, 1, 0, 0);
-    // 仅安全区之外使用纯色衬底；主画面永远只等比绘制一次，不模糊、复制或拉长边缘。
+    // 窄于 16:9 的设备才可能出现等比留边；宽屏主画面覆盖完整物理窗口，
+    // 永远只绘制一次，不模糊、复制或拉长边缘。
     screenContext.fillStyle = '#2b3d42';
     screenContext.fillRect(0, 0, screenCanvas.width, screenCanvas.height);
     screenContext.drawImage(
@@ -1549,7 +1574,7 @@
   installOwnProperty(browserWindow, '__SMART_EGG_WECHAT_ENV__', wechatEnvironment);
 
   const wechatBridge = {
-    version: 187,
+    version: 188,
     screenCanvas,
     gameCanvas,
     getDisplayRect: function () { return Object.assign({}, displayRect); },

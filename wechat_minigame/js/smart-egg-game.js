@@ -27,9 +27,9 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 187;   // 跟 index.html 的 ?v=187 保持一致
+    const GAME_CODE_VERSION = 188;   // 跟 index.html 的 ?v=188 保持一致
     const GAME_TITLE = '怪奇之原';
-    // v186 小程序精确宽屏适配：保留创造秘境代码与本地存档，只关闭正式入口和运行路径。
+    // v188 小程序全窗口宽屏适配：保留创造秘境代码与本地存档，只关闭正式入口和运行路径。
     // 重新开放时需恢复此运行时开关，并同步恢复平台适配构建开关；旧存档不会丢失。
     const CREATOR_MODE_ENABLED = false;
     try {
@@ -55,11 +55,18 @@
     const BASE_WORLD_W = 1920, H = 1080;
     const WECHAT_VIEWPORT = window.__wxMiniGame && window.__SMART_EGG_VIEWPORT__
         ? window.__SMART_EGG_VIEWPORT__ : null;
-    // 只在微信小游戏中按安全区比例横向扩展逻辑地图；网页与 Android 继续保持 1920×1080。
+    // 只在微信小游戏中按完整物理窗口比例横向扩展逻辑地图；安全区仅避让关键按钮。
+    // 网页与 Android 继续保持 1920×1080。
     // 宽度只增加可见世界，不缩放人物、门、平台和操作按钮。
     const W = WECHAT_VIEWPORT && Number.isFinite(Number(WECHAT_VIEWPORT.logicalWidth))
         ? Math.max(BASE_WORLD_W, Number(WECHAT_VIEWPORT.logicalWidth)) : BASE_WORLD_W;
     const VIEWPORT_SIDE_PAD = Math.max(0, (W - BASE_WORLD_W) / 2);
+    const VIEWPORT_SAFE_INSETS = Object.freeze({
+        left: Math.max(0, Number(WECHAT_VIEWPORT && WECHAT_VIEWPORT.logicalSafeInsets && WECHAT_VIEWPORT.logicalSafeInsets.left) || 0),
+        right: Math.max(0, Number(WECHAT_VIEWPORT && WECHAT_VIEWPORT.logicalSafeInsets && WECHAT_VIEWPORT.logicalSafeInsets.right) || 0),
+        top: Math.max(0, Number(WECHAT_VIEWPORT && WECHAT_VIEWPORT.logicalSafeInsets && WECHAT_VIEWPORT.logicalSafeInsets.top) || 0),
+        bottom: Math.max(0, Number(WECHAT_VIEWPORT && WECHAT_VIEWPORT.logicalSafeInsets && WECHAT_VIEWPORT.logicalSafeInsets.bottom) || 0)
+    });
     const FANTASY_TITLES = [
         '风起之门', '云阶试炼', '锁语遗迹', '断崖双跃',
         '守门人的礼仪', '花之暗号', '逃走的门',
@@ -727,7 +734,7 @@
     }
     function _isSingleHorizontalMap(lv) {
         if (!lv || lv.infinite_horizontal) return false;
-        if (lv._adaptiveViewportApplied && lv._adaptiveViewportApplied.strategy === 'extend-horizontal-exact-v2') return true;
+        if (lv._adaptiveViewportApplied && lv._adaptiveViewportApplied.strategy === 'extend-horizontal-full-window-v3') return true;
         const e = _mapExtent(lv);
         const declaredWidth = Number(lv.world_size && lv.world_size.w) || BASE_WORLD_W;
         return e.left === 0 && e.right === 0 && declaredWidth <= BASE_WORLD_W + 1;
@@ -762,7 +769,7 @@
         if (!lv.world_size) lv.world_size={w:BASE_WORLD_W,h:H};
         lv.world_size.w=BASE_WORLD_W+VIEWPORT_SIDE_PAD*2;
         lv._adaptiveViewportApplied={
-            strategy:'extend-horizontal-exact-v2',baseWidth:BASE_WORLD_W,viewWidth:W,
+            strategy:'extend-horizontal-full-window-v3',baseWidth:BASE_WORLD_W,viewWidth:W,
             sidePad:VIEWPORT_SIDE_PAD,extendedGrounds:changed
         };
         return lv;
@@ -837,6 +844,7 @@
           platform:window.__wxMiniGame?'wechat-minigame':'web',
           strategy:WECHAT_VIEWPORT&&WECHAT_VIEWPORT.strategy||'fixed-1920',
           baseWidth:BASE_WORLD_W,viewWidth:W,viewHeight:H,sidePad:VIEWPORT_SIDE_PAD,
+          safeInsets:{...VIEWPORT_SAFE_INSETS},
           aspectMode:WECHAT_VIEWPORT&&WECHAT_VIEWPORT.aspectMode||'fixed',
           displayRect:window.__SMART_EGG_WECHAT_BRIDGE__&&window.__SMART_EGG_WECHAT_BRIDGE__.getDisplayRect
             ? window.__SMART_EGG_WECHAT_BRIDGE__.getDisplayRect():null,
@@ -2187,7 +2195,8 @@
         // === 图2：顶部去掉了状态栏！（没有20:38/信号/WiFi/电池）===
 
         // === 1. 吊牌：两根竖杆 + 路牌「第 1 关」===
-        const bx = 110, by = 30, bw = 205, bh = 82;
+        const bx = Math.max(110, VIEWPORT_SAFE_INSETS.left + 24);
+        const by = Math.max(30, VIEWPORT_SAFE_INSETS.top + 10), bw = 205, bh = 82;
         const br = 18;
         // 1a. 两根吊杆（从画面顶部y=0垂下来）
         ctx.save();
@@ -2219,7 +2228,7 @@
 
         // === 2. ? ↻ ⏸ 三个手绘不规则方按钮（盒子不变，用Canvas线条/形状自画3个图标→绝对居中+放大）===
         const bs = 96, bgap = 34;
-        const by2 = 26;
+        const by2 = Math.max(26, VIEWPORT_SAFE_INSETS.top + 6);
         const bx0 = bx + bw + 44;
         for (let i = 0; i < 3; i++) {
             const cx = bx0 + i * (bs + bgap);
@@ -2358,12 +2367,12 @@
 
     function drawBottomControls() {
         // 参考稿：底部三个黑色手绘大按键，白色粗线箭头；左右键分开，跳跃键靠右。
-        const by = H - 172;
+        const by = Math.min(H - 172, H - VIEWPORT_SAFE_INSETS.bottom - 40 - 132);
         const sz = 132;
         const r = 30;
-        const x1 = 190;
-        const x2 = 455;
-        const x3 = W - 190 - sz;
+        const x1 = Math.max(190, VIEWPORT_SAFE_INSETS.left + 40);
+        const x2 = x1 + 265;
+        const x3 = Math.min(W - 190 - sz, W - VIEWPORT_SAFE_INSETS.right - 40 - sz);
 
         function drawBigBtn(x, y, seed) {
             // 松散手绘外圈 + 黑色主体，贴近参考图的“涂黑按钮”质感。

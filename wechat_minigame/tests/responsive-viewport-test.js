@@ -134,13 +134,13 @@ const matrix = [
     mode:'horizontal-map-extension'
   },
   {
-    name:'safe-area-offset-dpr3',
+    name:'2403x1080-asymmetric-safe-area-dpr3',
     info:{
-      windowWidth:2400, windowHeight:1120, pixelRatio:3,
-      safeArea:{ left:30, top:20, right:2370, bottom:1100, width:2340, height:1080 }
+      windowWidth:2403, windowHeight:1080, pixelRatio:3,
+      safeArea:{ left:104, top:0, right:2403, bottom:1080, width:2299, height:1080 }
     },
-    logicalWidth:2340,
-    rect:{ left:30, top:20, width:2340, height:1080, right:2370, bottom:1100 },
+    logicalWidth:2403,
+    rect:{ left:0, top:0, width:2403, height:1080, right:2403, bottom:1080 },
     mode:'horizontal-map-extension'
   },
   {
@@ -162,7 +162,7 @@ const matrix = [
 for (const entry of matrix) {
   const runtime = bootAdapter(entry.info);
   const viewport = runtime.bridge.getViewport();
-  assert.strictEqual(runtime.bridge.version, 187, `${entry.name}: bridge version`);
+  assert.strictEqual(runtime.bridge.version, 188, `${entry.name}: bridge version`);
   assert.strictEqual(viewport.logicalWidth, entry.logicalWidth, `${entry.name}: logical width`);
   assert.strictEqual(viewport.logicalHeight, 1080, `${entry.name}: logical height`);
   assert.strictEqual(viewport.aspectMode, entry.mode, `${entry.name}: aspect mode`);
@@ -201,26 +201,33 @@ for (const entry of matrix) {
     operation.type === 'fillRect' && operation.fillStyle === '#2b3d42'
   ), `${entry.name}: outside-safe-area matte must be natural blue-grey, never pure black`);
 
-  if (entry.name === 'safe-area-offset-dpr3') {
-    assert.strictEqual(runtime.bridge.clientToLogical(10, 540), null,
-      'unsafe-area matte must not become an interactive region');
+  if (entry.name === '2403x1080-asymmetric-safe-area-dpr3') {
+    assert.deepStrictEqual(Object.fromEntries(['left','right','top','bottom']
+      .map(key => [key, viewport.safeInsets[key]])), { left:104, right:0, top:0, bottom:0 },
+      'safe area must remain available for UI avoidance without shrinking the map');
+    assert.deepStrictEqual(Object.fromEntries(['left','right','top','bottom']
+      .map(key => [key, viewport.logicalSafeInsets[key]])), { left:104, right:0, top:0, bottom:0 },
+      'safe insets must also be exposed in logical coordinates for game UI placement');
+    assert.strictEqual(viewport.layoutSource, 'full-window',
+      'the full physical window, not safeArea, must determine the visible map width');
+    assert.strictEqual(viewport.gutters.left, 0,
+      'the asymmetric left safe area must not become a black render gutter');
+    assert.ok(runtime.bridge.clientToLogical(10, 540),
+      'rendered map inside the left safe inset must stay part of the logical world');
     const forwarded = { touchstart:[], touchmove:[], touchend:[], touchcancel:[] };
     for (const type of Object.keys(forwarded)) {
       runtime.gameCanvas.addEventListener(type, event => forwarded[type].push(event));
     }
     const outsideStart = { identifier:41, clientX:10, clientY:540 };
     runtime.callbacks.touchstart({ touches:[outsideStart], changedTouches:[outsideStart] });
-    assert.strictEqual(forwarded.touchstart.length, 0,
-      'a touch beginning outside the safe display rect must never reach gameplay');
-    assert.ok(runtime.gameWindow.__SMART_EGG_ADAPTER_LOG_CONFIG__
-      .find('viewport', 'touch-start-outside-display').length > 0,
-    'a rejected gutter touch must leave an independently filterable viewport diagnostic');
+    assert.strictEqual(forwarded.touchstart.length, 1,
+      'a touch in the full rendered map must reach gameplay even when safeArea starts farther right');
 
     const insideStart = { identifier:42, clientX:100, clientY:540 };
     runtime.callbacks.touchstart({ touches:[insideStart], changedTouches:[insideStart] });
-    assert.strictEqual(forwarded.touchstart.length, 1,
+    assert.strictEqual(forwarded.touchstart.length, 2,
       'a touch beginning inside the real game rect must reach gameplay');
-    const movedOutside = { identifier:42, clientX:10, clientY:540 };
+    const movedOutside = { identifier:42, clientX:-10, clientY:540 };
     runtime.callbacks.touchmove({ touches:[movedOutside], changedTouches:[movedOutside] });
     runtime.callbacks.touchend({ touches:[], changedTouches:[movedOutside] });
     assert.strictEqual(forwarded.touchmove.length, 1,
@@ -232,7 +239,7 @@ for (const entry of matrix) {
       'a released identifier must no longer be forwarded');
 
     const acceptedA = { identifier:51, clientX:700, clientY:600 };
-    const rejectedB = { identifier:52, clientX:10, clientY:600 };
+    const rejectedB = { identifier:52, clientX:-10, clientY:600 };
     runtime.callbacks.touchstart({ touches:[acceptedA], changedTouches:[acceptedA] });
     const startsBeforeRejectedSecondFinger = forwarded.touchstart.length;
     runtime.callbacks.touchstart({ touches:[acceptedA,rejectedB], changedTouches:[rejectedB] });

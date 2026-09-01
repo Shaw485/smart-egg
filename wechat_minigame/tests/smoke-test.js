@@ -105,10 +105,10 @@ const readonlyHostRequestAnimationFrame = function () { return 987; };
 const readonlyHostAlert = function () {};
 const readonlyHostAudioContext = function HostAudioContext() {};
 const windowInfoFixture = {
-  windowWidth: 2400,
+  windowWidth: 2403,
   windowHeight: 1080,
   pixelRatio: 1,
-  safeArea: { left:0, top:0, right:2400, bottom:1080, width:2400, height:1080 }
+  safeArea: { left:104, top:0, right:2403, bottom:1080, width:2299, height:1080 }
 };
 // 微信基础库 3.17.x 的 Window 对象以只读 getter 暴露这两个别名。
 // 兼容层必须复用它们，不能在严格模式里直接赋值。
@@ -347,11 +347,11 @@ setTimeout(async () => {
   assert.notStrictEqual(gameWindow, global, 'game browser shims must live on an isolated compatibility window');
   assert.ok(gameWindow.document.getElementById('game-canvas'));
   assert.strictEqual(gameWindow.navigator.userAgent, 'WeChatMiniGame/test');
-  assert.strictEqual(global.__SMART_EGG_WECHAT_BRIDGE__.version, 187);
+  assert.strictEqual(global.__SMART_EGG_WECHAT_BRIDGE__.version, 188);
   assert.strictEqual(Object.keys(global.__SMART_EGG_LEVELS__).length, 20);
   assert.deepStrictEqual(Object.keys(global.__SMART_EGG_LEVELS__).map(Number), Array.from({ length:20 }, (_, index) => index));
   assert.ok(gameWindow.__debug, 'game debug API should be installed');
-  assert.strictEqual(gameWindow.__debug.VERSION, 187);
+  assert.strictEqual(gameWindow.__debug.VERSION, 188);
   assert.strictEqual(gameWindow.__debug.getState(), 'menu');
   assert.deepStrictEqual(gameWindow.__debug.getFeatures(), { creatorMode:{ enabled:false, localData:'preserved' } });
   assert.strictEqual(gameWindow.__debug.setState('creatorList'), 'menu', 'disabled creator route must be blocked');
@@ -372,27 +372,29 @@ setTimeout(async () => {
     backingSize:viewport.backingSize
   }, {
     baseWidth:1920,
-    viewWidth:2400,
+    viewWidth:2403,
     viewHeight:1080,
-    sidePad:240,
-    strategy:'extend-horizontal-exact-v2',
-    backingSize:{width:1680,height:756,renderScale:0.7}
-  }, '20:9 微信视口必须横向扩图且 Canvas 继续等比缩放');
+    sidePad:241.5,
+    strategy:'extend-horizontal-full-window-v3',
+    backingSize:{width:1682,height:756,renderScale:0.7}
+  }, '2403×1080 非对称安全区必须按完整窗口横向扩图且 Canvas 继续等比缩放');
+  assert.deepStrictEqual(viewport.safeInsets, { left:104, right:0, top:0, bottom:0 },
+    '安全区只避让关键 UI，不得缩短真实地图');
   assert.deepStrictEqual(global.__SMART_EGG_WECHAT_BRIDGE__.getDisplayRect(), {
-    left:0, top:0, width:2400, height:1080, right:2400, bottom:1080
-  }, '20:9 安全区应被完整地图填满，不应保留 16:9 黑边');
+    left:0, top:0, width:2403, height:1080, right:2403, bottom:1080
+  }, '2403×1080 完整窗口应被真实地图填满，左侧 104 像素不得成为黑边');
   const level1Viewport = gameWindow.__debug.inspectLevelViewport(global.__SMART_EGG_LEVELS__[0]);
-  assert.deepStrictEqual(level1Viewport.after.grounds[0], { left:-240, right:2160, w:2400, h:440 },
+  assert.deepStrictEqual(level1Viewport.after.grounds[0], { left:-241.5, right:2161.5, w:2403, h:440 },
     '单屏完整地面必须向两侧扩展真实碰撞区域');
   assert.deepStrictEqual(level1Viewport.before.spawn, level1Viewport.after.spawn,
     '扩宽地图不得移动或缩放人物出生点');
   assert.deepStrictEqual(level1Viewport.before.doors, level1Viewport.after.doors,
     '扩宽地图不得移动或缩放门');
-  assert.strictEqual(level1Viewport.cameraStart, -240,
+  assert.strictEqual(level1Viewport.cameraStart, -241.5,
     '宽屏单屏关首帧相机必须直接对齐扩展后的左边缘');
   const cliffViewport = gameWindow.__debug.inspectLevelViewport(global.__SMART_EGG_LEVELS__[3]);
   assert.deepStrictEqual(cliffViewport.after.grounds.map(ground => [ground.left, ground.right]), [
-    [-240,600], [1080,2160]
+    [-241.5,600], [1080,2161.5]
   ], '断崖只扩外边，内部 600–1080 坑宽必须保持不变');
   const longViewport = gameWindow.__debug.inspectLevelViewport(global.__SMART_EGG_LEVELS__[11]);
   assert.strictEqual(longViewport.bounds.maxX, 5760,
@@ -440,9 +442,12 @@ setTimeout(async () => {
     && (index === 0 || entry.seq > entries[index - 1].seq)
   ), 'adapter diagnostics must carry one session id and increasing sequence numbers');
   const viewportLogs = adapterLogControl.find('viewport', 'viewport-updated');
-  assert.ok(viewportLogs.some(entry => entry.context.logicalWidth === 2400
+  assert.ok(viewportLogs.some(entry => entry.context.logicalWidth === 2403
     && entry.context.logicalHeight === 1080
-    && entry.context.sidePad === 240
+    && entry.context.sidePad === 241.5
+    && entry.context.layoutSource === 'full-window'
+    && entry.context.safeInsets.left === 104
+    && entry.context.gutters.left === 0
     && entry.context.aspectMode === 'horizontal-map-extension'),
   'viewport module must independently diagnose safe area, logical size and extension strategy');
   assert.deepStrictEqual(adapterLogControl.redact({ nested:{ secret:'hide', cookie:'hide', safe:3 } }),
@@ -755,7 +760,7 @@ setTimeout(async () => {
   assert.strictEqual(clipboardWrites, clipboardWritesBeforeFinalExport + 1,
     '当前这次日志导出必须完成微信剪贴板后备');
   assert.ok(lastFileWrite && lastFileWrite.encoding === 'utf8'
-    && /smart-egg-log-v187-/.test(lastFileWrite.filePath),
+    && /smart-egg-log-v188-/.test(lastFileWrite.filePath),
   '当前这次日志必须写入微信用户目录');
   const exportedReport = JSON.parse(lastFileWrite.data);
   assert.deepStrictEqual(exportedReport.previousFault, previousFaultFixture,
@@ -817,6 +822,6 @@ setTimeout(async () => {
   assert.ok(gameWindow.__SMART_EGG_ADAPTER_DIAGNOSTICS__[0].seq > sequenceBeforeRetentionProbe,
     'adapter diagnostics ring must evict old entries rather than growing without bound');
   Object.fromEntries = nativeObjectFromEntries;
-  console.log('微信小游戏冒烟测试通过：v187连续背景音乐单实例循环、动作音并行、精确宽屏、20关与故障恢复日志均正常。');
+  console.log('微信小游戏冒烟测试通过：v188连续背景音乐、完整窗口宽地图、安全区 UI 避让、20关与故障恢复日志均正常。');
   process.exit(0);
 }, 80);

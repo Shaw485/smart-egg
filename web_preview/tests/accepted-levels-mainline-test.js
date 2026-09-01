@@ -86,7 +86,7 @@ assert.match(game, /for \(const d of doors\) \{\s+const dx = d\.x - d\.w \/ 2, d
   '门跳跃的通关距离必须在实际判定循环内计算，不能引用前一轮循环的局部变量');
 assert.match(game, /ground_swap/);
 assert.match(game, /erase_wall/);
-assert.match(index, /accepted-mechanics\.js\?v=187/);
+assert.match(index, /accepted-mechanics\.js\?v=188/);
 assert.match(game, /function _shrinkTunnelGeometry/);
 assert.match(game, /shrink-tunnel-config/);
 
