@@ -6,9 +6,9 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 188;   // 跟 index.html 的 ?v=188 保持一致
+    const GAME_CODE_VERSION = 189;   // 跟 index.html 的 ?v=189 保持一致
     const GAME_TITLE = '怪奇之原';
-    // v188 小程序全窗口宽屏适配：保留创造秘境代码与本地存档，只关闭正式入口和运行路径。
+    // v189 真机背景音乐启动修复：保留创造秘境代码与本地存档，只关闭正式入口和运行路径。
     // 重新开放时需恢复此运行时开关，并同步恢复平台适配构建开关；旧存档不会丢失。
     const CREATOR_MODE_ENABLED = false;
     try {
@@ -1562,7 +1562,7 @@
     let _audioFailureCount = 0;
     let _lastAudioFailure = null;
     const BGM_ASSET = 'assets/bgm-wilds-ambient.wav';
-    const BGM_VOLUME = 0.42;
+    const BGM_VOLUME = 0.62;
     const BGM_MODE = 'looped-asset';
     let _bgmAudio = null;
     let _bgmRequested = false;

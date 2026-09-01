@@ -79,7 +79,7 @@ assert.ok(nonZeroSamples > 0 && peak > 0 && rms > 0,
   '背景音乐 PCM 数据不能是全静音');
 
 const game = fs.readFileSync(gamePath, 'utf8');
-assert.match(game, /const GAME_CODE_VERSION = 188/, 'Web 正式代码版本必须升级为 v188');
+assert.match(game, /const GAME_CODE_VERSION = 189/, 'Web 正式代码版本必须升级为 v189');
 
 const bgmAssetMatches = game.match(/assets\/[A-Za-z0-9._/-]*bgm[A-Za-z0-9._/-]*\.(?:wav|mp3|ogg|m4a)/gi) || [];
 const uniqueBgmAssets = [...new Set(bgmAssetMatches)];

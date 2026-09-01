@@ -15,8 +15,8 @@ assert.match(index, /id="changelog-open"[^>]*>改动记录<\/button>/);
 assert.match(index, /id="changelog-open"[^>]*aria-controls="changelog-dialog"[^>]*aria-expanded="false"/);
 assert.match(index, /id="changelog-dialog"[^>]*role="dialog"[^>]*aria-modal="true"/);
 assert.match(index, /id="changelog-search"[^>]*type="search"/);
-assert.match(index, /changelog\.js\?v=188/);
-assert.ok(index.indexOf('game.js?v=188') < index.indexOf('changelog.js?v=188'),
+assert.match(index, /changelog\.js\?v=189/);
+assert.ok(index.indexOf('game.js?v=189') < index.indexOf('changelog.js?v=189'),
   '改动记录入口应在游戏运行时之后初始化，以便仅在首页显示');
 
 assert.match(style, /\.changelog-dialog\s*\{/);
@@ -42,9 +42,9 @@ assert.doesNotMatch(script, /context:\s*\{[^}]*query:/s,
   '搜索诊断只能记录长度和结果数，不能保存用户输入的原文');
 
 assert.match(notebook, /^## 网站改动记录同步 — 2026-09-01/m);
-assert.match(notebook, /^## Web \/ 微信小游戏 v188/m);
-assert.ok(notebook.indexOf('## Web / 微信小游戏 v188') < notebook.indexOf('## Web / 微信小游戏 v187'),
-  'v188 正式记录必须排在 v187 之前');
+assert.match(notebook, /^## Web \/ 微信小游戏 v189/m);
+assert.ok(notebook.indexOf('## Web / 微信小游戏 v189') < notebook.indexOf('## Web / 微信小游戏 v188'),
+  'v189 正式记录必须排在 v188 之前');
 assert.ok(notebook.indexOf('## 网站改动记录同步') < notebook.indexOf('## Web / 微信小游戏 v186'),
   '网站同步功能本身也必须出现在网站读取的最新记录中');
 assert.ok(notebook.indexOf('## Web / 微信小游戏 v186') < notebook.indexOf('## Web / 微信小游戏 v185'),

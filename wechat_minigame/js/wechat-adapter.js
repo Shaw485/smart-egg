@@ -1,7 +1,7 @@
 'use strict';
 
 /*
- * 怪奇之原微信小游戏兼容层 v188
+ * 怪奇之原微信小游戏兼容层 v189
  *
  * 游戏本体以 1080 高的逻辑 Canvas 绘制；微信宽屏会横向扩展地图而不拉伸元素。本文件把微信小游戏的
  * Canvas、触摸、存储、音频、生命周期、键盘和日志文件接口映射成游戏
@@ -203,7 +203,7 @@
     redact: function (context) { return redactAdapterContext(context, 0); }
   });
   adapterLog('runtime', 'adapter-session-start', {
-    version: 188,
+    version: 189,
     creatorMode: CREATOR_MODE_ENABLED,
     retention: { type: 'memory-ring', maxEntries: ADAPTER_LOG_MAX },
     productionDefaults: mapEntriesToObject(adapterLogModules)
@@ -654,8 +654,8 @@
   // v187 背景音乐：唯一、长期、连续循环的 InnerAudio 实例。旧版逐音符
   // Oscillator 会产生每 380ms 一次的点状声，背景音乐绝不再经过该短音链路。
   const BGM_ASSET = 'assets/bgm-wilds-ambient.wav';
-  const BGM_VOLUME = 0.42;
-  const BGM_LOAD_WATCHDOG_MS = 5000;
+  const BGM_VOLUME = 0.62;
+  const BGM_LOAD_WATCHDOG_MS = 10000;
   const BGM_PLAY_WATCHDOG_MS = 1800;
   const backgroundMusic = (function createBackgroundMusicController() {
     let audio = null;
@@ -716,15 +716,20 @@
       playWatchdog = setTimeout(function () {
         playWatchdog = 0;
         if (attemptId !== playAttemptId || !playPending || playing || !audio) return;
+        const stalled = audio;
+        audio = null;
+        playAttemptId++;
         playPending = false;
-        state = ready ? 'ready' : 'waiting-ready';
+        ready = false;
+        playing = false;
+        state = 'play-timeout';
         lastError = 'play-start-timeout';
+        releaseAudioInstance(stalled, true);
         logBgm('bgm-play-timeout', {
           reason,
           attemptId,
           watchdogMs:BGM_PLAY_WATCHDOG_MS,
-          ready,
-          retry:'next-interaction-or-lifecycle-resume'
+          retry:'rebuild-on-next-interaction-or-lifecycle-resume'
         }, 'warn');
       }, BGM_PLAY_WATCHDOG_MS);
     }
@@ -783,7 +788,12 @@
         logBgm('bgm-late-play-ignored', { requested, lifecyclePaused, state }, 'warn');
         return;
       }
+      // 部分微信真机会正常开始播放长本地音轨，却不派发 canplay。
+      // onPlay 本身就是比 canplay 更强的就绪证据，必须同时解除加载看门狗，
+      // 否则已经发声的实例仍会在超时后被误销毁。
+      clearLoadWatchdog();
       clearPlayWatchdog();
+      ready = true;
       playing = true;
       playPending = false;
       state = 'playing';
@@ -809,6 +819,9 @@
       playPending = false;
       state = 'ended';
       logBgm('bgm-ended', { requested }, 'warn');
+      // loop=true 理论上不会进入 ended；少数设备若仍派发 ended，显式补播，
+      // 避免背景音乐只响一轮后永久消失。
+      if (requested && !lifecyclePaused && audio) requestPlay('ended-loop-fallback');
     }
     function handleStop() {
       clearPlayWatchdog();
@@ -853,10 +866,19 @@
           }).catch(function (error) {
             if (attemptId !== playAttemptId || audio !== instance) return;
             clearPlayWatchdog();
+            const rejected = audio;
+            audio = null;
+            playAttemptId++;
             playPending = false;
+            playing = false;
+            ready = false;
             state = 'blocked';
             lastError = audioErrorMessage(error);
-            logBgm('bgm-play-rejected', { reason, message:lastError }, 'warn');
+            releaseAudioInstance(rejected, true);
+            logBgm('bgm-play-rejected', {
+              reason, message:lastError,
+              retry:'rebuild-on-next-interaction-or-lifecycle-resume'
+            }, 'warn');
           });
         } else if (typeof audio.onPlay !== 'function') {
           handlePlay();
@@ -884,7 +906,10 @@
         if (!instance) throw new Error('createInnerAudioContext returned no context');
         audio = instance;
         createCount++;
-        instance.autoplay = false;
+        // 控制器只会在真实触摸/按键后创建，因此这里的 autoplay 不是冷启动
+        // 自动播放。它让真机在设置本地长音轨 src 时主动发起解码/播放；若设备
+        // 忽略 autoplay，后续 canplay 仍会走 requestPlay 作为第二条启动路径。
+        instance.autoplay = true;
         instance.loop = true;
         instance.obeyMuteSwitch = false;
         instance.volume = BGM_VOLUME;
@@ -908,7 +933,10 @@
         if (typeof instance.onStop === 'function') instance.onStop(handlers.stop);
         if (typeof instance.onError === 'function') instance.onError(handlers.error);
         state = 'loading';
-        logBgm('bgm-instance-created', { createCount, loop:true, volume:BGM_VOLUME });
+        logBgm('bgm-instance-created', {
+          createCount, loop:true, volume:BGM_VOLUME,
+          startupStrategy:'interaction-autoplay-with-canplay-fallback'
+        });
         armLoadWatchdog(instance);
         instance.src = BGM_ASSET;
         if (typeof instance.onCanplay !== 'function') {
@@ -952,7 +980,20 @@
       playing = false;
       playPending = false;
       state = 'paused';
+      if (!ready) {
+        const loading = audio;
+        audio = null;
+        playAttemptId++;
+        clearLoadWatchdog();
+        clearPlayWatchdog();
+        releaseAudioInstance(loading, true);
+        logBgm('bgm-loading-cancelled-for-pause', {
+          reason:reason || 'pause', retry:'rebuild-on-resume'
+        });
+        return true;
+      }
       try {
+        audio.autoplay = false;
         // 先落本地状态，避免极少数基础库漏发 onPause 后恢复逻辑误以为仍在播放。
         audio.pause();
         if (typeof audio.onPause !== 'function') handlePause();
@@ -1361,6 +1402,18 @@
   }
   wx.onHide(function () { setVisibility(true); });
   wx.onShow(function () { setVisibility(false); });
+  if (typeof wx.onAudioInterruptionBegin === 'function') {
+    wx.onAudioInterruptionBegin(function () {
+      adapterLog('audio-core', 'audio-interruption-begin', { action:'pause-bgm' }, 'warn');
+      backgroundMusic.pause('audio-interruption-begin');
+    });
+  }
+  if (typeof wx.onAudioInterruptionEnd === 'function') {
+    wx.onAudioInterruptionEnd(function () {
+      adapterLog('audio-core', 'audio-interruption-end', { action:'resume-bgm' });
+      backgroundMusic.resume('audio-interruption-end');
+    });
+  }
   if (typeof wx.onWindowResize === 'function') {
     wx.onWindowResize(function () {
       updateViewport();
@@ -1574,7 +1627,7 @@
   installOwnProperty(browserWindow, '__SMART_EGG_WECHAT_ENV__', wechatEnvironment);
 
   const wechatBridge = {
-    version: 188,
+    version: 189,
     screenCanvas,
     gameCanvas,
     getDisplayRect: function () { return Object.assign({}, displayRect); },
