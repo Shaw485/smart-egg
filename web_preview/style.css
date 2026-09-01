@@ -63,3 +63,83 @@ body.android-app #hint-bar { display: none; }
 }
 .code-actions button:active { transform: translateY(2px); background: #eee; }
 body.android-app .code-dialog { align-items: flex-start; padding-top: 8vh; }
+
+/* 网页版改动记录：内容直接读取项目根目录的《改动记事本》，不维护第二份手抄数据。 */
+.changelog-open {
+    position: fixed; left: 18px; top: 18px; z-index: 240;
+    min-width: 132px; padding: 11px 18px;
+    border: 3px solid #17343a; border-radius: 18px;
+    background: #fff0bd; color: #17343a;
+    box-shadow: 4px 5px 0 rgba(23,52,58,.26);
+    font: 800 18px/1.1 -apple-system, "PingFang SC", sans-serif;
+    cursor: pointer;
+}
+.changelog-open:hover { background: #f5d978; transform: translateY(-1px); }
+.changelog-open:active { transform: translateY(2px); box-shadow: 2px 2px 0 rgba(23,52,58,.26); }
+.changelog-open[hidden], .changelog-dialog[hidden] { display: none; }
+.changelog-dialog {
+    position: fixed; inset: 0; z-index: 500;
+    display: flex; align-items: center; justify-content: center;
+    padding: 22px; background: rgba(25,24,34,.76);
+}
+.changelog-card {
+    width: min(980px, 95vw); height: min(880px, 90vh);
+    display: grid; grid-template-rows: auto auto auto minmax(0,1fr);
+    overflow: hidden; border: 5px solid #17343a; border-radius: 28px;
+    background: #fff8dc; color: #17343a;
+    box-shadow: 12px 14px 0 rgba(0,0,0,.24);
+}
+.changelog-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 22px 26px 16px; border-bottom: 3px solid rgba(23,52,58,.18);
+    background: linear-gradient(135deg, #b8e0df, #f5d978);
+}
+.changelog-kicker { margin-bottom: 3px; font-size: 14px; font-weight: 800; letter-spacing: .2em; opacity: .72; }
+.changelog-header h1 { font-size: 36px; line-height: 1; }
+.changelog-close {
+    width: 52px; height: 52px; border: 3px solid #17343a; border-radius: 17px;
+    background: #fff0bd; color: #17343a; font-size: 38px; font-weight: 800; line-height: 42px;
+    cursor: pointer;
+}
+.changelog-tools { display: flex; gap: 12px; padding: 16px 24px 8px; }
+#changelog-search {
+    min-width: 0; flex: 1; padding: 12px 15px;
+    border: 3px solid #17343a; border-radius: 14px;
+    background: #fff; color: #17343a; font: 17px/1.2 -apple-system, "PingFang SC", sans-serif;
+}
+#changelog-refresh {
+    padding: 10px 18px; border: 3px solid #17343a; border-radius: 14px;
+    background: #f5d978; color: #17343a; font-size: 16px; font-weight: 800; cursor: pointer;
+}
+.changelog-status { min-height: 32px; padding: 4px 26px 10px; color: rgba(23,52,58,.72); font-size: 14px; }
+.changelog-status.is-error { color: #a92f36; font-weight: 700; }
+.changelog-content { overflow: auto; padding: 4px 24px 28px; overscroll-behavior: contain; }
+.changelog-intro { margin-bottom: 18px; padding: 14px 18px; border-radius: 14px; background: rgba(184,224,223,.34); }
+.release-entry {
+    margin: 0 0 18px; padding: 18px 20px;
+    border: 3px solid rgba(23,52,58,.82); border-radius: 18px; background: rgba(255,255,255,.76);
+}
+.release-entry:first-of-type { border-color: #b54043; box-shadow: inset 6px 0 0 #f5d978; }
+.release-entry h2 { margin-bottom: 11px; font-size: 24px; line-height: 1.28; }
+.release-entry h3 { margin: 16px 0 7px; font-size: 19px; }
+.changelog-content p, .changelog-content blockquote { margin: 7px 0; font-size: 16px; line-height: 1.65; }
+.changelog-content blockquote { padding: 9px 13px; border-left: 5px solid #2d7770; background: rgba(45,119,112,.09); }
+.changelog-content ul { margin: 7px 0 4px 1.25em; }
+.changelog-content li { margin: 7px 0; font-size: 16px; line-height: 1.55; }
+.changelog-content code { padding: 2px 6px; border-radius: 6px; background: rgba(23,52,58,.1); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.changelog-empty, .changelog-load-error { padding: 40px 18px; text-align: center; font-size: 17px; line-height: 1.7; }
+.changelog-load-error a { color: #1d6668; font-weight: 800; }
+body.changelog-visible { overflow: hidden; }
+body.android-app .changelog-open, body.android-app .changelog-dialog { display: none !important; }
+
+@media (max-width: 760px), (max-height: 620px) {
+    .changelog-dialog { padding: 8px; }
+    .changelog-card { width: 98vw; height: 96vh; border-radius: 18px; }
+    .changelog-header { padding: 14px 16px 11px; }
+    .changelog-header h1 { font-size: 28px; }
+    .changelog-tools { padding: 12px 14px 6px; }
+    .changelog-status { padding: 3px 16px 7px; }
+    .changelog-content { padding: 3px 14px 20px; }
+    .release-entry { padding: 14px; }
+    .changelog-open { left: 10px; top: 10px; min-width: 108px; padding: 9px 12px; font-size: 15px; }
+}

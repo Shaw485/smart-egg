@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>怪奇之原 · F4 旷野版</title>
-    <link rel="stylesheet" href="style.css?v=186">
+    <link rel="stylesheet" href="style.css?v=186.1">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
@@ -12,6 +12,24 @@
 <body class="web-mode">
     <div id="game-wrapper">
         <canvas id="game-canvas"></canvas>
+        <button id="changelog-open" class="changelog-open" type="button" aria-haspopup="dialog" aria-controls="changelog-dialog" aria-expanded="false" hidden>改动记录</button>
+        <section id="changelog-dialog" class="changelog-dialog" role="dialog" aria-modal="true" aria-labelledby="changelog-title" hidden>
+            <div class="changelog-card">
+                <header class="changelog-header">
+                    <div>
+                        <div class="changelog-kicker">怪奇之原</div>
+                        <h1 id="changelog-title">改动记录</h1>
+                    </div>
+                    <button id="changelog-close" class="changelog-close" type="button" aria-label="关闭改动记录">×</button>
+                </header>
+                <div class="changelog-tools">
+                    <input id="changelog-search" type="search" inputmode="search" autocomplete="off" placeholder="搜索版本、关卡或功能">
+                    <button id="changelog-refresh" type="button">刷新记录</button>
+                </div>
+                <div id="changelog-status" class="changelog-status" aria-live="polite">准备加载改动记录…</div>
+                <div id="changelog-content" class="changelog-content" tabindex="0"></div>
+            </div>
+        </section>
         <div id="level-code-dialog" class="code-dialog" hidden>
             <div class="code-card">
                 <div class="code-title">输入关卡码</div>
@@ -34,6 +52,7 @@
     <script src="accepted-mechanics.js?v=186"></script>
     <script src="physics-collision.js?v=186"></script>
     <script src="game.js?v=186"></script>
+    <script src="changelog.js?v=186.1"></script>
 <!-- 注：每次 game.js 升级都改 v 参数（?v=xxx）强制浏览器刷新缓存，避免用户看到旧代码导致死循环 -->
 </body>
 </html>
