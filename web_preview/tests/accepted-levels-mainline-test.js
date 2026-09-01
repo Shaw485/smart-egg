@@ -48,8 +48,8 @@ assert.strictEqual(mechanics.validateInkStroke(validStroke).valid, true, '保留
 assert.strictEqual(mechanics.validateInkStroke(validStroke.slice(0, 3)).valid, false, '通用手势工具仍须拒绝未完成路径');
 const shrinkLevel = bundle[14];
 const tunnel = shrinkLevel.shrink_tunnel;
-const tunnelLeft = tunnel.x + 10;
-const tunnelRight = tunnel.x + tunnel.w - 10;
+const tunnelLeft = tunnel.x;
+const tunnelRight = tunnel.x + tunnel.w;
 const tunnelClearance = tunnel.ground_top - (tunnel.y + tunnel.h);
 assert.ok(tunnel.w > 630, '第15关墙体必须比旧版更宽');
 assert.ok(tunnel.h <= 120, '第15关墙体本身不得高于未缩小人物的碰撞高度');
@@ -59,6 +59,77 @@ assert.strictEqual(mechanics.sideBlock(tunnelLeft-50, tunnelLeft+10, 40, tunnelL
   '未缩小时必须被低通道阻挡');
 assert.strictEqual(mechanics.sideBlock(tunnelLeft-50, tunnelLeft+10, 40, tunnelLeft, tunnelRight, false).blocked, false,
   '缩小后必须能通过低通道');
+assert.strictEqual(mechanics.sideBlock(tunnelLeft-30, tunnelLeft-15, 40*.62, tunnelLeft, tunnelRight, true, true).blocked, true,
+  '缩小人物跳起后与墙体垂直重叠时，必须被墙侧挡住，不能斜向穿过墙底');
+const embeddedFullPlayer = mechanics.sideBlock(820, 820, 40, tunnelLeft, tunnelRight, true, true);
+assert.strictEqual(embeddedFullPlayer.blocked, true,
+  '未缩小人物即使因旧帧状态进入墙体范围，也必须被实体墙推出，不能继续穿过');
+assert.strictEqual(embeddedFullPlayer.side, 'left-overlap');
+const playerStandingOnTunnel = mechanics.sideBlock(900, 900, 40, tunnelLeft, tunnelRight, true, false);
+assert.strictEqual(playerStandingOnTunnel.blocked, false,
+  '人物站在墙顶时只有边界接触，下一帧不能被横向推出');
+const smallHalfH = 60 * .62;
+const smallCenterOffsetY = 60 - smallHalfH;
+const tunnelBottomHit = mechanics.solidVerticalBlock({
+  previousY:810+smallCenterOffsetY, nextY:720+smallCenterOffsetY,
+  centerX:900, halfW:40*.62, halfH:smallHalfH,
+  velocityY:-900, obstacle:{x:tunnel.x,y:tunnel.y,w:tunnel.w,h:tunnel.h}
+});
+assert.strictEqual(tunnelBottomHit.blocked, true, '缩小人物从通道内起跳也必须撞到墙底，不能穿模');
+assert.strictEqual(tunnelBottomHit.side, 'bottom');
+assert.strictEqual(tunnelBottomHit.y-smallHalfH, tunnel.y+tunnel.h,
+  '缩小人物撞墙底后的物理头顶必须贴合墙底，不得悬空或压入墙体');
+const tunnelTopLanding = mechanics.solidVerticalBlock({
+  previousY:580, nextY:620, centerX:900, halfW:40, halfH:60,
+  velocityY:700, obstacle:{x:tunnel.x,y:tunnel.y,w:tunnel.w,h:tunnel.h}
+});
+assert.strictEqual(tunnelTopLanding.blocked, true, '人物从上方落下必须站在墙顶，墙要进入实体碰撞层');
+assert.strictEqual(tunnelTopLanding.side, 'top');
+assert.strictEqual(tunnelTopLanding.onGround, true);
+// 集成复现：缩小人物从墙左侧同时右移和起跳。即使头顶先越过墙底、X 在后续帧
+// 才进入墙体范围，侧面碰撞也必须在身体垂直重叠时拦住，不能斜向钻进实体墙。
+{
+  const dt = 1 / 60;
+  const halfW = 40 * .62;
+  const halfH = 60 * .62;
+  const offsetY = 60 - halfH;
+  let x = tunnelLeft - 40;
+  let y = 810;
+  let vy = -1080;
+  let penetrated = false;
+  for (let frame = 0; frame < 16; frame += 1) {
+    const previousX = x;
+    const previousCenterY = y + offsetY;
+    const shapeTop = previousCenterY - halfH;
+    const shapeBottom = previousCenterY + halfH;
+    const verticalOverlap = shapeBottom > tunnel.y && shapeTop < tunnel.y + tunnel.h;
+    const horizontal = mechanics.sideBlock(
+      previousX, previousX + 300 * dt, halfW,
+      tunnelLeft, tunnelRight, verticalOverlap, verticalOverlap
+    );
+    x = horizontal.x;
+    const nextY = y + vy * dt;
+    const vertical = mechanics.solidVerticalBlock({
+      previousY:previousCenterY,
+      nextY:nextY+offsetY,
+      centerX:x,
+      halfW,
+      halfH,
+      velocityY:vy,
+      obstacle:{x:tunnel.x,y:tunnel.y,w:tunnel.w,h:tunnel.h}
+    });
+    y = vertical.blocked ? vertical.y-offsetY : nextY;
+    if (vertical.blocked) vy = 0;
+    else vy += 2400 * dt;
+    const currentTop = y + offsetY - halfH;
+    const currentBottom = y + offsetY + halfH;
+    const overlapsWall = x + halfW > tunnelLeft && x - halfW < tunnelRight
+      && currentBottom > tunnel.y && currentTop < tunnel.y + tunnel.h;
+    if (overlapsWall) penetrated = true;
+  }
+  assert.strictEqual(penetrated, false,
+    '缩小人物斜向起跳的逐帧轨迹不能进入墙体实体范围');
+}
 assert.strictEqual(mechanics.eraseProgress(.9, 100), 1, '擦除进度必须封顶为1');
 const migratedProgress = mechanics.migrateProgressForRemovedLevel({
   unlocked: 17,
@@ -86,9 +157,20 @@ assert.match(game, /for \(const d of doors\) \{\s+const dx = d\.x - d\.w \/ 2, d
   '门跳跃的通关距离必须在实际判定循环内计算，不能引用前一轮循环的局部变量');
 assert.match(game, /ground_swap/);
 assert.match(game, /erase_wall/);
-assert.match(index, /accepted-mechanics\.js\?v=189/);
+assert.match(index, /accepted-mechanics\.js\?v=190/);
 assert.match(game, /function _shrinkTunnelGeometry/);
 assert.match(game, /shrink-tunnel-config/);
+assert.match(game, /solidVerticalBlock/);
+assert.match(game, /shrink-tunnel-vertical-block/);
+assert.match(game, /shrink-tunnel-side-block/);
+assert.match(game, /const tunnelVerticalOverlap=/,
+  '墙体侧面阻挡必须先验证垂直重叠，人物站墙顶时不能被推出');
+assert.match(game, /function _shrinkTunnelPlayerShape/,
+  '缩小状态必须复用统一碰撞形状，避免水平和垂直判定坐标漂移');
+assert.match(game, /const tunnelCollisionCenterOffsetY = tunnelPlayerShape\.centerOffsetY/,
+  '缩小碰撞体必须与绘制共用脚底锚点');
+assert.match(game, /player-size-toggle-rejected/,
+  '通道内净空不足时必须拒绝恢复全尺寸，不能把人物横向瞬移出墙体');
 
 const reverseLevel = bundle[13];
 assert.strictEqual(reverseLevel.source_review_id, 17, '原第15关必须顺排为新的第14关');

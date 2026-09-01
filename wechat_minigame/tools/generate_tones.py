@@ -9,6 +9,7 @@ import wave
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "assets"
+WEB_ASSETS = ROOT.parent / "web_preview" / "assets"
 SAMPLE_RATE = 16_000
 DURATION_SECONDS = 0.9
 
@@ -63,8 +64,46 @@ def write_jump_action() -> None:
         output.writeframes(frames)
 
 
+def write_door_knock(target: pathlib.Path) -> None:
+    """Generate one short wooden door knock for each actual player tap."""
+    duration = 0.28
+    frame_count = int(SAMPLE_RATE * duration)
+    noise_state = 0xD00F5EED
+    previous_noise = 0.0
+    phases = [0.0, 0.0, 0.0]
+    frequencies = (168.0, 336.0, 515.0)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(target), "wb") as output:
+        output.setnchannels(1)
+        output.setsampwidth(2)
+        output.setframerate(SAMPLE_RATE)
+        frames = bytearray()
+        for index in range(frame_count):
+            time = index / SAMPLE_RATE
+            attack = min(1.0, time / 0.0025)
+            wood_decay = math.exp(-17.5 * time)
+            body = 0.0
+            for voice, frequency in enumerate(frequencies):
+                phases[voice] += 2 * math.pi * frequency / SAMPLE_RATE
+                body += (0.72, 0.28, 0.12)[voice] * math.sin(phases[voice])
+
+            # A very brief deterministic impact transient makes the sample read as
+            # knuckle-on-wood instead of another electronic low tone.
+            noise_state = (1664525 * noise_state + 1013904223) & 0xFFFFFFFF
+            noise = ((noise_state / 0xFFFFFFFF) * 2.0) - 1.0
+            high_noise = noise - previous_noise * 0.72
+            previous_noise = noise
+            transient = high_noise * math.exp(-72.0 * time)
+            mixed = attack * (body * wood_decay * 0.78 + transient * 0.30)
+            sample = max(-32767, min(32767, int(14_800 * mixed)))
+            frames.extend(struct.pack("<h", sample))
+        output.writeframes(frames)
+
+
 if __name__ == "__main__":
     ASSETS.mkdir(parents=True, exist_ok=True)
     for tone in (110, 440, 880):
         write_tone(tone)
     write_jump_action()
+    write_door_knock(ASSETS / "sfx-door-knock.wav")
+    write_door_knock(WEB_ASSETS / "sfx-door-knock.wav")

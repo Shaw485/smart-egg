@@ -162,7 +162,7 @@ const matrix = [
 for (const entry of matrix) {
   const runtime = bootAdapter(entry.info);
   const viewport = runtime.bridge.getViewport();
-  assert.strictEqual(runtime.bridge.version, 189, `${entry.name}: bridge version`);
+  assert.strictEqual(runtime.bridge.version, 190, `${entry.name}: bridge version`);
   assert.strictEqual(viewport.logicalWidth, entry.logicalWidth, `${entry.name}: logical width`);
   assert.strictEqual(viewport.logicalHeight, 1080, `${entry.name}: logical height`);
   assert.strictEqual(viewport.aspectMode, entry.mode, `${entry.name}: aspect mode`);

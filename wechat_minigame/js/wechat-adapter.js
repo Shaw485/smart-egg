@@ -1,7 +1,7 @@
 'use strict';
 
 /*
- * 怪奇之原微信小游戏兼容层 v189
+ * 怪奇之原微信小游戏兼容层 v190
  *
  * 游戏本体以 1080 高的逻辑 Canvas 绘制；微信宽屏会横向扩展地图而不拉伸元素。本文件把微信小游戏的
  * Canvas、触摸、存储、音频、生命周期、键盘和日志文件接口映射成游戏
@@ -203,7 +203,7 @@
     redact: function (context) { return redactAdapterContext(context, 0); }
   });
   adapterLog('runtime', 'adapter-session-start', {
-    version: 189,
+    version: 190,
     creatorMode: CREATOR_MODE_ENABLED,
     retention: { type: 'memory-ring', maxEntries: ADAPTER_LOG_MAX },
     productionDefaults: mapEntriesToObject(adapterLogModules)
@@ -1095,7 +1095,9 @@
         const delay = Math.max(0, (this._startAt - context.currentTime) * 1000);
         const duration = Math.max(40, ((Number(when) || this._startAt + 0.2) - this._startAt) * 1000);
         const gain = this._gain && this._gain.gain ? this._gain.gain.peak : 0.05;
-        const sampleId = this.__smartEggSample === 'jump-action' ? 'jump-action' : null;
+        const sampleId = this.__smartEggSample === 'jump-action'
+          ? 'jump-action'
+          : (this.__smartEggSample === 'door-knock' ? 'door-knock' : null);
         adapterLog('audio', 'tone-scheduled', {
           frequency:Math.round(frequency), base, sampleId,
           delayMs:Math.round(delay), durationMs:Math.round(duration), gain:Number(gain.toFixed(4))
@@ -1103,7 +1105,7 @@
         setTimeout(function () {
           const asset = sampleId === 'jump-action'
             ? 'assets/sfx-jump-action.wav'
-            : 'assets/tone-' + base + '.wav';
+            : (sampleId === 'door-knock' ? 'assets/sfx-door-knock.wav' : 'assets/tone-' + base + '.wav');
           let audio = null;
           let playRequested = false;
           let playbackConfirmed = false;
@@ -1166,7 +1168,7 @@
             }
           }
           function handleCanplay() {
-            if (destroyed || playRequested) return;
+            if (destroyed || playbackConfirmed || playRequested) return;
             playRequested = true;
             try {
               audio.play();
@@ -1197,16 +1199,18 @@
           try {
             audio = wx.createInnerAudioContext({ useWebAudioImplement:false });
             if (!audio) throw new Error('createInnerAudioContext returned no context');
-            audio.autoplay = false;
+            // 与长 BGM 相同，原生 autoplay/onPlay 是短动作音的主动启动路径；
+            // canplay 仍显式 play 兜底，避免少数真机漏发 canplay 导致敲门无声。
+            audio.autoplay = true;
             audio.loop = false;
             // 兼容旧基础库；新基础库以 setInnerAudioOption 的全局配置为准。
             audio.obeyMuteSwitch = false;
             audio.volume = sampleId === 'jump-action'
               ? Math.max(0.45, Math.min(1, gain * 5.5))
-              : Math.max(0, Math.min(1, gain * 2.2));
-            audio.playbackRate = sampleId === 'jump-action'
-              ? 1
-              : Math.max(0.5, Math.min(2, frequency / base));
+              : (sampleId === 'door-knock'
+                ? Math.max(0.72, Math.min(1, gain * 5.2))
+                : Math.max(0, Math.min(1, gain * 2.2)));
+            audio.playbackRate = sampleId ? 1 : Math.max(0.5, Math.min(2, frequency / base));
             // 必须先注册事件，再设置 src；本地资源可能很快进入 canplay。
             if (typeof audio.onCanplay === 'function') audio.onCanplay(handleCanplay);
             supportsOnPlay = typeof audio.onPlay === 'function';
@@ -1221,6 +1225,7 @@
               });
               cleanup('load-timeout', false);
             }, 10000);
+            adapterLog('audio','tone-autoplay-armed',{asset,sampleId,canplayFallback:true});
             audio.src = asset;
             if (typeof audio.onCanplay !== 'function') handleCanplay();
           } catch (error) {
@@ -1627,7 +1632,7 @@
   installOwnProperty(browserWindow, '__SMART_EGG_WECHAT_ENV__', wechatEnvironment);
 
   const wechatBridge = {
-    version: 189,
+    version: 190,
     screenCanvas,
     gameCanvas,
     getDisplayRect: function () { return Object.assign({}, displayRect); },

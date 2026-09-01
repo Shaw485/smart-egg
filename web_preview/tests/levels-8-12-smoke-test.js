@@ -10,8 +10,8 @@ const gameSource = fs.readFileSync(path.join(root, 'web_preview/game.js'), 'utf8
 const indexSource = fs.readFileSync(path.join(root, 'web_preview/index.html'), 'utf8');
 const debugGuide = fs.readFileSync(path.join(root, 'web_preview/README.md'), 'utf8');
 
-assert.match(gameSource, /const GAME_CODE_VERSION = 189/);
-assert.match(indexSource, /game\.js\?v=189/);
+assert.match(gameSource, /const GAME_CODE_VERSION = 190/);
+assert.match(indexSource, /game\.js\?v=190/);
 assert.match(gameSource, /const TOTAL_LEVELS = 20/);
 assert.match(gameSource, /_updateNewLevelMechanics\(dt\)/);
 assert.match(gameSource, /persistent-crate-land/);
@@ -60,26 +60,67 @@ assert.strictEqual(levels[3].crates.length, 3);
 assert.ok(levels[3].crates.every(crate => crate.static_platform));
 assert.ok(!JSON.stringify(levels[4]).includes('远处安静得看不见尽头'));
 
-// 第12关机制回归：无论走到哪里，未拖动时门都在当前视野之外；只有累计左拖达标才固定出现。
+// 第12关机制回归：未拖动时门始终在视野外；拖地达标后门从右边缘逐帧进入，不能闪到中间。
 const dragLevel = levels[4];
 assert.deepStrictEqual(dragLevel.drag_world, { reveal_drag:720, door_lead:360, found_distance:620 });
 for (const viewportWidth of [1920, 2400, 3840]) {
   for (const playerX of [420, 1200, 3200, 5680]) {
     const cameraX = Math.max(0, Math.min(dragLevel.world_size.w - viewportWidth, playerX - 420));
-    const hiddenDoorX = playerX + viewportWidth + dragLevel.drag_world.door_lead;
+    const hiddenDoorX = cameraX + viewportWidth + dragLevel.drag_world.door_lead;
     assert.ok(hiddenDoorX - cameraX > viewportWidth,
       `第12关未拖动时门必须保持在视野外：viewport=${viewportWidth}, player=${playerX}`);
   }
 }
-const dragGoal = dragLevel.doors.find(door => door.is_goal);
-const foundPlayerX = 2200;
-const desiredDoorX = foundPlayerX + Math.min(dragLevel.drag_world.found_distance, 2400 * .42);
-const foundDoorX = Math.max(dragGoal.w/2+20,
-  Math.min(dragLevel.world_size.w-dragGoal.w/2-20, desiredDoorX));
-assert.ok(foundDoorX > foundPlayerX && foundDoorX-foundPlayerX <= dragLevel.drag_world.found_distance,
-  '第12关完成拖动后，门必须出现在人物前方可到达距离内');
-assert.match(gameSource, /_dragWorldTravel >= cfg\.revealDrag/);
+for (const viewportWidth of [1920, 2400, 3840]) {
+  const initialScreenX = viewportWidth + dragLevel.drag_world.door_lead;
+  const targetScreenX = initialScreenX - dragLevel.drag_world.reveal_drag;
+  assert.ok(initialScreenX > viewportWidth,
+    `第12关达标瞬间门仍应从屏幕右侧外开始：viewport=${viewportWidth}, x=${initialScreenX}`);
+  assert.ok(targetScreenX >= viewportWidth * .70 && targetScreenX < viewportWidth,
+    `第12关动画目标必须位于屏幕右侧区域：viewport=${viewportWidth}, x=${targetScreenX}`);
+  let current = initialScreenX;
+  const maxStep = 840 / 60;
+  let firstVisible = null;
+  for (let frame = 0; frame < 120 && Math.abs(targetScreenX-current) > .001; frame += 1) {
+    const before = current;
+    const distance = targetScreenX-current;
+    current += Math.max(-maxStep, Math.min(maxStep, distance));
+    assert.ok(Math.abs(current-before) <= maxStep + 1e-9,
+      '第12关门每帧位移必须受 entrySpeed 限制');
+    if (firstVisible === null && current < viewportWidth + 75) firstVisible = current;
+  }
+  assert.ok(firstVisible !== null && firstVisible >= viewportWidth - maxStep,
+    `第12关门必须先从屏幕右边缘进入：viewport=${viewportWidth}, first=${firstVisible}`);
+  assert.ok(Math.abs(current-targetScreenX) < .001,
+    '第12关门必须平滑追到世界目标，不能永久丢失拖动位移');
+}
+assert.match(gameSource, /-_dragWorldOffset >= cfg\.revealDrag/);
 assert.match(gameSource, /world-door-found/);
+assert.match(gameSource, /door\.x = _cameraX \+ W \+ cfg\.doorLead/,
+  '未达标时第12关门必须始终锚定在当前屏幕右侧之外');
+const resetMechanicsSource = gameSource.slice(
+  gameSource.indexOf('function _resetMainlineMechanicState()'),
+  gameSource.indexOf('function _acceptedBridgeGeometry', gameSource.indexOf('function _resetMainlineMechanicState()'))
+);
+assert.match(resetMechanicsSource, /if \(door\) door\.x = _cameraX \+ W \+ cfg\.doorLead/,
+  '第12关载入复位阶段必须先隐藏门，避免超宽屏自动换关首帧闪现');
+assert.match(resetMechanicsSource, /firstFrameHidden: !!door/,
+  '第12关首帧隐藏状态必须进入独立机制日志');
+assert.ok(
+  gameSource.indexOf('_cameraX = _initialCameraX(levelData)')
+    < gameSource.indexOf('_resetMainlineMechanicState();', gameSource.indexOf('function loadLevelAndStart()')),
+  '必须先确定开场镜头再按该镜头隐藏第12关门'
+);
+assert.match(gameSource, /_dragWorldDoorTargetX = door\.x \+ _dragWorldOffset/,
+  '达标时必须保留完整拖地偏移作为世界目标，不能丢弃合并事件的超出距离');
+assert.match(gameSource, /const maxStep = cfg\.entrySpeed \* Math\.max\(0, Number\(dt\) \|\| 0\)/,
+  '门进入画面时必须逐帧限速，不能在同一帧闪到中间');
+assert.match(gameSource, /_dragWorldDoorTargetX \+= appliedDelta/,
+  '发现门后继续拖地必须移动世界目标，门再平滑追赶');
+assert.match(gameSource, /world-door-entry-complete/);
+assert.match(gameSource, /revealMode:'right-edge-animated'/);
+assert.doesNotMatch(gameSource, /const desired = player\.x \+ Math\.min\(cfg\.foundDistance/,
+  '第12关不得在达标瞬间把门传送到人物前方中间位置');
 assert.match(gameSource, /walkingCanRevealDoor: false/);
 assert.match(gameSource, /function _dragWorldGroundHit\(p\)/);
 assert.match(gameSource, /startSurface:'ground'/);

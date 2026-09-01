@@ -7,10 +7,13 @@ const path = require('path');
 const projectRoot = path.resolve(__dirname, '../..');
 const bgmAmbientPath = path.join(projectRoot, 'wechat_minigame/assets/bgm-wilds-ambient.wav');
 const jumpActionPath = path.join(projectRoot, 'wechat_minigame/assets/sfx-jump-action.wav');
+const doorKnockPath = path.join(projectRoot, 'wechat_minigame/assets/sfx-door-knock.wav');
 assert.ok(fs.existsSync(bgmAmbientPath) && fs.statSync(bgmAmbientPath).size > 1000,
   '微信包必须包含独立、连续的旷野环境背景音乐');
 assert.ok(fs.existsSync(jumpActionPath) && fs.statSync(jumpActionPath).size > 1000,
   '微信包必须包含独立的跳跃动作音效采样');
+assert.ok(fs.existsSync(doorKnockPath) && fs.statSync(doorKnockPath).size > 1000,
+  '微信包必须包含独立的木质敲门音效采样');
 assert.strictEqual(
   fs.readFileSync(path.join(projectRoot, 'wechat_minigame/js/levels.js'), 'utf8'),
   fs.readFileSync(path.join(projectRoot, 'godot_project/levels/levels_bundle.js'), 'utf8'),
@@ -353,11 +356,11 @@ setTimeout(async () => {
   assert.notStrictEqual(gameWindow, global, 'game browser shims must live on an isolated compatibility window');
   assert.ok(gameWindow.document.getElementById('game-canvas'));
   assert.strictEqual(gameWindow.navigator.userAgent, 'WeChatMiniGame/test');
-  assert.strictEqual(global.__SMART_EGG_WECHAT_BRIDGE__.version, 189);
+  assert.strictEqual(global.__SMART_EGG_WECHAT_BRIDGE__.version, 190);
   assert.strictEqual(Object.keys(global.__SMART_EGG_LEVELS__).length, 20);
   assert.deepStrictEqual(Object.keys(global.__SMART_EGG_LEVELS__).map(Number), Array.from({ length:20 }, (_, index) => index));
   assert.ok(gameWindow.__debug, 'game debug API should be installed');
-  assert.strictEqual(gameWindow.__debug.VERSION, 189);
+  assert.strictEqual(gameWindow.__debug.VERSION, 190);
   assert.strictEqual(gameWindow.__debug.getState(), 'menu');
   assert.deepStrictEqual(gameWindow.__debug.getFeatures(), { creatorMode:{ enabled:false, localData:'preserved' } });
   assert.strictEqual(gameWindow.__debug.setState('creatorList'), 'menu', 'disabled creator route must be blocked');
@@ -586,6 +589,25 @@ setTimeout(async () => {
     'jump oscillator must route only to the dedicated physical-action sample');
   assert.strictEqual(actionAudioInstance.playbackRate, 1,
     'dedicated action sample must keep its authored playback rate');
+  const knockOscillator = adapterAudio.createOscillator();
+  const knockGain = adapterAudio.createGain();
+  innerAudioCanplayMode = 'manual';
+  innerAudioAutoplayMode = 'native';
+  knockOscillator.__smartEggSample = 'door-knock';
+  knockOscillator.connect(knockGain);
+  knockOscillator.start(adapterAudio.currentTime);
+  knockOscillator.stop(adapterAudio.currentTime + 0.24);
+  await new Promise(resolve => setTimeout(resolve, 380));
+  const knockAudioInstance = innerAudioInstances[innerAudioInstances.length - 1];
+  assert.strictEqual(knockAudioInstance.src, 'assets/sfx-door-knock.wav',
+    '第5关敲门必须路由到独立木质敲门采样，不能继续复用合成低频提示音');
+  assert.strictEqual(knockAudioInstance.playbackRate, 1,
+    '敲门采样必须保持作者设定的自然速度');
+  assert.strictEqual(knockAudioInstance.autoplay, true,
+    '敲门采样必须通过原生 autoplay/onPlay 主动启动，不能把 canplay 当成唯一门槛');
+  assert.ok(knockAudioInstance.operations.includes('play'),
+    '即使真机漏发 canplay，敲门采样也必须经 autoplay 实际播放');
+  innerAudioCanplayMode = 'sync';
   assert.strictEqual(bgmAudioInstance.playing, true,
     'short jump SFX playback must not pause or replace the long-lived BGM instance');
   assert.ok(!bgmAudioInstance.operations.includes('stop') && !bgmAudioInstance.operations.includes('destroy'),
@@ -790,7 +812,7 @@ setTimeout(async () => {
   assert.strictEqual(clipboardWrites, clipboardWritesBeforeFinalExport + 1,
     '当前这次日志导出必须完成微信剪贴板后备');
   assert.ok(lastFileWrite && lastFileWrite.encoding === 'utf8'
-    && /smart-egg-log-v189-/.test(lastFileWrite.filePath),
+    && /smart-egg-log-v190-/.test(lastFileWrite.filePath),
   '当前这次日志必须写入微信用户目录');
   const exportedReport = JSON.parse(lastFileWrite.data);
   assert.deepStrictEqual(exportedReport.previousFault, previousFaultFixture,
@@ -852,6 +874,6 @@ setTimeout(async () => {
   assert.ok(gameWindow.__SMART_EGG_ADAPTER_DIAGNOSTICS__[0].seq > sequenceBeforeRetentionProbe,
     'adapter diagnostics ring must evict old entries rather than growing without bound');
   Object.fromEntries = nativeObjectFromEntries;
-  console.log('微信小游戏冒烟测试通过：v189真机背景音乐自启动兜底、完整窗口宽地图、安全区 UI 避让、20关与故障恢复日志均正常。');
+  console.log('微信小游戏冒烟测试通过：v190第5/12/15关交互、真机背景音乐、完整窗口宽地图、安全区 UI 避让与故障恢复日志均正常。');
   process.exit(0);
 }, 80);

@@ -27,9 +27,9 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 189;   // 跟 index.html 的 ?v=189 保持一致
+    const GAME_CODE_VERSION = 190;   // 跟 index.html 的 ?v=190 保持一致
     const GAME_TITLE = '怪奇之原';
-    // v189 真机背景音乐启动修复：保留创造秘境代码与本地存档，只关闭正式入口和运行路径。
+    // v190 第5/12/15关交互修复：保留创造秘境代码与本地存档，只关闭正式入口和运行路径。
     // 重新开放时需恢复此运行时开关，并同步恢复平台适配构建开关；旧存档不会丢失。
     const CREATOR_MODE_ENABLED = false;
     try {
@@ -163,6 +163,7 @@
     let _persistentLevelActive = false;
     let _lastStaticCrateLandingId = null;
     let _dragWorldOffset = 0, _dragWorldTravel = 0, _dragWorldFound = false;
+    let _dragWorldDoorTargetX = null, _dragWorldDoorEntryLogged = false;
     // 第 13–20 关来自独立评审池。状态全部按关卡复位，并通过细分日志模块独立排查。
     let _acceptedDualHold = 0, _acceptedDualBuilt = false, _acceptedDualStarted = false;
     let _acceptedInkPath = [], _acceptedInkBuilt = false, _acceptedInkErrorUntil = 0;
@@ -185,7 +186,8 @@
         return {
             revealDrag: Math.max(240, Number(cfg.reveal_drag) || 720),
             doorLead: Math.max(100, Number(cfg.door_lead) || 360),
-            foundDistance: Math.max(180, Number(cfg.found_distance) || 620)
+            foundDistance: Math.max(180, Number(cfg.found_distance) || 620),
+            entrySpeed: Math.max(360, Number(cfg.entry_speed) || 840)
         };
     }
     function _shrinkTunnelGeometry() {
@@ -197,11 +199,24 @@
         const groundTop = Number(cfg.ground_top) || 870;
         return {
             x, y, w, h, groundTop,
-            left: x + 10,
-            right: x + w - 10,
+            left: x,
+            right: x + w,
             clearance: groundTop - (y + h),
             fullPlayerHeight: HALF_H * 2,
             smallPlayerHeight: HALF_H * 2 * .62
+        };
+    }
+    function _shrinkTunnelPlayerShape(y) {
+        const scale = _acceptedPlayerSmall ? .62 : 1;
+        const halfW = HALF_W * scale;
+        const halfH = HALF_H * scale;
+        const centerOffsetY = HALF_H - halfH;
+        const playerY = Number.isFinite(Number(y)) ? Number(y) : player.y;
+        const centerY = playerY + centerOffsetY;
+        return {
+            scale, halfW, halfH, centerOffsetY, centerY,
+            top:centerY-halfH,
+            bottom:centerY+halfH
         };
     }
     function _dragWorldGroundHit(p) {
@@ -253,6 +268,8 @@
         _dragWorldOffset = 0;
         _dragWorldTravel = 0;
         _dragWorldFound = false;
+        _dragWorldDoorTargetX = null;
+        _dragWorldDoorEntryLogged = false;
         _acceptedDualHold = 0;
         _acceptedDualBuilt = false;
         _acceptedDualStarted = false;
@@ -275,10 +292,21 @@
             reviewSourceId: levelData && levelData.source_review_id || null
         });
         if (_hasMechanic('drag_world')) {
+            // loadLevelAndStart 可能在自动过关的同一帧继续 render；因此门必须在
+            // 机制复位阶段就移到当前视口右侧，不能等下一帧 update 才隐藏。
+            // 超宽微信视口会把 JSON 中的原始 x=3500 纳入首帧，这里避免单帧闪现。
+            const door = _acceptedGoalDoor();
+            const cfg = _dragWorldConfig();
+            const sourceDoorX = door && door.x;
+            if (door) door.x = _cameraX + W + cfg.doorLead;
             logStep('mechanic:world', 'world-drag-config', {
                 levelIndex: currentLevelIndex,
-                ..._dragWorldConfig(),
-                walkingCanRevealDoor: false
+                ...cfg,
+                walkingCanRevealDoor: false,
+                firstFrameHidden: !!door,
+                sourceDoorX: door && Math.round(sourceDoorX),
+                hiddenDoorX: door && Math.round(door.x),
+                hiddenDoorScreenX: door && Math.round(door.x-_cameraX)
             });
         }
         if (_hasMechanic('shrink_tunnel')) {
@@ -455,6 +483,21 @@
             return true;
         }
         if (_hasMechanic('shrink_tunnel') && Math.abs(world.x-player.x)<=90 && Math.abs(world.y-player.y)<=110) {
+            if (_acceptedPlayerSmall) {
+                const tunnel = _shrinkTunnelGeometry();
+                const fullOverlapsTunnel = player.x+HALF_W>tunnel.left
+                    && player.x-HALF_W<tunnel.right
+                    && player.y+HALF_H>tunnel.y
+                    && player.y-HALF_H<tunnel.y+tunnel.h;
+                if (fullOverlapsTunnel) {
+                    logStep('mechanic:transform','player-size-toggle-rejected',{
+                        pointerId, reason:'insufficient-clearance',
+                        playerX:Math.round(player.x), playerY:Math.round(player.y),
+                        tunnel:{left:tunnel.left,right:tunnel.right,top:tunnel.y,bottom:tunnel.y+tunnel.h}
+                    });
+                    return true;
+                }
+            }
             _acceptedPlayerSmall = !_acceptedPlayerSmall;
             playSfx('unlock');
             logStep('mechanic:transform','player-size-toggle',{pointerId,small:_acceptedPlayerSmall,playerX:Math.round(player.x),playerY:Math.round(player.y)});
@@ -538,8 +581,15 @@
         } else if (_sceneDrag.type === 'world') {
             const delta = p.x - _sceneDrag.lastX;
             _sceneDrag.lastX = p.x;
+            const previousOffset = _dragWorldOffset;
             _dragWorldOffset = Math.max(-3000,Math.min(0,_dragWorldOffset + delta));
-            if (delta < 0) _dragWorldTravel += -delta;
+            const appliedDelta = _dragWorldOffset - previousOffset;
+            if (appliedDelta < 0) _dragWorldTravel += -appliedDelta;
+            // 发现门后，后续拖地继续移动门的世界目标；实际门位置在逐帧逻辑中
+            // 限速追赶，低帧率或合并 pointermove 也不会把门一帧闪到画面中间。
+            if (_dragWorldFound && appliedDelta !== 0 && Number.isFinite(_dragWorldDoorTargetX)) {
+                _dragWorldDoorTargetX += appliedDelta;
+            }
         }
         return true;
     }
@@ -610,14 +660,14 @@
             const door = _acceptedGoalDoor();
             const cfg = _dragWorldConfig();
             if (door && !_dragWorldFound) {
-                // 仅靠走路时，门始终跟在当前视野右侧之外；到达世界边缘也不会偶然撞上。
-                door.x = player.x + W + cfg.doorLead;
-                if (_dragWorldTravel >= cfg.revealDrag) {
+                // 未达到阈值前，门始终锚定在当前屏幕右侧之外；只走路不会发现门。
+                // 达到阈值时只设置世界目标，不立刻改到目标位置，实际门在后续帧
+                // 以固定速度从右边缘进入，兼容低帧率和合并 pointermove。
+                door.x = _cameraX + W + cfg.doorLead;
+                if (-_dragWorldOffset >= cfg.revealDrag) {
                     _dragWorldFound = true;
-                    const bounds = _mapBounds(levelData);
-                    const desired = player.x + Math.min(cfg.foundDistance, W * .42);
-                    door.x = Math.max(bounds.minX + door.w / 2 + 20,
-                        Math.min(bounds.maxX - door.w / 2 - 20, desired));
+                    _dragWorldDoorTargetX = door.x + _dragWorldOffset;
+                    _dragWorldDoorEntryLogged = false;
                     playSfx('unlock');
                     logStep('mechanic:world', 'world-door-found', {
                         levelIndex:currentLevelIndex,
@@ -625,7 +675,28 @@
                         required:cfg.revealDrag,
                         playerX:Math.round(player.x),
                         cameraX:Math.round(_cameraX),
-                        doorX:Math.round(door.x)
+                        doorX:Math.round(door.x),
+                        doorScreenX:Math.round(door.x-_cameraX),
+                        targetDoorX:Math.round(_dragWorldDoorTargetX),
+                        targetDoorScreenX:Math.round(_dragWorldDoorTargetX-_cameraX),
+                        revealOffset:Math.round(_dragWorldOffset),
+                        entrySpeed:cfg.entrySpeed,
+                        revealMode:'right-edge-animated'
+                    });
+                }
+            } else if (door && Number.isFinite(_dragWorldDoorTargetX)) {
+                const distance = _dragWorldDoorTargetX - door.x;
+                const maxStep = cfg.entrySpeed * Math.max(0, Number(dt) || 0);
+                const step = Math.max(-maxStep, Math.min(maxStep, distance));
+                door.x += step;
+                if (!_dragWorldDoorEntryLogged && Math.abs(_dragWorldDoorTargetX-door.x) < .5) {
+                    door.x = _dragWorldDoorTargetX;
+                    _dragWorldDoorEntryLogged = true;
+                    logStep('mechanic:world','world-door-entry-complete',{
+                        levelIndex:currentLevelIndex,
+                        doorX:Math.round(door.x),
+                        doorScreenX:Math.round(door.x-_cameraX),
+                        entrySpeed:cfg.entrySpeed
                     });
                 }
             }
@@ -911,7 +982,14 @@
         stillness: { seconds:_stillTime, approachStarted:_stillApproachLogged },
         wordBridge: { placed:_wordPlaced, drag:_sceneDrag&&_sceneDrag.type },
         persistentReset: { crates:_persistentCrateCount, active:_persistentLevelActive },
-        dragWorld: { offset:_dragWorldOffset, leftTravel:_dragWorldTravel, found:_dragWorldFound, config:_dragWorldConfig() },
+        dragWorld: {
+            offset:_dragWorldOffset,
+            leftTravel:_dragWorldTravel,
+            found:_dragWorldFound,
+            doorTargetX:_dragWorldDoorTargetX,
+            doorEntryComplete:_dragWorldDoorEntryLogged,
+            config:_dragWorldConfig()
+        },
         acceptedReview: {
           sourceId: levelData && levelData.source_review_id || null,
           dual: { hold:_acceptedDualHold, built:_acceptedDualBuilt },
@@ -1686,11 +1764,58 @@
                 _tone(440, 0.12, 'square', 0.055, 0.00, 660);
                 _tone(880, 0.24, 'triangle', 0.075, 0.10, 1175);
             } else if (name === 'knock') {
-                _tone(145, 0.11, 'sine', 0.12, 0.00, 82);
-                _tone(105, 0.16, 'triangle', 0.085, 0.045, 62);
+                if (window.__wxMiniGame) {
+                    _tone(180, 0.24, 'triangle', 0.16, 0, 92, 'door-knock');
+                } else if (!_playWebAssetSfx('assets/sfx-door-knock.wav', 0.82, 'door-knock', _playKnockFallback)) {
+                    _playKnockFallback();
+                }
             }
         } catch (error) {
             _recordAudioFailure('sfx', error, { name });
+        }
+    }
+    function _playKnockFallback() {
+        // 极旧浏览器、资源解码失败或播放被拒绝时，保留一次低频木质敲击；
+        // 兜底只由一次性守卫触发，不会与正常采样叠音。
+        _tone(180, 0.14, 'triangle', 0.14, 0, 88);
+        _tone(360, 0.07, 'sine', 0.055, 0.005, 150);
+    }
+    function _playWebAssetSfx(asset, volume, sampleId, fallback) {
+        if (window.__wxMiniGame || typeof window.Audio !== 'function') return false;
+        try {
+            const audio = new window.Audio();
+            let fallbackTriggered = false;
+            const fallbackOnce = (stage, error) => {
+                if (fallbackTriggered) return;
+                fallbackTriggered = true;
+                if (error) _recordAudioFailure('asset-sfx-' + stage, error, { asset, sampleId });
+                logStep('audio','asset-sfx-fallback',{asset,sampleId,stage});
+                if (typeof fallback === 'function') fallback();
+            };
+            const handlePlaying = () => logStep('audio','asset-sfx-playing',{asset,sampleId,volume:audio.volume});
+            const handleError = event => fallbackOnce('media-error', event && (event.error || event));
+            if (typeof audio.addEventListener === 'function') {
+                audio.addEventListener('playing',handlePlaying,{once:true});
+                audio.addEventListener('error',handleError,{once:true});
+            } else {
+                audio.onplaying = handlePlaying;
+                audio.onerror = handleError;
+            }
+            audio.preload = 'auto';
+            audio.volume = Math.max(0, Math.min(1, Number(volume) || 0));
+            audio.src = asset;
+            const result = audio.play();
+            if (result && typeof result.catch === 'function') {
+                result.then(
+                    () => logStep('audio','asset-sfx-play-accepted',{asset,sampleId}),
+                    error => fallbackOnce('play-rejected',error)
+                );
+            }
+            logStep('audio', 'asset-sfx-play-requested', { asset, sampleId, volume:audio.volume });
+            return true;
+        } catch (error) {
+            _recordAudioFailure('asset-sfx', error, { asset, sampleId });
+            return false;
         }
     }
     window.__debug.__setAudioContextForTest = context => {
@@ -3097,8 +3222,10 @@
         let acceptedObstacle = null;
         if(_hasMechanic('shrink_tunnel')){
             const tunnel=_shrinkTunnelGeometry();
+            const tunnelPlayerShape=_shrinkTunnelPlayerShape(player.y);
+            const tunnelVerticalOverlap=tunnelPlayerShape.bottom>tunnel.y&&tunnelPlayerShape.top<tunnel.y+tunnel.h;
             acceptedObstacle={name:'shrink-tunnel',...ACCEPTED_MECHANICS.sideBlock(
-                previousPlayerX,player.x,HALF_W,tunnel.left,tunnel.right,!_acceptedPlayerSmall
+                previousPlayerX,player.x,tunnelPlayerShape.halfW,tunnel.left,tunnel.right,tunnelVerticalOverlap,tunnelVerticalOverlap
             )};
         }else if(_hasMechanic('erase_wall')){
             acceptedObstacle={name:'erasable-wall',...ACCEPTED_MECHANICS.sideBlock(previousPlayerX,player.x,HALF_W,900,1020,_acceptedWallErase<1)};
@@ -3110,7 +3237,8 @@
             const now=performance.now();
             if(!_horizontalSnapGuardLastAt.has(key)||now-_horizontalSnapGuardLastAt.get(key)>500){
                 _horizontalSnapGuardLastAt.set(key,now);
-                logStep('collide','accepted-obstacle-horizontal-block',{levelIndex:currentLevelIndex,sourceReviewId:levelData.source_review_id,obstacle:acceptedObstacle.name,side:acceptedObstacle.side,previousX:Math.round(previousPlayerX),attemptedX:Math.round(attemptedX),resolvedX:Math.round(player.x)});
+                const blockEvent=acceptedObstacle.name==='shrink-tunnel'?'shrink-tunnel-side-block':'accepted-obstacle-horizontal-block';
+                logStep('collide',blockEvent,{levelIndex:currentLevelIndex,sourceReviewId:levelData.source_review_id,obstacle:acceptedObstacle.name,side:acceptedObstacle.side,previousX:Math.round(previousPlayerX),attemptedX:Math.round(attemptedX),resolvedX:Math.round(player.x)});
             }
         }
         player.onGround = false;
@@ -3230,10 +3358,47 @@
             }
         }
         // Y 方向
+        const tunnelPlayerShape = _shrinkTunnelPlayerShape(player.y);
+        const tunnelCollisionHalfW = tunnelPlayerShape.halfW;
+        const tunnelCollisionHalfH = tunnelPlayerShape.halfH;
+        // 缩小绘制以脚底为锚点，碰撞也必须保持同一脚底。若直接围绕 player.y
+        // 等比缩放，物理体会悬空约 23px，并在撞墙底/落墙顶时压进画面。
+        const tunnelCollisionCenterOffsetY = tunnelPlayerShape.centerOffsetY;
         const previousPlayerBottom = player.y + HALF_H;
         const previousPlayerTop = player.y - HALF_H;
+        const previousPlayerY = player.y;
         player.y += player.vy * dt;
         const landingSpeed = player.vy;
+        if (_hasMechanic('shrink_tunnel')) {
+            const tunnel = _shrinkTunnelGeometry();
+            const tunnelCollision = ACCEPTED_MECHANICS.solidVerticalBlock({
+                previousY:previousPlayerY+tunnelCollisionCenterOffsetY,
+                nextY:player.y+tunnelCollisionCenterOffsetY,
+                centerX:player.x,
+                halfW:tunnelCollisionHalfW,
+                halfH:tunnelCollisionHalfH,
+                velocityY:player.vy,
+                obstacle:{x:tunnel.x,y:tunnel.y,w:tunnel.w,h:tunnel.h}
+            });
+            if (tunnelCollision.blocked) {
+                player.y = tunnelCollision.y-tunnelCollisionCenterOffsetY;
+                player.vy = 0;
+                if (tunnelCollision.onGround) {
+                    player.onGround = true;
+                    player.jumpsLeft = levelData.double_jump ? 2 : 1;
+                    if (landingSpeed > 260) playSfx('land');
+                }
+                logStep('collide','shrink-tunnel-vertical-block',{
+                    levelIndex:currentLevelIndex,
+                    sourceReviewId:levelData.source_review_id,
+                    side:tunnelCollision.side,
+                    small:_acceptedPlayerSmall,
+                    previousY:Math.round(previousPlayerY),
+                    attemptedY:Math.round(previousPlayerY+landingSpeed*dt),
+                    resolvedY:Math.round(player.y)
+                });
+            }
+        }
         if (player.vy < 0 && _questionBlocks.length) {
             for (const b of _questionBlocks) {
                 const bx=b.x-b.w/2, by=b.y-b.h/2;
