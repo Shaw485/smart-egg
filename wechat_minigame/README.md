@@ -1,6 +1,6 @@
-# 怪奇之原 · 微信小游戏版（v191）
+# 怪奇之原 · 微信小游戏版（v192）
 
-这是与网页和 Android 构建隔离的微信小游戏工程。当前同步网页正式主线 v191，共 20 个关卡；首页“创造秘境”入口已下线，已有自定义关卡数据仍保留在本机存储中，没有删除，后续可以通过统一功能开关恢复。
+这是与网页和 Android 构建隔离的微信小游戏工程。当前同步网页正式主线 v192，共 20 个关卡；首页“创造秘境”入口已下线，已有自定义关卡数据仍保留在本机存储中，没有删除，后续可以通过统一功能开关恢复。
 
 ## 正确导入方式
 
@@ -9,7 +9,13 @@
 3. 当前 `project.config.json` 已配置《怪奇之原》的正式小游戏 AppID：`wx6f83b5cdbf65041b`；本机当前登录账号已确认具有该 AppID 的管理权限，后台名称为“怪奇之原”。换电脑或换账号后仍应再次核对右侧“基本信息”。
 4. 基础库使用 `3.17.1`，画面为横屏。打开工程后先点“编译”，再进行预览和真机调试。
 5. 当前项目未接业务服务器，20 关和运行模块全部内嵌在主包中。
-6. 上传前必须同时核对 `js/wechat-adapter.js` 显示代码版本 `191`、`js/smart-egg-game.js` 包含 `GAME_CODE_VERSION = 191`，且 `assets/bgm-wilds-ambient.wav`、`assets/sfx-door-knock.wav` 存在；任一不符都停止上传。
+6. 上传前必须同时核对 `js/wechat-adapter.js` 显示代码版本 `192`、`js/smart-egg-game.js` 包含 `GAME_CODE_VERSION = 192`，且 `assets/bgm-wilds-ambient.wav`、`assets/sfx-door-knock.wav` 存在；任一不符都停止上传。
+
+## 本次进度重置（v192）
+
+首次运行新版时，微信小游戏统一从 `0 / 20` 开始，仅开放第 1 关。程序先初始化固定新存档键 `smart_egg_wechat_save_v2`，再清除旧键 `big_clever_save_v1`；之后正常保存新通关进度，重开游戏和普通版本升级不会再次清零。网页、Android、创造模式数据和故障诊断不参与此次重置。
+
+当前代码尚未上传或发布到微信平台；需要重新上传并发布此版本，各设备运行新版后才生效。
 
 ## 当前验收范围
 
@@ -48,10 +54,11 @@ node wechat_minigame/tools/sync-web-runtime.js --check
 ```bash
 node --check wechat_minigame/js/smart-egg-game.js
 node wechat_minigame/tests/smoke-test.js
+node wechat_minigame/tests/progress-storage-test.js
 node wechat_minigame/tests/responsive-viewport-test.js
 ```
 
-冒烟测试固定检查：v191 适配层、20/20 关卡内嵌、创造秘境不可达且数据未清理、三页选关、冷启动无致命错误、A/D/空格/Shift、10 项输入回归、辅助模块同源、缺失/迟到 canplay 时的 BGM 直接启动与兜底、`currentTime` 进度验证、进度停滞重建、意外 pause 自动恢复、系统音频中断恢复、旧 380ms 点状音序停用、独立跳跃动作声、第 5 关木质敲门采样、第 12 关右侧连续入场、第 15 关实体碰撞、自然腿部姿态、微信胶囊避让以及包含故障恢复信息的原生日志导出。响应式矩阵测试覆盖 16:9、19.5:9、20:9、2403×1080 非对称左安全区与 DPR 3、窄横屏 contain、32:9 超宽精确地图、输入坐标换算、单次完整绘制和无横向拉伸；冒烟测试另外核对完整窗口覆盖、逻辑安全内边距、单屏地面外边延展、内部断崖不变及三屏地图仍为 5760 宽。
+冒烟测试固定检查：v192 适配层、20/20 关卡内嵌、创造秘境不可达且数据未清理、三页选关、冷启动无致命错误、A/D/空格/Shift、10 项输入回归、辅助模块同源、缺失/迟到 canplay 时的 BGM 直接启动与兜底、`currentTime` 进度验证、进度停滞重建、意外 pause 自动恢复、系统音频中断恢复、旧 380ms 点状音序停用、独立跳跃动作声、第 5 关木质敲门采样、第 12 关右侧连续入场、第 15 关实体碰撞、自然腿部姿态、微信胶囊避让以及包含故障恢复信息的原生日志导出。响应式矩阵测试覆盖 16:9、19.5:9、20:9、2403×1080 非对称左安全区与 DPR 3、窄横屏 contain、32:9 超宽精确地图、输入坐标换算、单次完整绘制和无横向拉伸；冒烟测试另外核对完整窗口覆盖、逻辑安全内边距、单屏地面外边延展、内部断崖不变及三屏地图仍为 5760 宽。
 
 ## 日志与独立调试
 
@@ -86,9 +93,10 @@ v184 会持久化精简的 `previousFault` 和 `lastFault`，每条故障中的 
 - `js/levels.js`：20 个正式关卡的内嵌离线数据。
 - `js/physics-collision.js`：主线碰撞模块。
 - `js/accepted-mechanics.js`：第 13–20 关正式机制模块。
-- `js/smart-egg-game.js`：由同步脚本生成的 v191 微信运行时。
+- `js/smart-egg-game.js`：由同步脚本生成的 v192 微信运行时。
 - `tools/sync-web-runtime.js`：确定性同步与一致性检查。
 - `tests/smoke-test.js`：微信隔离环境启动和功能回归。
+- `tests/progress-storage-test.js`：旧版全通关归零、新玩家 0/20、真实通关后重开、后续版本不重复清零、设备隔离与存储故障回归。
 - `tests/responsive-viewport-test.js`：完整窗口比例、物理/逻辑安全内边距、等比呈现、输入换算和超宽精确地图矩阵回归，并验证没有单侧黑边或边缘复制。
 
 ## 正式上线前仍需人工完成

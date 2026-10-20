@@ -15,8 +15,8 @@ assert.match(index, /id="changelog-open"[^>]*>改动记录<\/button>/);
 assert.match(index, /id="changelog-open"[^>]*aria-controls="changelog-dialog"[^>]*aria-expanded="false"/);
 assert.match(index, /id="changelog-dialog"[^>]*role="dialog"[^>]*aria-modal="true"/);
 assert.match(index, /id="changelog-search"[^>]*type="search"/);
-assert.match(index, /changelog\.js\?v=191/);
-assert.ok(index.indexOf('game.js?v=191') < index.indexOf('changelog.js?v=191'),
+assert.match(index, /changelog\.js\?v=192/);
+assert.ok(index.indexOf('game.js?v=192') < index.indexOf('changelog.js?v=192'),
   '改动记录入口应在游戏运行时之后初始化，以便仅在首页显示');
 
 assert.match(style, /\.changelog-dialog\s*\{/);

@@ -6,7 +6,7 @@
     //   - GAME_CODE_VERSION：每次发版递增整数（和index.html?v=xxx同步，避免不同步）
     //   - 用户以前打开的旧tab还保留着旧代码的JS快照，没手动刷新就一直命中缓存
     //   - 现在：打开页面时先读localStorage的最后保存版本号，如果当前更小 → 强制location.reload(true)清磁盘缓存
-    const GAME_CODE_VERSION = 191;   // 跟 index.html 的 ?v=191 保持一致
+    const GAME_CODE_VERSION = 192;   // 跟 index.html 的 ?v=192 保持一致
     const GAME_TITLE = '怪奇之原';
     // v191 手机扬声器可听配乐、直接播放进度诊断与微信系统胶囊安全区。
     // 重新开放时需恢复此运行时开关，并同步恢复平台适配构建开关；旧存档不会丢失。
@@ -2795,7 +2795,10 @@
         _setLevelSelectPage(page, 'debug-set-page');
         return window.__debug.getLevelSelectPaging();
     };
-    const LS_KEY = 'big_clever_save_v1';
+    const LEGACY_LS_KEY = 'big_clever_save_v1';
+    // v192 微信首次启动统一归零。此键是存档代际，不随代码版本递增；
+    // 后续启动和更新继续读取玩家新进度，网页与 Android 仍保留原存档。
+    const LS_KEY = window.__wxMiniGame ? 'smart_egg_wechat_save_v2' : LEGACY_LS_KEY;
     // v4.9.6 关卡加载缓存（死亡重来的同步保证，必须声明在最前面避免 TDZ）
     const _cachedLevels = {};
 
@@ -2834,7 +2837,25 @@
                 completed: migration.completed,
                 mainline_revision: migration.mainline_revision
             };
-            if (s && migration.migrated) localStorage.setItem(LS_KEY, JSON.stringify(migrated));
+            if (window.__wxMiniGame && !s) {
+                // 先持久化新档，再清除旧档；绝不把旧通关记录导入新存档。
+                localStorage.setItem(LS_KEY, JSON.stringify(migrated));
+                logStep('progress', 'wechat-progress-reset', {
+                    key: LS_KEY, completed_count: 0, unlocked: 1
+                });
+            } else if (s && migration.migrated) {
+                localStorage.setItem(LS_KEY, JSON.stringify(migrated));
+            }
+            if (window.__wxMiniGame) {
+                // 清理失败时只重试旧键删除，不会再次重置已保存的新进度。
+                try {
+                    if (localStorage.getItem(LEGACY_LS_KEY) !== null) {
+                        localStorage.removeItem(LEGACY_LS_KEY);
+                    }
+                } catch (error) {
+                    logStep('progress', 'legacy-save-cleanup-failed', { message: error.message });
+                }
+            }
             // v4.9.7a G类：localStorage 读取成功/失败详情
             logStep('progress', 'loadProgress-success', {
                 key: LS_KEY, raw_bytes: (s||'').length,

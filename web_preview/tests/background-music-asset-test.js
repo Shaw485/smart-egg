@@ -95,7 +95,7 @@ assert.ok(highPassRatio >= 0.45,
   `至少应有足够的 250Hz 以上可听内容，当前高通 RMS 比例=${highPassRatio.toFixed(3)}`);
 
 const game = fs.readFileSync(gamePath, 'utf8');
-assert.match(game, /const GAME_CODE_VERSION = 191/, 'Web 正式代码版本必须升级为 v191');
+assert.match(game, /const GAME_CODE_VERSION = 192/, 'Web 正式代码版本必须升级为 v192');
 assert.match(game, /const BGM_VOLUME = 0\.76/,
   'v191 手机可听背景音乐应使用明确的独立音量');
 assert.match(game, /phone-audible-v191/,
